@@ -2,11 +2,20 @@
 
 A fair-launch token launchpad on Solana, built on Meteora's pools.
 The owner's original brief is `resources.md`; the project's terms are in `GLOSSARY.md`.
+"Top-pad" is only the folder's working name: the owner will pick the real one later, in the screens ticket (#15), where the proposals are recorded.
 
 The work is being planned as a wayfinder map: one GitHub issue labelled `wayfinder:map`, with its tickets as sub-issues.
 Start any session by reading that map issue (`gh issue list --label wayfinder:map`).
 
 For anything about Jupiter or Meteora, read the owner's canonical knowledge base first, not this repo and not the web: `/Volumes/Farhan/Work Folder/Dev/AI/Research-Projects/jupiter-meteora` locally, or https://github.com/imDev2023/jupiter-meteora-resources in the cloud.
+
+## Traps for research agents
+
+- Research findings live on `research/<name>` branches, pushed and never merged, so `main` does not hold them; read one with `git show origin/research/<name>:research/<name>.md`.
+- An agent started with worktree isolation is refused any git or gh command its guard cannot prove stays in its own worktree: `cd` followed by git, loops, `source` or `.` of an env file, and even `git -C` on its own worktree path (likely the space in `Work Folder`).
+  What works: one plain command per call, plain `git <cmd>` from the worktree itself, `git -C /private/tmp/claude-501/...` read-only commands on clones in the scratchpad (allowed in `~/.claude/settings.json`), and API keys through `direnv exec "<this folder>" <cmd>`.
+- Never download, dump or commit Meteora's program binaries: the licence research says that needs Meteora's written permission, which #26 has asked for.
+- Parallel agents share one free-tier Helius key and get rate-limited; stagger on-chain-heavy research.
 
 ## Agent skills
 
