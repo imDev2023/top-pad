@@ -65,9 +65,13 @@ _Avoid_: insider, dev wallet (a single disclosed creator wallet is not a bundler
 ### Fees
 
 **Sniper tax**:
-The very high trading fee that every buy pays in the first moments after a coin's pool is created, falling to the normal fee within a short time, so that sniping or bundling at launch loses most of the stake.
+The very high trading fee that every buy and sell pays when a coin starts trading, falling steadily to the normal fee over its Tax window, so that sniping or bundling at launch loses most of the stake.
 None of it goes to the coin's creator.
 _Avoid_: anti-sniper fee, snipe tax, launch tax
+
+**Tax window**:
+The first minute of a coin's trading, during which the sniper tax applies and the fees traders pay go to the Fair Open's depositors as their Tax Share, or to Top-pad in an Instant launch.
+_Avoid_: deposit window (that is the Fair Open's window before trading starts), launch window
 
 **Tax Share**:
 A Fair Open depositor's share of the sniper tax their coin collected, in proportion to how much of their deposit bought coins.
