@@ -7,9 +7,26 @@ Its reason to exist is that the people who launch and buy a coin are not beaten 
 
 ### Launches
 
+**Launch mode**:
+How a coin first reaches public trading on Top-pad: a Fair Open, the default, or an Instant launch.
+_Avoid_: launch type, launch style
+
 **Fair Open**:
-A launch that begins with a deposit window in which every buyer gets the same opening price, before public trading starts.
+The launch mode that begins with a deposit window in which every depositor gets the coin at the same price, before public trading starts.
 _Avoid_: presale, IDO, whitelist sale
+
+**Instant launch**:
+The launch mode in which a coin is open to public trading from the moment it is created, with no deposit window.
+_Avoid_: pump launch, standard launch, curve launch
+
+**Graduation**:
+The moment a coin's bonding curve reaches its Graduation Target and its liquidity moves into a regular Meteora pool (DAMM v2), after which it trades like any other coin.
+Both launch modes graduate the same way.
+_Avoid_: migration (that is Meteora's mechanism), bonding, completion
+
+**Graduation Target**:
+The amount of quote asset a coin's curve must raise to graduate, fixed once at launch.
+_Avoid_: bonding target, market cap target
 
 **Creator lock**:
 The cap on the creator's own buy of their coin, together with its gradual release over time.
