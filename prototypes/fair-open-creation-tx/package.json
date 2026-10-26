@@ -1,0 +1,14 @@
+{
+  "name": "prototype-fair-open-creation-tx",
+  "private": true,
+  "type": "module",
+  "description": "PROTOTYPE, throwaway: devnet feasibility check for the Fair Open creation transaction (ticket #31).",
+  "dependencies": {
+    "@coral-xyz/anchor": "0.31.1",
+    "@meteora-ag/dynamic-bonding-curve-sdk": "2.0.0",
+    "@solana/spl-token": "0.4",
+    "@solana/web3.js": "1",
+    "bn.js": "^5.2.5",
+    "bs58": "6"
+  }
+}
