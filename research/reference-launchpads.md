@@ -111,7 +111,8 @@ Sources: https://docs.meteora.ag/core-products/dbc/token-2022-support, https://d
 - A badge is per mint and per program: a DBC badge does not satisfy DAMM v2 or DLMM.
   DBC graduation uses DAMM v2 configs with the `CreatePoolWithoutMintValidation` permission, so a DBC-badged quote asset still graduates.
 - DLMM additionally refuses mints with a freeze authority unless Meteora reviews them.
-- A badge never allows a non-zero transfer fee on a quote mint.
+- Superseded on 2026-10-26: the docs mirror said a badge never allows a non-zero transfer fee on a quote mint, but DBC 0.2.2 (live on mainnet since 2026-10-16) accepts a badged fee-bearing quote through `create_config2`, which forces fixed supply, no locked vesting, the Customizable migration fee and the Compounding fee mode; a zero-fee TransferFeeConfig with its authority revoked is now accepted without a badge.
+  Source: [research/quote-asset-badges.md](https://github.com/imDev2023/top-pad/blob/research/quote-asset-badges/research/quote-asset-badges.md), which also has the full per-mint count for StonkFun's 607 quote assets.
 - xStocks carry Scaled UI Amount, Pausable and Permanent Delegate (https://solana.com/news/case-study-xstocks).
   Consequences for any coin priced in one: the issuer can pause it, can move tokens out of any account including pool vaults, and the displayed balance changes with splits and dividends.
 - The Stoker scan of DBC on 2026-09-26 found:
