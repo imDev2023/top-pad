@@ -61,3 +61,22 @@ _Avoid_: block-0 snipe, same-block buy
 **Bundler**:
 A creator who secretly buys a large share of a coin's supply across many wallets at launch, in order to dump it later.
 _Avoid_: insider, dev wallet (a single disclosed creator wallet is not a bundler)
+
+### Fees
+
+**Sniper tax**:
+The very high trading fee that every buy pays in the first moments after a coin's pool is created, falling to the normal fee within a short time, so that sniping or bundling at launch loses most of the stake.
+None of it goes to the coin's creator.
+_Avoid_: anti-sniper fee, snipe tax, launch tax
+
+**Tax Share**:
+A Fair Open depositor's share of the sniper tax their coin collected, in proportion to how much of their deposit bought coins.
+_Avoid_: rebate (it is not their own money coming back), cashback, airdrop, holder rewards
+
+**Platform Fee**:
+Top-pad's share of the fees on trades of its coins, on the curve and after Graduation.
+_Avoid_: partner fee (Meteora's name for the role), protocol fee (that is Meteora's own cut)
+
+**Creator Earnings**:
+What a coin's creator earns from trades of their coin, on the curve and after Graduation.
+_Avoid_: creator fee (Meteora's on-chain term), creator rewards, royalties
