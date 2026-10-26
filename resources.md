@@ -38,4 +38,12 @@ First of all, since we are making a prototype, put all your effort:
 
 [https://titan.exchange/](https://titan.exchange/)
 
+[https://developer.titan.exchange/](https://developer.titan.exchange/)
+
+[https://titan-exchange.gitbook.io/titan/developer-doc](https://titan-exchange.gitbook.io/titan/developer-doc)
+
+[https://titan-exchange.gitbook.io/titan/developer-doc#apis](https://titan-exchange.gitbook.io/titan/developer-doc#apis)
+
+[https://titan-exchange.gitbook.io/titan/developer-doc/developers-portal/introduction](https://titan-exchange.gitbook.io/titan/developer-doc/developers-portal/introduction)
+
 /Volumes/Farhan/Work Folder/Dev/AI/stonk-fun-solana
