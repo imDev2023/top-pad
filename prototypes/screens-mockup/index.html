@@ -1,0 +1,1141 @@
+<title>Greenflag Screens Mockup</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<!--
+  PROTOTYPE, throwaway. Answers the screens ticket "What should Top-pad look like?"
+  (https://github.com/imDev2023/top-pad/issues/15). Fake devnet data only; nothing here is wired to a chain.
+  Plan: six screens in one file, switched by #discover #fairopen #coin #launch #creator #enforced;
+  the coin page has three layout variants (A, B, C) cycled from the floating bar or the arrow keys.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Saira+Condensed:wght@600;700&display=swap">
+<style>
+/* Layout: a sticky track-marshal bar with screen tabs; each screen is a dense grid that stacks to one column under 900px.
+   Color: asphalt neutrals with the marshal's flag set: green (go, proven), yellow (caution, labelled), red (stop, refused), blue (info), checkered (Graduation). */
+:root {
+  --bg: #14171a;
+  --panel: #1b1f23;
+  --panel-2: #23282d;
+  --line: #2f363c;
+  --fg: #e7ebe8;
+  --muted: #9ba6a0;
+  --faint: #6c7671;
+  --go: #33c27a;
+  --go-ink: #04130b;
+  --go-soft: rgba(51, 194, 122, .14);
+  --caution: #f0c234;
+  --caution-soft: rgba(240, 194, 52, .14);
+  --stop: #f0604f;
+  --stop-soft: rgba(240, 96, 79, .15);
+  --info: #62acef;
+  --info-soft: rgba(98, 172, 239, .14);
+  --chk-a: #e7ebe8;
+  --chk-b: #14171a;
+  --shadow: 0 10px 30px rgba(0, 0, 0, .45);
+  --font-display: "Saira Condensed", "Arial Narrow", "Roboto Condensed", sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #eef1ef; --panel: #ffffff; --panel-2: #f4f6f5; --line: #d6dcd8; --fg: #15191c; --muted: #545f59; --faint: #7b8580;
+    --go: #168a4b; --go-ink: #ffffff; --go-soft: rgba(22, 138, 75, .11);
+    --caution: #9c7200; --caution-soft: rgba(196, 146, 0, .14);
+    --stop: #c33628; --stop-soft: rgba(195, 54, 40, .1);
+    --info: #1d6db5; --info-soft: rgba(29, 109, 181, .1);
+    --chk-a: #15191c; --chk-b: #ffffff; --shadow: 0 10px 30px rgba(20, 30, 25, .16);
+    color-scheme: light;
+  }
+}
+:root[data-theme="light"] {
+  --bg: #eef1ef; --panel: #ffffff; --panel-2: #f4f6f5; --line: #d6dcd8; --fg: #15191c; --muted: #545f59; --faint: #7b8580;
+  --go: #168a4b; --go-ink: #ffffff; --go-soft: rgba(22, 138, 75, .11);
+  --caution: #9c7200; --caution-soft: rgba(196, 146, 0, .14);
+  --stop: #c33628; --stop-soft: rgba(195, 54, 40, .1);
+  --info: #1d6db5; --info-soft: rgba(29, 109, 181, .1);
+  --chk-a: #15191c; --chk-b: #ffffff; --shadow: 0 10px 30px rgba(20, 30, 25, .16);
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--fg);
+  font-family: var(--font-body); font-size: 14px; line-height: 1.45;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 0 96px;
+}
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+a { color: var(--info); text-decoration: none; }
+a:hover { text-decoration: underline; }
+button, input, select, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--info); outline-offset: 2px; }
+.mono, .num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.muted { color: var(--muted); }
+.faint { color: var(--faint); }
+h1, h2, h3 { font-family: var(--font-display); font-weight: 700; letter-spacing: .01em; text-wrap: balance; margin: 0; line-height: 1.1; }
+h1 { font-size: 2rem; }
+h2 { font-size: 1.35rem; }
+h3 { font-size: 1.05rem; text-transform: uppercase; letter-spacing: .06em; }
+p { margin: 0; }
+.eyebrow { font-size: .72rem; text-transform: uppercase; letter-spacing: .09em; color: var(--muted); font-weight: 600; }
+
+/* top bar */
+.topbar {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20; background: var(--bg);
+  margin-left: calc(-1 * max(16px, env(safe-area-inset-left, 0px)));
+  margin-right: calc(-1 * max(16px, env(safe-area-inset-right, 0px)));
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  border-bottom: 1px solid var(--line);
+}
+.devnet { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; font-size: .75rem; color: var(--muted); padding-block: 6px; border-bottom: 1px dashed var(--line); }
+.devnet b { color: var(--caution); font-weight: 600; }
+.bar { display: flex; align-items: center; gap: 16px; padding-block: 10px; flex-wrap: wrap; }
+.brand { display: flex; align-items: center; gap: 10px; }
+.brandmark { width: 22px; height: 26px; position: relative; flex: none; }
+.brandmark::before { content: ""; position: absolute; left: 0; top: 0; width: 3px; height: 26px; background: var(--fg); border-radius: 1px; }
+.brandmark::after { content: ""; position: absolute; left: 3px; top: 1px; width: 19px; height: 13px; background: var(--go); clip-path: polygon(0 0, 100% 12%, 82% 50%, 100% 88%, 0 100%); }
+.brandname { font-family: var(--font-display); font-weight: 700; font-size: 1.5rem; letter-spacing: .02em; }
+.namepill { border: 1px dashed var(--faint); background: transparent; border-radius: 999px; padding: 2px 10px; font-size: .72rem; color: var(--muted); cursor: pointer; }
+.namepill:hover { border-color: var(--caution); color: var(--caution); }
+.tabs { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; flex: 1 1 420px; min-width: 0; }
+.tabs::-webkit-scrollbar { display: none; }
+.tab { white-space: nowrap; padding: 6px 12px; border-radius: 4px; color: var(--muted); font-weight: 500; border: 1px solid transparent; }
+.tab:hover { color: var(--fg); text-decoration: none; background: var(--panel); }
+.tab[aria-current="page"] { color: var(--fg); background: var(--panel-2); border-color: var(--line); }
+.wallet { display: flex; gap: 8px; align-items: center; margin-left: auto; }
+
+/* generic pieces */
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
+.pad { padding: 14px 16px; }
+.stack { display: grid; gap: 12px; }
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.spread { display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.btn { border: 1px solid var(--line); background: var(--panel-2); border-radius: 4px; padding: 8px 14px; cursor: pointer; font-weight: 600; }
+.btn:hover { border-color: var(--muted); }
+.btn.go { background: var(--go); color: var(--go-ink); border-color: var(--go); }
+.btn.go:hover { filter: brightness(1.08); }
+.btn.ghost { background: transparent; }
+.btn.sm { padding: 4px 10px; font-size: .8rem; }
+.btn[disabled] { opacity: .45; cursor: not-allowed; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 3px; font-size: .75rem; font-weight: 500; white-space: nowrap; border: 1px solid transparent; }
+.chip.go { background: var(--go-soft); color: var(--go); }
+.chip.caution { background: var(--caution-soft); color: var(--caution); }
+.chip.stop { background: var(--stop-soft); color: var(--stop); }
+.chip.info { background: var(--info-soft); color: var(--info); }
+.chip.neutral { background: var(--panel-2); color: var(--muted); border-color: var(--line); }
+.flag::before { content: ""; width: 9px; height: 10px; flex: none; background: currentColor; clip-path: polygon(0 0, 18% 0, 18% 100%, 0 100%, 0 0, 100% 15%, 72% 45%, 100% 75%, 18% 70%, 18% 0); }
+.pip { width: 9px; height: 9px; border-radius: 2px; flex: none; display: inline-block; }
+.pip.go { background: var(--go); } .pip.caution { background: var(--caution); } .pip.stop { background: var(--stop); } .pip.info { background: var(--info); }
+.meter { height: 8px; background: var(--panel-2); border-radius: 2px; overflow: hidden; position: relative; border: 1px solid var(--line); }
+.meter > i { position: absolute; inset: 0 auto 0 0; background: var(--go); }
+.avatar { width: 34px; height: 34px; border-radius: 6px; display: grid; place-items: center; font-family: var(--font-display); font-weight: 700; color: #fff; flex: none; font-size: .9rem; }
+.sealed { width: 34px; height: 34px; border-radius: 6px; flex: none; border: 1px dashed var(--faint); display: grid; place-items: center; color: var(--faint); font-family: var(--font-mono); font-size: .8rem; background: repeating-linear-gradient(45deg, transparent 0 6px, var(--panel-2) 6px 12px); }
+.handle { font-weight: 600; }
+.mark { font-size: .68rem; font-weight: 600; padding: 1px 6px; border-radius: 3px; background: var(--info-soft); color: var(--info); }
+.mark.human { background: var(--go-soft); color: var(--go); }
+.screen { display: none; padding-top: 18px; }
+.screen.on { display: block; }
+.grid2 { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; align-items: start; }
+.grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 900px) { .grid2, .grid3 { grid-template-columns: minmax(0, 1fr); } }
+.scrollx { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; }
+th { text-align: left; font-size: .7rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 600; padding: 8px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+td { padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+tr:last-child td { border-bottom: 0; }
+.placeholder { font-size: .68rem; color: var(--caution); border-bottom: 1px dotted var(--caution); cursor: help; }
+.note { font-size: .78rem; color: var(--muted); }
+.big { font-family: var(--font-display); font-weight: 700; font-size: 2.6rem; line-height: 1; font-variant-numeric: tabular-nums; }
+.checkered { background: conic-gradient(var(--chk-a) 25%, var(--chk-b) 0 50%, var(--chk-a) 0 75%, var(--chk-b) 0) 0 0 / 8px 8px; }
+
+/* discover */
+.hero { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 16px; }
+@media (max-width: 900px) { .hero { grid-template-columns: minmax(0, 1fr); } }
+.nextflag { display: grid; gap: 10px; border-left: 4px solid var(--go); }
+.opencard { display: grid; gap: 10px; }
+.opencard + .opencard { border-top: 1px solid var(--line); padding-top: 12px; }
+.teaser { font-style: italic; color: var(--fg); }
+.cal-time { font-family: var(--font-mono); font-size: .8rem; white-space: nowrap; }
+
+/* fair open */
+.countbox { display: grid; gap: 6px; padding: 16px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
+.pot { position: relative; height: 22px; border-radius: 3px; background: var(--panel-2); border: 1px solid var(--line); overflow: hidden; }
+.pot .fill { position: absolute; inset: 0 auto 0 0; background: var(--go); transition: width .4s; }
+.pot .over { position: absolute; inset: 0 auto 0 0; background: repeating-linear-gradient(135deg, var(--caution) 0 6px, transparent 6px 12px); opacity: .55; transition: width .4s; }
+.pot .unv { position: absolute; inset: 0 auto 0 0; border-right: 2px dashed var(--fg); opacity: .5; }
+.tiers { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.tier { border: 1px solid var(--line); border-radius: 5px; padding: 10px; display: grid; gap: 4px; background: var(--panel-2); cursor: pointer; text-align: left; }
+.tier[aria-pressed="true"] { border-color: var(--go); box-shadow: inset 0 0 0 1px var(--go); }
+.tier b { font-family: var(--font-display); font-size: 1.3rem; }
+.steps { counter-reset: s; display: grid; gap: 10px; padding: 0; margin: 0; list-style: none; }
+.steps li { counter-increment: s; display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 10px; align-items: start; }
+.steps li::before { content: counter(s); font-family: var(--font-display); font-weight: 700; width: 24px; height: 24px; border-radius: 3px; display: grid; place-items: center; background: var(--panel-2); border: 1px solid var(--line); color: var(--muted); }
+.field { display: grid; gap: 5px; }
+.field label { font-size: .78rem; color: var(--muted); font-weight: 500; }
+.input { background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px; padding: 8px 10px; width: 100%; min-width: 0; }
+.input:focus { border-color: var(--info); outline: none; }
+.amount { display: flex; gap: 6px; }
+
+/* coin */
+.coinhead { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.coinhead .avatar { width: 46px; height: 46px; font-size: 1.1rem; }
+.statline { display: flex; gap: 18px; flex-wrap: wrap; }
+.statline div { display: grid; }
+.statline span { font-size: .7rem; color: var(--muted); text-transform: uppercase; letter-spacing: .07em; }
+.taxband { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 10px 14px; border-radius: 6px; border: 1px solid var(--caution); background: var(--caution-soft); }
+.taxband.done { border-color: var(--line); background: var(--panel); }
+.taxband .big { font-size: 2rem; color: var(--caution); }
+.taxband.done .big { color: var(--go); }
+.taxtrack { height: 6px; background: var(--panel-2); border-radius: 2px; overflow: hidden; }
+.taxtrack i { display: block; height: 100%; background: var(--caution); }
+@media (max-width: 560px) { .taxband { grid-template-columns: minmax(0, 1fr); } }
+.chart { width: 100%; height: 260px; display: block; }
+.gradbar { display: grid; grid-template-columns: minmax(0, 1fr) 26px; gap: 0; height: 14px; border: 1px solid var(--line); border-radius: 3px; overflow: hidden; }
+.gradbar .track { background: var(--panel-2); position: relative; }
+.gradbar .track i { position: absolute; inset: 0 auto 0 0; background: var(--go); }
+.qb { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.trades td { font-size: .82rem; padding: 6px 10px; }
+.tradenew { animation: flash 1.2s ease-out; }
+@keyframes flash { from { background: var(--go-soft); } to { background: transparent; } }
+.paidtax { color: var(--stop); }
+.fair { display: grid; gap: 0; }
+.fair .fhead { display: flex; justify-content: space-between; gap: 8px; align-items: center; padding: 12px 14px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.frow { display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--line); align-items: start; }
+.frow .pip { margin-top: 5px; }
+.frow .ft { font-size: .7rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 600; }
+.frow .fv { font-weight: 500; }
+.frow .fp { font-size: .78rem; }
+.fair .ffoot { padding: 10px 14px; display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; font-size: .8rem; }
+.fair.wide .frows { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.fair.wide .frow { border-right: 1px solid var(--line); }
+@media (max-width: 900px) { .fair.wide .frows { grid-template-columns: minmax(0, 1fr); } }
+.flagstrip { display: flex; gap: 6px; flex-wrap: wrap; }
+.flagbtn { display: inline-flex; gap: 8px; align-items: center; padding: 7px 10px; border-radius: 4px; border: 1px solid var(--line); background: var(--panel); cursor: pointer; font-size: .8rem; text-align: left; }
+.flagbtn[aria-expanded="true"] { border-color: var(--fg); }
+.flagdetail { padding: 12px 14px; }
+.statebar { display: inline-flex; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+.statebar button { border: 0; background: transparent; padding: 4px 10px; font-size: .75rem; cursor: pointer; color: var(--muted); }
+.statebar button[aria-pressed="true"] { background: var(--panel-2); color: var(--fg); }
+.pausedband { border: 1px solid var(--info); background: var(--info-soft); border-radius: 6px; padding: 10px 14px; }
+
+/* launch */
+.stepper { display: flex; gap: 4px; flex-wrap: wrap; }
+.stepper button { border: 1px solid var(--line); background: var(--panel); border-radius: 4px; padding: 6px 10px; font-size: .78rem; cursor: pointer; color: var(--muted); }
+.stepper button[aria-current="step"] { color: var(--fg); border-color: var(--go); }
+.stepper button.done { color: var(--go); }
+.modes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+@media (max-width: 640px) { .modes { grid-template-columns: minmax(0, 1fr); } }
+.mode { text-align: left; border: 1px solid var(--line); border-radius: 6px; padding: 14px; background: var(--panel-2); cursor: pointer; display: grid; gap: 6px; }
+.mode[aria-pressed="true"] { border-color: var(--go); box-shadow: inset 0 0 0 1px var(--go); }
+.verdict { border-radius: 5px; padding: 10px 12px; display: grid; gap: 4px; }
+.verdict.go { background: var(--go-soft); color: var(--fg); border-left: 3px solid var(--go); }
+.verdict.caution { background: var(--caution-soft); border-left: 3px solid var(--caution); }
+.verdict.stop { background: var(--stop-soft); border-left: 3px solid var(--stop); }
+.ladder { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 4px; }
+@media (max-width: 560px) { .ladder { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.rung { border: 1px solid var(--line); border-radius: 4px; padding: 6px; text-align: center; font-family: var(--font-mono); font-size: .78rem; background: var(--panel-2); transition: background .2s, border-color .2s; }
+.rung.signed { border-color: var(--go); background: var(--go-soft); color: var(--go); }
+.hash { font-family: var(--font-mono); font-size: .75rem; word-break: break-all; color: var(--muted); }
+
+/* creator */
+.facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; }
+.facts > div { padding: 12px 14px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); display: grid; gap: 2px; }
+.facts b { font-family: var(--font-display); font-size: 1.6rem; font-variant-numeric: tabular-nums; }
+.facts > div:nth-child(4n) { border-right: 0; }
+@media (max-width: 760px) {
+  .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .facts > div:nth-child(4n) { border-right: 1px solid var(--line); }
+  .facts > div:nth-child(2n) { border-right: 0; }
+}
+
+/* floating variant switcher (prototype only) */
+.switcher {
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(14px + env(safe-area-inset-bottom, 0px)); z-index: 30;
+  display: flex; align-items: center; gap: 4px; padding: 5px; border-radius: 999px;
+  background: var(--fg); color: var(--bg); box-shadow: var(--shadow); max-width: calc(100vw - 32px);
+}
+.switcher button { width: 30px; height: 30px; border-radius: 999px; border: 0; background: transparent; color: var(--bg); cursor: pointer; font-size: 1rem; }
+.switcher button:hover { background: rgba(127, 127, 127, .25); }
+.switcher span { font-size: .78rem; font-weight: 600; padding-inline: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+footer { margin-top: 28px; font-size: .75rem; color: var(--faint); }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+
+<header class="topbar">
+  <div class="devnet"><span><b>Devnet prototype</b> · every coin, wallet and number on these screens is made up</span><span>Throwaway mockup for the screens ticket</span></div>
+  <div class="bar">
+    <div class="brand">
+      <span class="brandmark" aria-hidden="true"></span>
+      <span class="brandname" data-brand>Greenflag</span>
+      <button class="namepill" id="nameSwitch" type="button" title="Switch between the proposed name and the working name">name not final ⇄</button>
+    </div>
+    <nav class="tabs" aria-label="Screens">
+      <a class="tab" href="#discover" data-screen="discover">Discover</a>
+      <a class="tab" href="#fairopen" data-screen="fairopen">Fair Open</a>
+      <a class="tab" href="#coin" data-screen="coin">Coin page</a>
+      <a class="tab" href="#launch" data-screen="launch">Launch</a>
+      <a class="tab" href="#creator" data-screen="creator">Creator record</a>
+      <a class="tab" href="#enforced" data-screen="enforced">How it's enforced</a>
+    </nav>
+    <div class="wallet">
+      <span class="chip info">Scored</span>
+      <span class="chip neutral mono">7xKq…v9fP</span>
+    </div>
+  </div>
+</header>
+
+<!-- 1. DISCOVER -->
+<main>
+<section class="screen" id="s-discover" aria-labelledby="h-discover">
+  <div class="stack" style="gap:16px">
+    <div class="hero">
+      <div class="panel pad nextflag">
+        <div class="eyebrow">Next green flag</div>
+        <div class="spread">
+          <div>
+            <div class="big" id="heroCount">06:42</div>
+            <div class="muted">until <span class="handle">@pixelpigeon</span>'s Fair Open closes and the coin starts trading</div>
+          </div>
+          <a class="btn go" href="#fairopen">Deposit before the open</a>
+        </div>
+        <p class="note">Everyone in the pot buys at one price at the open. No first-block winner: buys outside the pot pay a 99% sniper tax in the first second, falling to 1.25% over a minute.</p>
+      </div>
+      <div class="panel pad stack">
+        <div class="spread"><h3 id="h-discover">Deposit windows open now</h3><span class="chip go flag">2 live</span></div>
+        <div id="liveOpens"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="pad spread"><h3>Launch calendar</h3><span class="note">Sealed: name, ticker and image stay hidden until the open. You see the creator, their record and the terms.</span></div>
+      <div class="scrollx">
+        <table>
+          <thead><tr><th>Opens</th><th>Coin</th><th>Creator and record</th><th>Terms</th><th></th></tr></thead>
+          <tbody id="calendar"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="pad spread">
+        <h3>New and trending</h3>
+        <div class="row note"><span class="chip go flag">green flag: proven on chain</span><span class="chip caution flag">yellow: labelled</span><span class="chip stop flag">red: Bundle Radar finding</span></div>
+      </div>
+      <div class="scrollx">
+        <table>
+          <thead><tr><th>Coin</th><th>Launch</th><th>Age</th><th>Market cap</th><th>To Graduation</th><th>Flags</th></tr></thead>
+          <tbody id="coins"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 2. FAIR OPEN -->
+<section class="screen" id="s-fairopen" aria-labelledby="h-fo">
+  <div class="grid2">
+    <div class="stack" style="gap:16px">
+      <div class="panel pad stack">
+        <div class="coinhead">
+          <span class="sealed" aria-hidden="true">?</span>
+          <div style="min-width:0">
+            <h1 id="h-fo">Sealed coin</h1>
+            <div class="muted">by <a href="#creator" class="handle">@pixelpigeon</a> <span class="mark human">human</span> <span class="mark">verified creator</span> · 5 launches · 3 graduated · 0 bundling findings</div>
+          </div>
+        </div>
+        <p class="teaser">"A pigeon that only flies on green."</p>
+        <div class="note">Name, ticker and image are revealed at the open. The creator committed to them in advance: <span class="hash" title="SHA-256 of name, ticker and image">c41f 9a07 2be3 55d0 81aa 6f3c 0e92 7d14</span>. The coin created at the open must match this hash, or the open fails and everyone is refunded.</div>
+      </div>
+
+      <div class="grid3">
+        <div class="countbox">
+          <span class="eyebrow">Window closes in</span>
+          <span class="big" id="foCount">06:42</span>
+          <span class="note">Opens at <span class="mono">14:00:00 UTC</span> · 10-minute window</span>
+        </div>
+        <div class="countbox">
+          <span class="eyebrow">In the pot</span>
+          <span class="big"><span id="foPot">14.20</span><span class="muted" style="font-size:1.1rem"> SOL</span></span>
+          <span class="note">from <span id="foPeople">63</span> people · pot buys up to <span class="mono">17 SOL</span></span>
+        </div>
+        <div class="countbox">
+          <span class="eyebrow">Minimum raise</span>
+          <span class="big" style="color:var(--go)">5 SOL ✓</span>
+          <span class="note">Reached. If a pot misses its minimum, no coin is created and everyone is refunded.</span>
+        </div>
+      </div>
+
+      <div class="panel pad stack">
+        <div class="spread"><h3>The pot</h3><span class="note" id="foOverNote"></span></div>
+        <div class="pot" aria-label="Pot filling">
+          <div class="fill" id="potFill"></div>
+          <div class="over" id="potOver"></div>
+          <div class="unv" id="potUnv" style="width:25%" title="Unverified deposits together can buy at most 25% of the pot"></div>
+        </div>
+        <div class="spread note">
+          <span>0</span>
+          <span>Unverified share: <span class="mono" id="unvUsed">2.10</span> of <span class="mono">4.25 SOL</span> (25% of the pot)</span>
+          <span class="mono">17 SOL cap <span class="placeholder" title="20% of the Graduation Target. The target itself is decided in the Curve and Graduation Target ticket; 85 SOL is a placeholder.">20% of 85 SOL</span></span>
+        </div>
+      </div>
+
+      <div class="panel pad stack">
+        <h3>What happens at the open</h3>
+        <ol class="steps">
+          <li><div><b>The window closes at 14:00:00.</b> <span class="muted">Until then you can withdraw everything.</span></div></li>
+          <li><div><b>One transaction creates the coin, its pool and the pot's buy.</b> <span class="muted">The pot buys first and pays the normal 1.25% fee. Anyone else in that second pays the 99% sniper tax.</span></div></li>
+          <li><div><b>Everyone in the pot pays the same price.</b> <span class="muted">If more is deposited than the pot can buy, everyone gets an equal share: if you asked for less than the share, you get all of yours. The rest is refunded.</span></div></li>
+          <li><div><b>Coins and refunds arrive in your wallet within seconds.</b> <span class="muted">Sent by the labelled Greenflag keeper. Nothing to claim, no vesting.</span></div></li>
+          <li><div><b>A minute later, you get your Tax Share.</b> <span class="muted">Fees snipers pay in the first minute go to the pot's depositors, in proportion to what each deposit bought.</span></div></li>
+        </ol>
+        <p class="note">If the coin has not been created by <span class="mono">14:15 UTC</span>, you can withdraw your deposit on chain yourself, without our server.</p>
+      </div>
+    </div>
+
+    <aside class="stack" style="gap:16px">
+      <div class="panel pad stack">
+        <div class="spread"><h3>Your deposit</h3><span class="chip info" id="tierChip">Scored · cap 0.5 SOL</span></div>
+        <div class="tiers" role="group" aria-label="Depositor tier (demo)">
+          <button class="tier" type="button" data-tier="unverified" aria-pressed="false"><span class="eyebrow">Unverified</span><b>0.1</b><span class="note">SOL cap</span></button>
+          <button class="tier" type="button" data-tier="scored" aria-pressed="true"><span class="eyebrow">Scored</span><b>0.5</b><span class="note">linked X or wallet score</span></button>
+          <button class="tier" type="button" data-tier="verified" aria-pressed="false"><span class="eyebrow">Verified</span><b>2</b><span class="note">World ID, KYC or Civic</span></button>
+        </div>
+        <p class="note" id="tierHelp">You're Scored through your linked X account. Verify once to raise your cap in every Fair Open to 2 SOL.</p>
+        <button class="btn" type="button" id="verifyBtn">Verify once with World ID</button>
+        <div class="field">
+          <label for="depAmt">Amount (SOL)</label>
+          <div class="amount">
+            <input class="input mono" id="depAmt" inputmode="decimal" value="0.30">
+            <button class="btn sm" type="button" id="depMax">Max</button>
+          </div>
+        </div>
+        <div class="row">
+          <button class="btn go" type="button" id="depBtn">Deposit</button>
+          <button class="btn ghost" type="button" id="wdBtn">Withdraw all</button>
+        </div>
+        <div class="note" id="depMsg">You have deposited <span class="mono" id="myDep">0.00</span> SOL.</div>
+      </div>
+
+      <div class="panel pad stack">
+        <h3>If the window closed now</h3>
+        <div class="spread"><span class="muted">Each person's share</span><span class="mono" id="estLevel">all filled</span></div>
+        <div class="spread"><span class="muted">Your coins bought with</span><span class="mono" id="estFill">0.00 SOL</span></div>
+        <div class="spread"><span class="muted">Your refund</span><span class="mono" id="estRefund">0.00 SOL</span></div>
+        <div class="spread"><span class="muted">Your token account rent</span><span class="mono">0.002 SOL</span></div>
+        <p class="note">Worked example: a 15 SOL pot with 30 people asking 0.1 and 50 asking 0.5 to 2. The 30 get 0.1 each, the 50 get 0.24 each, the rest is refunded.</p>
+      </div>
+      <a class="btn" href="#coin" id="skipOpen">Demo: jump to the open</a>
+    </aside>
+  </div>
+</section>
+
+<!-- 3. COIN PAGE (three layout variants) -->
+<section class="screen" id="s-coin" aria-labelledby="h-coin">
+  <div class="stack" style="gap:14px">
+    <div class="spread" id="coinHead"></div>
+    <div class="spread">
+      <div class="statebar" role="group" aria-label="Demo coin">
+        <button type="button" data-coin="PIGEON" aria-pressed="true">$PIGEON</button>
+        <button type="button" data-coin="BABYWIF" aria-pressed="false">$BABYWIF (creator barred)</button>
+      </div>
+      <div class="statebar" role="group" aria-label="Demo state">
+        <button type="button" data-state="curve" aria-pressed="true">On the curve</button>
+        <button type="button" data-state="graduated" aria-pressed="false">Graduated</button>
+        <button type="button" data-state="paused" aria-pressed="false">Paused by Meteora</button>
+      </div>
+      <span class="note">Demo switches. The floating bar at the bottom cycles three layouts for this page.</span>
+    </div>
+    <div id="coinBody"></div>
+  </div>
+</section>
+
+<!-- 4. LAUNCH FLOW -->
+<section class="screen" id="s-launch" aria-labelledby="h-launch">
+  <div class="grid2">
+    <div class="stack" style="gap:14px">
+      <div class="spread"><h1 id="h-launch">Launch a coin</h1><span class="note">Takes about 3 minutes. Nothing is public until you schedule.</span></div>
+      <div class="stepper" id="stepper"></div>
+      <div class="panel pad stack" id="stepBody"></div>
+      <div class="spread"><button class="btn ghost" type="button" id="stepBack">Back</button><button class="btn go" type="button" id="stepNext">Continue</button></div>
+    </div>
+    <aside class="panel pad stack">
+      <h3>What traders will see</h3>
+      <div id="launchPreview"></div>
+    </aside>
+  </div>
+</section>
+
+<!-- 5. CREATOR RECORD -->
+<section class="screen" id="s-creator" aria-labelledby="h-creator">
+  <div class="spread" style="margin-bottom:14px">
+    <div class="statebar" role="group" aria-label="Demo creator">
+      <button type="button" data-cview="good" aria-pressed="true">@pixelpigeon</button>
+      <button type="button" data-cview="barred" aria-pressed="false">@hatdrop, barred</button>
+      <button type="button" data-cview="private" aria-pressed="false">@hatdrop's private view</button>
+    </div>
+    <span class="note">Demo switch: a good record, a barred creator, and what the accused creator sees before a finding is published.</span>
+  </div>
+  <div class="stack" id="creatorAlt" style="gap:16px" hidden></div>
+  <div class="stack" id="creatorGood" style="gap:16px">
+    <div class="spread">
+      <div class="coinhead">
+        <span class="avatar" style="background:linear-gradient(135deg,#6a5acd,#2f8f83)">PP</span>
+        <div>
+          <h1 id="h-creator">@pixelpigeon</h1>
+          <div class="row note"><span class="mark human">verified human · World ID</span><span class="mark">verified creator</span><span>Creator wallet <span class="mono">7xKq…v9fP</span></span><a href="#creator">X profile ↗</a></div>
+        </div>
+      </div>
+      <p class="note" style="max-width:52ch">Every number below is computed from on-chain transactions and links to them. There is no score: read the facts and decide.</p>
+    </div>
+
+    <div class="panel facts">
+      <div><span class="eyebrow">Launches</span><b>5</b><span class="note">4 Fair Open · 1 Instant</span></div>
+      <div><span class="eyebrow">Graduated</span><b>3 <span class="muted" style="font-size:1rem">60%</span></b><span class="note">of 5 launches</span></div>
+      <div><span class="eyebrow">Creator lock</span><b>1 active</b><span class="note">3 fully released, never early</span></div>
+      <div><span class="eyebrow">Creator wallet sells</span><b>2</b><span class="note">both after release</span></div>
+      <div><span class="eyebrow">Handed over</span><b>1</b><span class="note">$OTTR to @otterdao</span></div>
+      <div><span class="eyebrow">Went quiet</span><b>1</b><span class="note">never graduated, no trades 30 days</span></div>
+      <div><span class="eyebrow">Bundle Radar</span><b>0</b><span class="note">confirmed findings · 2 labels</span></div>
+      <div><span class="eyebrow">Creator Earnings</span><b class="mono" style="font-size:1.3rem">4.60 SOL</b><span class="note">ready to claim</span></div>
+    </div>
+
+    <div class="grid2">
+      <div class="panel">
+        <div class="pad"><h3>Launches</h3></div>
+        <div class="scrollx">
+          <table>
+            <thead><tr><th>Coin</th><th>Mode</th><th>Launched</th><th>Graduated</th><th>Creator lock</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td><b>$PIGEON</b></td><td>Fair Open</td><td class="mono">27 Oct 2026</td><td><span class="chip neutral">55% there</span></td><td><span class="chip go">locked to 3 Nov</span></td><td class="note">Deposited 0.5 SOL at Scored tier</td></tr>
+              <tr><td><b>$CRUMB</b></td><td>Fair Open</td><td class="mono">14 Sep 2026</td><td><span class="chip go">yes, day 2</span></td><td><span class="chip neutral">released</span></td><td class="note">Creator wallet sold 1.1% on 20 Oct</td></tr>
+              <tr><td><b>$OTTR</b></td><td>Fair Open</td><td class="mono">2 Aug 2026</td><td><span class="chip go">yes, day 1</span></td><td><span class="chip neutral">released</span></td><td class="note">Handed over to <a href="#creator">@otterdao</a> on 9 Sep. Stays on this record.</td></tr>
+              <tr><td><b>$LOFT</b></td><td>Fair Open</td><td class="mono">21 Jul 2026</td><td><span class="chip go">yes, day 6</span></td><td><span class="chip neutral">released</span></td><td class="note">Bundle Radar label: 2 same-slot buys, <a href="#creator">evidence ↗</a></td></tr>
+              <tr><td><b>$SQUAB</b></td><td>Instant</td><td class="mono">30 Jun 2026</td><td><span class="chip neutral">no</span></td><td><span class="chip neutral">none (Instant)</span></td><td class="note">Went quiet. Bundle Radar label: funding link, <a href="#creator">evidence ↗</a></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <aside class="stack" style="gap:16px">
+        <div class="panel pad stack">
+          <h3>Creator Earnings</h3>
+          <div class="spread"><span class="muted">Curve fees, from the Greenflag program</span><span class="mono">3.42 SOL</span></div>
+          <div class="spread"><span class="muted">Graduated pool fees, from Meteora</span><span class="mono">1.18 SOL</span></div>
+          <button class="btn go" type="button" id="claimBtn">Claim both · 4.60 SOL</button>
+          <p class="note" id="claimMsg">One transaction claims from both. You earn 0.50% of curve volume, then half the graduated pool's fees.</p>
+        </div>
+        <div class="panel pad stack">
+          <h3>Creator wallet history</h3>
+          <div class="spread"><span class="mono">7xKq…v9fP</span><span class="chip go">current</span></div>
+          <div class="spread"><span class="mono faint">3mRb…L2aa</span><span class="note">handed over 2 Aug 2026, signed by the old wallet</span></div>
+          <p class="note">Lost a wallet? Rotate through your X account after a public cooldown of <span class="placeholder" title="The cooldown length is fixed when the spec is assembled">72 hours</span>.</p>
+        </div>
+      </aside>
+    </div>
+  </div>
+</section>
+
+<!-- 6. HOW IT'S ENFORCED -->
+<section class="screen" id="s-enforced" aria-labelledby="h-enf">
+  <div class="stack" style="gap:16px; max-width: 1040px">
+    <div class="stack" style="gap:6px">
+      <h1 id="h-enf">How this is enforced</h1>
+      <p class="muted" style="max-width:68ch">Each promise on the Fairness card, the program that keeps it, and who could still change it. Links go to the accounts on Solana so you can check them yourself.</p>
+    </div>
+    <div class="panel scrollx">
+      <table>
+        <thead><tr><th>Promise</th><th>Kept by</th><th>Who can change it</th></tr></thead>
+        <tbody>
+          <tr><td><span class="pip go"></span> Sniper tax: 99% falling to 1.25% over the first 60 seconds, for every buy and sell</td><td>Meteora's bonding curve settings for this coin</td><td>Nobody. These settings cannot be edited after launch.</td></tr>
+          <tr><td><span class="pip go"></span> Fair Open: one price, per-person caps, equal shares, refunds</td><td>Greenflag program</td><td>An upgrade, announced 7 days ahead through a multisig timelock <span class="placeholder" title="Mainnet policy. On devnet the program uses a plain key.">mainnet</span></td></tr>
+          <tr><td><span class="pip go"></span> Withdraw your deposit yourself if the open is 15 minutes late</td><td>Greenflag program</td><td>Same as above</td></tr>
+          <tr><td><span class="pip go"></span> Creator lock: nothing for 7 days, all free by day 30</td><td>Jupiter Lock escrow</td><td>Nobody can cancel it, Greenflag included. Only the creator can change who receives it.</td></tr>
+          <tr><td><span class="pip go"></span> Liquidity before Graduation</td><td>Meteora's bonding curve</td><td>Nobody can withdraw it.</td></tr>
+          <tr><td><span class="pip go"></span> 100% of liquidity locked forever after Graduation</td><td>Meteora's pool program (permanent lock)</td><td>Nobody can unlock it. The lock still earns fees for the creator and Greenflag.</td></tr>
+          <tr><td><span class="pip go"></span> Fee split: creator 0.50%, Greenflag 0.50%, Meteora 0.25%</td><td>Greenflag program as the curve's partner</td><td>An upgrade, announced 7 days ahead</td></tr>
+          <tr><td><span class="pip caution"></span> Copycat and bundling labels</td><td>Greenflag's server</td><td>We refuse exact copies and label near ones. Labels are our judgement, with the evidence linked.</td></tr>
+          <tr><td><span class="pip stop"></span> A confirmed creator bundle bars the creator's X account, Creator wallet and World ID from launching again</td><td>Greenflag's launch key, which refuses to co-sign their launches</td><td>The creator sees the evidence privately and has 72 hours to reply before it is published. One appeal within 30 days; a second only with new evidence.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="panel">
+      <div class="pad spread"><h3>Creator bundling findings so far</h3><span class="note">Each one links to its published evidence pack</span></div>
+      <div class="facts">
+        <div><span class="eyebrow">Confirmed</span><b>4</b><span class="note">evidence packs published</span></div>
+        <div><span class="eyebrow">Creators barred now</span><b>3</b><span class="note">X account, wallet and World ID</span></div>
+        <div><span class="eyebrow">Appeals</span><b>3</b><span class="note">2 first appeals, 1 second appeal</span></div>
+        <div><span class="eyebrow">Overturned</span><b>1</b><span class="note">bar lifted, finding withdrawn</span></div>
+      </div>
+    </div>
+    <div class="grid3">
+      <div class="panel pad stack">
+        <h3>What Meteora can still do</h3>
+        <p class="note">Meteora's operators can pause a graduated pool and change its fees. Pausing stops trading but never unlocks a position. Meteora can also upgrade its own programs.</p>
+      </div>
+      <div class="panel pad stack">
+        <h3>What we can still do</h3>
+        <p class="note">Upgrade the Greenflag program, but every upgrade is public 7 days before it lands, so creators can claim their earnings first. The upgrade authority is published and every build is verified.</p>
+      </div>
+      <div class="panel pad stack">
+        <h3>What only covers our launches</h3>
+        <p class="note">Anyone can create a coin directly on Meteora with our settings. The Creator lock and Vamp Shield only cover coins our launch key co-signed, and only those are listed here.</p>
+      </div>
+    </div>
+    <p class="note">Trades routed through Jupiter or Titan reach the pool directly. Everything above still applies to them, because it lives on chain, not on this website.</p>
+  </div>
+</section>
+</main>
+
+<footer>Prototype for the screens ticket · branch prototype/screens-mockup · throwaway, never merged</footer>
+
+<div class="switcher" id="switcher" hidden>
+  <button type="button" id="varPrev" aria-label="Previous layout">←</button>
+  <span id="varLabel">A (Card beside chart)</span>
+  <button type="button" id="varNext" aria-label="Next layout">→</button>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var $ = function (s, r) { return (r || document).querySelector(s); };
+  var $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
+  var store = {
+    get: function (k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+    set: function (k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+  };
+  var t0 = Date.now();
+  var secsSince = function () { return (Date.now() - t0) / 1000; };
+  var mmss = function (s) { s = Math.max(0, Math.ceil(s)); return String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0"); };
+  var fmt = function (n, d) { return n.toFixed(d == null ? 2 : d); };
+
+  /* name switch */
+  var names = ["Greenflag", "Top-pad"];
+  var nameIx = Number(store.get("gf-name") || 0) % names.length;
+  function applyName() {
+    $$("[data-brand]").forEach(function (el) { el.textContent = names[nameIx]; });
+    $("#nameSwitch").textContent = nameIx === 0 ? "proposed name ⇄" : "working name ⇄";
+  }
+  $("#nameSwitch").addEventListener("click", function () { nameIx = (nameIx + 1) % names.length; store.set("gf-name", nameIx); applyName(); });
+
+  /* router */
+  var screens = ["discover", "fairopen", "coin", "launch", "creator", "enforced"];
+  function show(name) {
+    if (screens.indexOf(name) < 0) name = "discover";
+    $$(".screen").forEach(function (s) { s.classList.toggle("on", s.id === "s-" + name); });
+    $$(".tab").forEach(function (t) { t.setAttribute("aria-current", t.dataset.screen === name ? "page" : "false"); });
+    $("#switcher").hidden = name !== "coin";
+    if (name === "coin") { renderCoin(); }
+    window.scrollTo(0, 0);
+  }
+  window.addEventListener("hashchange", function () { show(location.hash.slice(1)); });
+
+  /* ---------- discover ---------- */
+  var live = [
+    { creator: "pixelpigeon", human: true, rec: "5 launches · 3 graduated · 0 findings", teaser: "A pigeon that only flies on green.", end: 402, pot: 14.2, people: 63 },
+    { creator: "mara_builds", human: false, rec: "First launch", teaser: "Coffee-powered frog, roasted on devnet.", end: 517, pot: 3.1, people: 21 }
+  ];
+  var cal = [
+    { when: "Today 18:30", creator: "otterdao", marks: ["verified creator"], rec: "9 launches · 4 graduated · 1 handed over to them", terms: ["Pot up to 17 SOL", "Min raise 6 SOL"], teaser: "Otters hold hands while they sleep. So should holders." },
+    { when: "Today 21:00", creator: "lumen_lab", marks: [], rec: "First launch", terms: ["Pot up to 17 SOL", "No minimum"], teaser: "Something that glows in the dark. Literally." },
+    { when: "Tue 28 Oct 15:00", creator: "kettle_sol", marks: ["human"], rec: "3 launches · 1 graduated · 2 creator sells", terms: ["Pot up to 17 SOL", "Min raise 3 SOL"], teaser: "Whistles when it boils." },
+    { when: "Thu 30 Oct 12:00", creator: "noodle_dao", marks: [], rec: "2 launches · 0 graduated · 1 went quiet", terms: ["Pot up to 17 SOL", "Min raise 8 SOL"], teaser: "Long. Slurpable. Community-owned." }
+  ];
+  var coins = [
+    { sym: "PIGEON", name: "Pigeon on Green", color: "#3d8f6a,#1f4d7a", mode: "Fair Open", age: "4m", mcap: "$61.2K", grad: 55, flags: [["go", "Creator locked to 3 Nov"], ["go", "81 people · one price"], ["caution", "2 same-slot buys paid 99%"]] },
+    { sym: "BABYWIF", name: "Baby Wif Hat", color: "#c9762c,#7a2f4d", mode: "Instant", age: "7d", mcap: "$18.4K", grad: 22, flags: [["caution", "Looks like WIF (dogwifhat)"], ["stop", "Confirmed creator bundle · creator barred"]] },
+    { sym: "OTTR", name: "Sleepy Otter", color: "#5a7d9a,#2e3f63", mode: "Fair Open", age: "2d", mcap: "$1.9M", grad: 100, flags: [["go", "Liquidity locked forever"], ["go", "Creator lock releasing"], ["info", "Handed over to @otterdao"]] },
+    { sym: "KETL", name: "Kettle", color: "#8a8f3c,#3c5f2e", mode: "Instant", age: "38m", mcap: "$9.7K", grad: 9, flags: [["caution", "Creator wallet sold 2.1%"]] },
+    { sym: "FROGBREW", name: "Frog Brew", color: "#2f8f5a,#6b4a2b", mode: "Fair Open", age: "1h", mcap: "$212K", grad: 81, flags: [["go", "Creator locked to 3 Nov"], ["go", "64 people · one price"]] }
+  ];
+  function chip(kind, text, isFlag) { return '<span class="chip ' + kind + (isFlag ? " flag" : "") + '">' + text + "</span>"; }
+  function renderDiscover() {
+    $("#calendar").innerHTML = cal.map(function (c) {
+      var marks = c.marks.map(function (m) { return '<span class="mark' + (m === "human" ? " human" : "") + '">' + m + "</span>"; }).join(" ");
+      return "<tr><td class=\"cal-time\">" + c.when + " UTC</td>" +
+        '<td><div class="row"><span class="sealed" aria-hidden="true">?</span><span class="teaser" style="max-width:34ch">"' + c.teaser + '"</span></div></td>' +
+        '<td><div><a class="handle" href="#creator">@' + c.creator + "</a> " + marks + '</div><div class="note">' + c.rec + "</div></td>" +
+        '<td><div class="row">' + c.terms.map(function (t) { return chip("neutral", t); }).join("") + chip("neutral", "10 min") + "</div></td>" +
+        '<td><button class="btn sm" type="button" data-remind>Remind me</button></td></tr>';
+    }).join("");
+    $$("[data-remind]").forEach(function (b) { b.addEventListener("click", function () { b.textContent = "Reminder set"; b.disabled = true; }); });
+    $("#coins").innerHTML = coins.map(function (c) {
+      var grad = c.grad >= 100 ? '<span class="chip neutral"><span class="checkered" style="width:12px;height:10px;display:inline-block"></span> Graduated</span>' :
+        '<div style="min-width:110px"><div class="meter"><i style="width:' + c.grad + '%"></i></div><span class="note mono">' + c.grad + "%</span></div>";
+      return '<tr><td><a href="#coin" data-golink="' + c.sym + '" class="row" style="flex-wrap:nowrap;color:inherit"><span class="avatar" style="background:linear-gradient(135deg,' + c.color + ')">' + c.sym.slice(0, 2) + '</span><span><b>$' + c.sym + '</b><br><span class="note">' + c.name + "</span></span></a></td>" +
+        "<td>" + chip(c.mode === "Fair Open" ? "go" : "neutral", c.mode) + '</td><td class="mono">' + c.age + '</td><td class="mono">' + c.mcap + "</td><td>" + grad + "</td>" +
+        '<td><div class="row">' + c.flags.map(function (f) { return chip(f[0], f[1], true); }).join("") + "</div></td></tr>";
+    }).join("");
+    $$("[data-golink]").forEach(function (a) { a.addEventListener("click", function () { curCoin = coinData[a.dataset.golink] ? a.dataset.golink : "PIGEON"; }); });
+  }
+  function tickDiscover() {
+    var s = secsSince();
+    $("#heroCount").textContent = mmss(live[0].end - s);
+    $("#liveOpens").innerHTML = live.map(function (o, i) {
+      var pot = i === 0 ? foState.pot : o.pot + s * 0.01;
+      return '<div class="opencard"><div class="spread"><div class="row"><span class="sealed" aria-hidden="true">?</span><div><a class="handle" href="#fairopen">@' + o.creator + "</a> " + (o.human ? '<span class="mark human">human</span>' : "") +
+        '<div class="note">' + o.rec + '</div></div></div><div class="mono" style="font-size:1.25rem">' + mmss(o.end - s) + "</div></div>" +
+        '<p class="teaser">"' + o.teaser + '"</p><div class="meter"><i style="width:' + Math.min(100, pot / 17 * 100) + '%"></i></div>' +
+        '<div class="spread note"><span><span class="mono">' + fmt(pot) + " SOL</span> from " + (i === 0 ? foState.people : o.people) + ' people</span><a href="#fairopen">Deposit →</a></div></div>';
+    }).join("");
+  }
+
+  /* ---------- fair open ---------- */
+  var caps = { unverified: 0.1, scored: 0.5, verified: 2 };
+  var foState = { tier: "scored", mine: 0, pot: 14.2, people: 63, unv: 2.1 };
+  // fake requests from other depositors; grows over time to show oversubscription
+  var others = [];
+  (function seed() {
+    var r = 7; function rnd() { r = (r * 9301 + 49297) % 233280; return r / 233280; }
+    for (var i = 0; i < 62; i++) { var t = rnd(); others.push(t < 0.35 ? 0.1 : t < 0.8 ? 0.2 + rnd() * 0.3 : 0.5 + rnd() * 1.5); }
+    var sum = others.reduce(function (a, b) { return a + b; }, 0);
+    others = others.map(function (x) { return x * 14.2 / sum; });
+  })();
+  function level(reqs, cap) {
+    var total = reqs.reduce(function (a, b) { return a + b; }, 0);
+    if (total <= cap) return null;
+    var s = reqs.slice().sort(function (a, b) { return a - b; }), left = cap;
+    for (var i = 0; i < s.length; i++) { var share = left / (s.length - i); if (s[i] <= share) left -= s[i]; else return share; }
+    return null;
+  }
+  function renderFO() {
+    var reqs = others.concat(foState.mine > 0 ? [foState.mine] : []);
+    var total = reqs.reduce(function (a, b) { return a + b; }, 0);
+    foState.pot = total; foState.people = reqs.length;
+    var L = level(reqs, 17);
+    $("#foPot").textContent = fmt(total);
+    $("#foPeople").textContent = reqs.length;
+    $("#potFill").style.width = Math.min(100, total / 17 * 100) + "%";
+    $("#potOver").style.width = total > 17 ? Math.min(100, (total - 17) / 17 * 100) + "%" : "0%";
+    $("#foOverNote").textContent = total > 17 ? "Oversubscribed by " + fmt(total - 17) + " SOL: equal shares, the rest refunded" : fmt(17 - total) + " SOL of room left";
+    $("#unvUsed").textContent = fmt(foState.unv);
+    $("#estLevel").textContent = L == null ? "everyone filled" : "up to " + fmt(L, 3) + " SOL";
+    var fill = L == null ? foState.mine : Math.min(foState.mine, L);
+    $("#estFill").textContent = fmt(fill, 3) + " SOL";
+    $("#estRefund").textContent = fmt(foState.mine - fill, 3) + " SOL";
+    $("#myDep").textContent = fmt(foState.mine);
+    var cap = caps[foState.tier];
+    $("#tierChip").textContent = foState.tier[0].toUpperCase() + foState.tier.slice(1) + " · cap " + cap + " SOL";
+    $$(".tier").forEach(function (b) { b.setAttribute("aria-pressed", b.dataset.tier === foState.tier ? "true" : "false"); });
+    $("#verifyBtn").hidden = foState.tier === "verified";
+    $("#tierHelp").textContent = foState.tier === "verified" ? "Verified once with World ID. Your cap is 2 SOL in every Fair Open." :
+      foState.tier === "scored" ? "You're Scored through your linked X account. Verify once to raise your cap in every Fair Open to 2 SOL." :
+      "Unverified wallets can deposit 0.1 SOL, and all of them together buy at most a quarter of the pot. Link X or verify to raise your cap.";
+  }
+  $$(".tier").forEach(function (b) { b.addEventListener("click", function () { foState.tier = b.dataset.tier; if (foState.mine > caps[foState.tier]) foState.mine = caps[foState.tier]; renderFO(); }); });
+  $("#verifyBtn").addEventListener("click", function () { var b = this; b.textContent = "Checking your World ID proof…"; b.disabled = true; setTimeout(function () { foState.tier = "verified"; b.disabled = false; b.textContent = "Verify once with World ID"; renderFO(); }, 900); });
+  $("#depMax").addEventListener("click", function () { $("#depAmt").value = fmt(caps[foState.tier] - foState.mine); });
+  $("#depBtn").addEventListener("click", function () {
+    var v = parseFloat($("#depAmt").value), cap = caps[foState.tier], msg = $("#depMsg");
+    if (!(v > 0)) { msg.innerHTML = '<span style="color:var(--stop)">Enter an amount above 0.</span>'; return; }
+    if (foState.mine + v > cap + 1e-9) { msg.innerHTML = '<span style="color:var(--stop)">Your ' + foState.tier + " cap is " + cap + " SOL. You can add " + fmt(cap - foState.mine) + " more.</span>"; return; }
+    foState.mine += v; renderFO();
+    msg.innerHTML = "Deposited. You have <span class=\"mono\">" + fmt(foState.mine) + "</span> SOL in the pot and can withdraw it until 14:00:00.";
+  });
+  $("#wdBtn").addEventListener("click", function () { foState.mine = 0; renderFO(); $("#depMsg").innerHTML = "Withdrawn. You have <span class=\"mono\">0.00</span> SOL in the pot."; });
+  function tickFO() {
+    var s = secsSince();
+    $("#foCount").textContent = mmss(402 - s);
+    if (others.length < 140 && Math.random() < 0.35) { others.push(0.1 + Math.random() * 0.4); if (Math.random() < 0.3) foState.unv = Math.min(4.25, foState.unv + 0.1); }
+    renderFO();
+  }
+
+  /* ---------- coin page ---------- */
+  var variants = [["A", "Card beside chart"], ["B", "Flags strip"], ["C", "Proof first"]];
+  var vIx = Number(store.get("gf-variant") || 0) % variants.length;
+  var coinState = "curve";
+  var taxStart = Date.now() - 12000;
+  var tradesBy = {};
+  var trades = tradesBy.PIGEON = [
+    { who: "Greenflag keeper", tag: "pot buy, labelled", side: "buy", sol: 17, fee: 1.25, ago: "0s", pinned: true },
+    { who: "4hZt…2kPq", tag: "same slot as the open", side: "buy", sol: 3.0, fee: 99, ago: "0s" },
+    { who: "Bv9c…mW1e", tag: "same slot as the open", side: "buy", sol: 1.5, fee: 99, ago: "0s" },
+    { who: "@pixelpigeon", tag: "creator, unlocked", side: "buy", sol: 0.4, fee: 89.2, ago: "6s" }
+  ];
+  tradesBy.BABYWIF = [
+    { who: "Ck2r…77Pd", tag: "", side: "buy", sol: 0.2, fee: 1.25, ago: "12s" },
+    { who: "Lp8u…Zc3v", tag: "", side: "sell", sol: 0.5, fee: 1.25, ago: "40s" },
+    { who: "2wWs…eRq9", tag: "", side: "buy", sol: 0.1, fee: 1.25, ago: "1m" }
+  ];
+  function liveTax() { return coinState === "curve" && coinData[curCoin].live; }
+  function taxAt(sec) { var n = Math.floor(sec); return n >= 60 ? 1.25 : 99 - 97.75 * n / 60; }
+  function taxSec() { return (Date.now() - taxStart) / 1000; }
+  var curCoin = "PIGEON";
+  var coinData = {
+    PIGEON: { name: "Pigeon on Green", sym: "PIGEON", ini: "PG", color: "#3d8f6a,#1f4d7a", mint: "9pGn…Qe41", price: "0.0000612 SOL", mcap: "$61.2K", holders: "214", live: true,
+      chips: [["go", "Fair Open · 81 people · one price", true], ["go", "identity matched the sealed hash"]] },
+    BABYWIF: { name: "Baby Wif Hat", sym: "BABYWIF", ini: "BW", color: "#c9762c,#7a2f4d", mint: "Bw1f…hAt7", price: "0.0000184 SOL", mcap: "$18.4K", holders: "96", live: false, age: "7d 3h",
+      chips: [["neutral", "Instant launch"], ["caution", "looks like $WIF (dogwifhat)", true], ["stop", "confirmed creator bundle", true]] }
+  };
+  function evidencePack(published) {
+    return '<div class="panel"><div class="pad spread"><h3>Evidence pack</h3><span class="note">$BABYWIF · launched 20 Oct 2026 · finding confirmed 21 Oct</span></div>' +
+      '<div class="scrollx"><table><thead><tr><th>What</th><th>On chain</th><th>Detail</th></tr></thead><tbody>' +
+      '<tr><td><b>Funding</b></td><td><a href="#creator" class="mono">6 transfers ↗</a></td><td class="note">Creator wallet <span class="mono">5hDw…t0Pz</span> sent 0.8 to 1.6 SOL to each of 6 new wallets, 2 hours before launch</td></tr>' +
+      '<tr><td><b>Jito bundle</b></td><td><a href="#creator" class="mono">b7c1…e90a ↗</a></td><td class="note">The coin\'s creation and all 6 buys landed in one bundle, in the creation slot</td></tr>' +
+      '<tr><td><b>Buys</b></td><td><a href="#creator" class="mono">4xQe…, 9mTr…, Hc2b… +3 ↗</a></td><td class="note">6 buys of 8.7 SOL in total bought 31% of supply and paid 99% sniper tax (8.6 SOL)</td></tr>' +
+      '<tr><td><b>After</b></td><td><a href="#creator" class="mono">11 transfers ↗</a></td><td class="note">The 6 wallets moved their coins to 2 exchange deposit addresses within 40 minutes of the tax window ending</td></tr>' +
+      (published ? '<tr><td><b>Creator\'s reply</b></td><td></td><td class="note">"Those are friends who wanted in early." Published with the finding.</td></tr>' : "") +
+      "</tbody></table></div></div>";
+  }
+  var fairRows = function () {
+    var grad = coinState !== "curve";
+    if (curCoin === "BABYWIF") return [
+      { k: "stop", t: "Bundle Radar", v: "Confirmed creator bundle", p: '6 wallets funded by the Creator wallet bought 31% of supply in the creation slot · <a href="#creator" data-cv="barred">evidence pack ↗</a>' },
+      { k: "stop", t: "Creator", v: '<a href="#creator" data-cv="barred">@hatdrop</a> is barred from launching', p: "Since 24 Oct 2026 · second appeal possible only with new evidence" },
+      { k: "info", t: "Launch", v: "Instant launch, no creator buy", p: "The bundle's buys paid the 99% sniper tax: 8.6 SOL" },
+      { k: "caution", t: "Copycat check", v: "Looks like $WIF (dogwifhat)", p: "Near match: derivative prefix BABY" },
+      { k: "caution", t: "Holdings", v: "Creator-linked wallets hold 0% now", p: "They sold or moved 31% of supply in the first hour" },
+      { k: "go", t: "Liquidity", v: grad ? "100% of liquidity locked forever" : "In Meteora's bonding curve. Nobody can withdraw it.", p: grad ? '<a href="#enforced">Creator position ↗</a> · <a href="#enforced">Greenflag position ↗</a>' : "Locks forever at Graduation" },
+      { k: "info", t: "Sniper tax", v: "8.9 SOL from the first minute went to Greenflag", p: "An Instant launch has no depositors to share it with" }
+    ];
+    return [
+      { k: "go", t: "Launch", v: "Fair Open: 17 SOL from 81 people, one price", p: 'Identity matched the sealed hash · <a href="#coin">open transaction ↗</a>' },
+      { k: "go", t: "Creator lock", v: "3.12M $PIGEON locked until 3 Nov 2026", p: 'Releases steadily, all free 26 Nov · from a 0.5 SOL deposit · <a href="#enforced">Jupiter Lock escrow ↗</a>' },
+      { k: "caution", t: "Creator's unlocked holdings", v: "0.41% of supply", p: 'Bought after the open from the Creator wallet · <a href="#coin">buy ↗</a>' },
+      { k: "go", t: "Liquidity", v: grad ? "100% of liquidity locked forever" : "In Meteora's bonding curve. Nobody can withdraw it.", p: grad ? '<a href="#enforced">Creator position ↗</a> · <a href="#enforced">Greenflag position ↗</a>' : "Locks forever at Graduation" },
+      { k: "caution", t: "Bundle Radar", v: "2 same-slot buys, both paid 99% tax", p: '0 Jito bundles · 0 funding links to the creator · <a href="#coin">evidence ↗</a>' },
+      { k: "go", t: "Creator", v: '<a href="#creator">@pixelpigeon</a> <span class="mark human">human</span>', p: "5 launches · 3 graduated · 0 bundling findings" },
+      { k: "info", t: "Keeper", v: "Pot buy sent by the labelled Greenflag keeper", p: '<span class="mono">GFkp…r83e</span> · never the creator\'s wallet' },
+      { k: "go", t: "Tax Share", v: '<span id="taxShareV">6.84 SOL</span> to depositors from the first minute', p: "Your share: 0.021 SOL, sent at 14:01:00" }
+    ];
+  };
+  function fairCard(wide) {
+    var all = fairRows(), count = function (k) { return all.filter(function (r) { return r.k === k; }).length; };
+    var rows = all.map(function (r) {
+      return '<div class="frow"><span class="pip ' + r.k + '"></span><div><div class="ft">' + r.t + '</div><div class="fv">' + r.v + '</div><div class="fp muted">' + r.p + "</div></div></div>";
+    }).join("");
+    var red = count("stop");
+    return '<div class="panel fair' + (wide ? " wide" : "") + '"' + (red ? ' style="border-color:var(--stop)"' : "") + '><div class="fhead"><h3>Fairness card</h3><div class="row"><span class="chip go flag">' + count("go") + ' green</span><span class="chip caution flag">' + count("caution") + ' yellow</span><span class="chip ' + (red ? "stop flag" : "neutral") + '">' + red + " red</span></div></div>" +
+      '<div class="frows">' + rows + '</div><div class="ffoot"><a href="#enforced">How this is enforced →</a><a href="#coin">Share card image on X</a></div></div>';
+  }
+  function flagStrip() {
+    return '<div class="panel pad stack"><div class="spread"><h3>Fairness card</h3><a class="note" href="#enforced">How this is enforced →</a></div><div class="flagstrip">' +
+      fairRows().map(function (r, i) { return '<button class="flagbtn" type="button" data-flag="' + i + '" aria-expanded="false"><span class="pip ' + r.k + '"></span><span><span class="ft eyebrow">' + r.t + "</span></span></button>"; }).join("") +
+      '</div><div class="flagdetail panel" id="flagDetail" hidden></div></div>';
+  }
+  function taxBand() {
+    return '<div class="taxband" id="taxBand"><div><div class="eyebrow">Sniper tax now</div><div class="big num" id="taxPct">99%</div></div>' +
+      '<div class="stack" style="gap:6px"><div class="taxtrack"><i id="taxTrack"></i></div><div class="note" id="taxNote"></div></div>' +
+      '<button class="btn sm" type="button" id="taxReplay">Replay the first minute</button></div>';
+  }
+  function barredBand() { return curCoin === "BABYWIF" ? '<div class="verdict stop"><b>Confirmed creator bundle: this coin\'s creator is barred from launching.</b><span class="note">6 wallets funded by the Creator wallet bought 31% of supply in the creation slot. <a href="#creator" data-cv="barred">Evidence pack and appeal status →</a></span></div>' : ""; }
+  function pausedBand() { return coinState === "paused" ? '<div class="pausedband"><b>Meteora paused this pool.</b> <span class="muted">Trading is stopped by Meteora\'s operators, not by Greenflag. Locked liquidity stays locked, and the pool resumes when Meteora lifts the pause.</span></div>' : ""; }
+  function chartBox() {
+    return '<div class="panel"><div class="pad spread" style="padding-bottom:0"><div class="row"><b>$' + curCoin + ' / SOL</b><span class="chip neutral">1s</span><span class="chip neutral">15s</span><span class="chip neutral">1m</span></div><span class="note">Chart placeholder</span></div><canvas class="chart" id="chart" width="900" height="260"></canvas></div>';
+  }
+  function gradBox() {
+    var pct = coinState === "curve" ? 55 : 100;
+    return '<div class="panel pad stack" style="gap:8px"><div class="spread"><b>' + (pct === 100 ? "Graduated to a Meteora pool" : "To Graduation") + '</b><span class="mono note">' + (pct === 100 ? "85 / 85 SOL" : "46.8 / 85 SOL") + ' <span class="placeholder" title="The Graduation Target is decided in the Curve and Graduation Target ticket">target placeholder</span></span></div>' +
+      '<div class="gradbar"><div class="track"><i style="width:' + pct + '%"></i></div><div class="checkered" title="Graduation"></div></div></div>';
+  }
+  function quickBuy() {
+    var off = coinState === "paused";
+    return '<div class="panel pad stack"><div class="spread"><h3>Quick buy</h3><span class="note" id="qbFee"></span></div><div class="qb">' +
+      ["0.1", "0.5", "1", "5"].map(function (a) { return '<button class="btn" type="button" data-qb="' + a + '"' + (off ? " disabled" : "") + ">" + a + "</button>"; }).join("") +
+      '</div><div class="note" id="qbMsg">' + (off ? "Trading is paused by Meteora." : "Pick an amount in SOL. The fee you would pay right now is shown before you sign.") + "</div></div>";
+  }
+  function tradesBox() {
+    return '<div class="panel"><div class="pad"><h3>Trades</h3></div><div class="scrollx"><table class="trades"><thead><tr><th>Wallet</th><th>Side</th><th>SOL</th><th>Fee paid</th><th>When</th></tr></thead><tbody id="tradeRows"></tbody></table></div></div>';
+  }
+  function renderTrades(newFirst) {
+    var tb = $("#tradeRows"); if (!tb) return;
+    tb.innerHTML = tradesBy[curCoin].slice(0, 9).map(function (t, i) {
+      var feeSol = t.sol * t.fee / 100;
+      return "<tr" + (newFirst && i === 0 ? ' class="tradenew"' : "") + '><td><span class="' + (t.pinned ? "chip info" : "mono") + '">' + t.who + '</span> <span class="note">' + (t.tag || "") + "</span></td>" +
+        '<td style="color:' + (t.side === "buy" ? "var(--go)" : "var(--stop)") + '">' + t.side + '</td><td class="mono">' + fmt(t.sol) + '</td><td class="mono' + (t.fee > 50 ? " paidtax" : "") + '">' + fmt(t.fee, 2) + "% · " + fmt(feeSol, 3) + '</td><td class="mono note">' + t.ago + "</td></tr>";
+    }).join("");
+  }
+  function renderHead() {
+    var c = coinData[curCoin];
+    $("#coinHead").innerHTML = '<div class="coinhead"><span class="avatar" style="background:linear-gradient(135deg,' + c.color + ')">' + c.ini + '</span><div><h1 id="h-coin">' + c.name +
+      ' <span class="muted mono" style="font-size:1rem">$' + c.sym + '</span></h1><div class="row note">' + c.chips.map(function (f) { return chip(f[0], f[1], f[2]); }).join("") + '<span class="mono">' + c.mint + "</span></div></div></div>" +
+      '<div class="statline"><div><span>Price</span><b class="mono">' + c.price + '</b></div><div><span>Market cap</span><b class="mono">' + c.mcap + '</b></div><div><span>Holders</span><b class="mono">' + c.holders +
+      '</b></div><div><span>Age</span><b class="mono" id="coinAge">' + (c.age || "") + "</b></div></div>";
+    $$("[data-coin]").forEach(function (x) { x.setAttribute("aria-pressed", x.dataset.coin === curCoin ? "true" : "false"); });
+  }
+  function renderCoin() {
+    renderHead();
+    var v = variants[vIx][0], body = $("#coinBody");
+    $("#varLabel").textContent = v + " (" + variants[vIx][1] + ")";
+    var tax = liveTax() ? taxBand() : "";
+    if (v === "A") {
+      body.innerHTML = '<div class="grid2"><div class="stack">' + barredBand() + pausedBand() + tax + chartBox() + gradBox() + tradesBox() + '</div><aside class="stack">' + quickBuy() + fairCard(false) + "</aside></div>";
+    } else if (v === "B") {
+      body.innerHTML = '<div class="stack">' + barredBand() + pausedBand() + flagStrip() + tax + '<div class="grid2"><div class="stack">' + chartBox() + gradBox() + '</div><aside class="stack">' + quickBuy() + "</aside></div>" + tradesBox() + "</div>";
+    } else {
+      body.innerHTML = '<div class="stack">' + barredBand() + pausedBand() + fairCard(true) + tax + '<div class="grid2"><div class="stack">' + chartBox() + gradBox() + tradesBox() + '</div><aside class="stack">' + quickBuy() + "</aside></div></div>";
+    }
+    wireCoin(); drawChart(); renderTrades(false); tickCoin();
+  }
+  function wireCoin() {
+    var r = $("#taxReplay"); if (r) r.addEventListener("click", function () { taxStart = Date.now(); });
+    $$("[data-qb]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        var a = parseFloat(b.dataset.qb), f = liveTax() ? taxAt(taxSec()) : 1.25;
+        tradesBy[curCoin].unshift({ who: "You", tag: "quick buy", side: "buy", sol: a, fee: f, ago: "now" });
+        renderTrades(true);
+        $("#qbMsg").innerHTML = "Bought with " + a + " SOL. Fee paid: <span class=\"mono\">" + fmt(f) + "% (" + fmt(a * f / 100, 4) + " SOL)</span>" + (f > 2 ? ". Waiting until the tax window ends would have cost 1.25%." : ".");
+      });
+    });
+    $$("[data-flag]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        var open = b.getAttribute("aria-expanded") === "true", d = $("#flagDetail"), r = fairRows()[Number(b.dataset.flag)];
+        $$("[data-flag]").forEach(function (x) { x.setAttribute("aria-expanded", "false"); });
+        if (open) { d.hidden = true; return; }
+        b.setAttribute("aria-expanded", "true");
+        d.innerHTML = '<div class="ft eyebrow">' + r.t + '</div><div class="fv" style="font-size:1.05rem">' + r.v + '</div><div class="note">' + r.p + "</div>";
+        d.hidden = false;
+      });
+    });
+  }
+  function tickCoin() {
+    var s = taxSec(), f = taxAt(s), done = s >= 60;
+    var band = $("#taxBand");
+    if (band) {
+      band.classList.toggle("done", done);
+      $("#taxPct").textContent = done ? "1.25%" : fmt(f, 1) + "%";
+      $("#taxTrack").style.width = Math.min(100, s / 60 * 100) + "%";
+      $("#taxNote").innerHTML = done ? "The first minute is over. Every trade now pays the normal 1.25% fee. Fees from the first minute went to the pot's depositors as their Tax Share." :
+        "Every buy and sell pays this fee. It falls 1.63 points each second and reaches the normal 1.25% in <b class=\"mono\">" + mmss(60 - s) + "</b>. It goes to the pot's depositors, never to the creator.";
+    }
+    var q = $("#qbFee"); if (q) q.textContent = coinState === "paused" ? "" : "Fee now: " + fmt(liveTax() ? f : 1.25) + "%";
+    var age = $("#coinAge"); if (age && coinData[curCoin].live) age.textContent = Math.floor(s / 60) + "m " + String(Math.floor(s % 60)).padStart(2, "0") + "s";
+  }
+  var tradeClock = 0;
+  function maybeTrade() {
+    if (coinState === "paused" || !$("#tradeRows")) return;
+    tradeClock++;
+    if (tradeClock % 3) return;
+    var s = taxSec(), f = liveTax() ? taxAt(s) : 1.25, sell = Math.random() < 0.3;
+    var who = ["9fQx…a1Lm", "Ck2r…77Pd", "Hn4e…Tt0b", "2wWs…eRq9", "Lp8u…Zc3v"][Math.floor(Math.random() * 5)];
+    var tl = tradesBy[curCoin];
+    tl.unshift({ who: who, tag: f > 60 ? "inside the tax window" : "", side: sell ? "sell" : "buy", sol: +(0.05 + Math.random() * 1.2).toFixed(2), fee: f, ago: "now" });
+    tl.forEach(function (t, i) { if (i > 0 && t.ago === "now") t.ago = "1s+"; });
+    renderTrades(true);
+  }
+  function drawChart() {
+    var c = $("#chart"); if (!c) return;
+    var w = c.clientWidth || 600, h = 260, dpr = window.devicePixelRatio || 1;
+    c.width = w * dpr; c.height = h * dpr; var g = c.getContext("2d"); g.scale(dpr, dpr);
+    var cs = getComputedStyle(document.documentElement);
+    var up = cs.getPropertyValue("--go").trim(), dn = cs.getPropertyValue("--stop").trim(), grid = cs.getPropertyValue("--line").trim(), txt = cs.getPropertyValue("--faint").trim();
+    g.clearRect(0, 0, w, h); g.strokeStyle = grid; g.lineWidth = 1;
+    for (var y = 30; y < h; y += 46) { g.beginPath(); g.moveTo(0, y + .5); g.lineTo(w, y + .5); g.stroke(); }
+    var n = Math.max(20, Math.floor(w / 11)), seed = 3, price = 40;
+    function rnd() { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; }
+    var cw = (w - 40) / n;
+    for (var i = 0; i < n; i++) {
+      var o = price, cl = o + (rnd() - 0.42) * 9, hi = Math.max(o, cl) + rnd() * 4, lo = Math.min(o, cl) - rnd() * 4; price = cl;
+      var sy = function (v) { return h - 16 - (v - 10) * 2.6; };
+      g.strokeStyle = g.fillStyle = cl >= o ? up : dn;
+      var x = 8 + i * cw + cw / 2;
+      g.beginPath(); g.moveTo(x, sy(hi)); g.lineTo(x, sy(lo)); g.stroke();
+      g.fillRect(x - cw * 0.32, Math.min(sy(o), sy(cl)), cw * 0.64, Math.max(1, Math.abs(sy(o) - sy(cl))));
+    }
+    g.fillStyle = txt; g.font = "11px " + cs.getPropertyValue("--font-mono"); g.fillText("fake candles · prototype", 10, 16);
+  }
+  window.addEventListener("resize", drawChart);
+  $$("[data-coin]").forEach(function (b) {
+    b.addEventListener("click", function () { curCoin = b.dataset.coin; renderCoin(); });
+  });
+  $$("[data-state]").forEach(function (b) {
+    b.addEventListener("click", function () { coinState = b.dataset.state; $$("[data-state]").forEach(function (x) { x.setAttribute("aria-pressed", x === b ? "true" : "false"); }); renderCoin(); });
+  });
+  function cycle(d) { vIx = (vIx + d + variants.length) % variants.length; store.set("gf-variant", vIx); renderCoin(); }
+  $("#varPrev").addEventListener("click", function () { cycle(-1); });
+  $("#varNext").addEventListener("click", function () { cycle(1); });
+  document.addEventListener("keydown", function (e) {
+    var a = document.activeElement;
+    if (a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" || a.isContentEditable)) return;
+    if (!$("#s-coin").classList.contains("on")) return;
+    if (e.key === "ArrowLeft") cycle(-1); else if (e.key === "ArrowRight") cycle(1);
+  });
+  $("#skipOpen").addEventListener("click", function () { taxStart = Date.now(); coinState = "curve"; curCoin = "PIGEON"; $$("[data-state]").forEach(function (x) { x.setAttribute("aria-pressed", x.dataset.state === "curve" ? "true" : "false"); }); });
+
+  /* ---------- launch flow ---------- */
+  var L = { step: 0, x: false, mode: "fair", name: "Lumen", ticker: "LUMEN", when: "", minRaise: "", teaser: "Something that glows in the dark. Literally.", hash: "", signed: 0, done: false };
+  var stepNames = ["Link X", "Launch mode", "Coin", "Schedule", "Sign", "Done"];
+  var protectedCoins = { WIF: "dogwifhat", BONK: "Bonk", POPCAT: "Popcat", PIGEON: "Pigeon on Green, a Greenflag coin that completed a Fair Open", OTTR: "Sleepy Otter, a graduated Greenflag coin" };
+  function editDistance1(a, b) {
+    if (Math.abs(a.length - b.length) > 1) return false;
+    var i = 0, j = 0, diff = 0;
+    while (i < a.length && j < b.length) { if (a[i] === b[j]) { i++; j++; continue; } if (++diff > 1) return false; if (a.length > b.length) i++; else if (b.length > a.length) j++; else { i++; j++; } }
+    return diff + (a.length - i) + (b.length - j) <= 1;
+  }
+  function vamp(ticker, name) {
+    if (!/^[A-Z0-9]{2,10}$/.test(ticker)) return { k: "stop", t: "Ticker not allowed", d: "Tickers use only A to Z and 0 to 9, 2 to 10 characters. No emoji, accents or other scripts, so nobody can fake a ticker with lookalike letters." };
+    if (/[​-‏‪-‮⁦-⁩]/.test(name)) return { k: "stop", t: "Name not allowed", d: "The name contains invisible or direction-changing characters." };
+    if (/[A-Za-z]/.test(name) && /[Ͱ-ϿЀ-ӿ]/.test(name)) return { k: "stop", t: "Name not allowed", d: "The name mixes Latin letters with Cyrillic or Greek ones, which is how lookalike names are made." };
+    if (protectedCoins[ticker]) return { k: "stop", t: "Refused: matches $" + ticker, d: "$" + ticker + " (" + protectedCoins[ticker] + ") is a protected coin. If this is a relaunch or a community takeover, appeal by linking the original coin and proving you control it.", appeal: true };
+    var core = ticker.replace(/^(BABY|MINI|LIL)/, "").replace(/(INU|AI|2)$/, "");
+    if (core !== ticker && protectedCoins[core]) return { k: "caution", t: "Launches with a label: looks like $" + core, d: "Traders will see \"looks like $" + core + "\" next to your coin. You can still launch." };
+    for (var p in protectedCoins) { if (ticker.length >= 5 && p.length >= 4 && editDistance1(ticker, p)) return { k: "caution", t: "Launches with a label: looks like $" + p, d: "One letter away from a protected coin. Traders will see \"looks like $" + p + "\" next to your coin." }; }
+    return { k: "go", t: "Clear", d: "No protected coin matches this ticker, name or image." };
+  }
+  function computeHash() {
+    var text = L.name + "|" + L.ticker + "|image:lumen.png";
+    if (window.crypto && crypto.subtle && window.TextEncoder) {
+      crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)).then(function (buf) {
+        L.hash = Array.prototype.map.call(new Uint8Array(buf), function (b) { return b.toString(16).padStart(2, "0"); }).join("").replace(/(.{4})/g, "$1 ").trim();
+        var el = $("#hashOut"); if (el) el.textContent = L.hash; renderPreview();
+      }).catch(function () {});
+    }
+  }
+  // ADR 0005 as amended: rungs fall in 5% steps from the pot's cap, at most 64
+  var rungs = []; for (var ri = 0; ri < 64; ri++) rungs.push(17 * Math.pow(0.95, ri));
+  function canNext() {
+    if (L.step === 0) return L.x;
+    if (L.step === 2) return vamp(L.ticker, L.name).k !== "stop" && L.name.trim().length > 0;
+    if (L.step === 3) return L.mode === "instant" || !!L.when;
+    if (L.step === 4) return L.mode === "instant" || L.signed === rungs.length;
+    return L.step < 5;
+  }
+  function renderStep() {
+    var b = $("#stepBody"), s = L.step;
+    $("#stepper").innerHTML = stepNames.map(function (n, i) { return '<button type="button" data-step="' + i + '"' + (i === s ? ' aria-current="step"' : "") + (i < s ? ' class="done"' : "") + ">" + (i < s ? "✓ " : "") + n + "</button>"; }).join("");
+    $$("[data-step]").forEach(function (x) { x.addEventListener("click", function () { var t = Number(x.dataset.step); if (t <= L.step) { L.step = t; renderStep(); } }); });
+    if (s === 0) {
+      b.innerHTML = '<h2>Link your X account</h2><p class="muted">Every launch needs one. Your Creator record belongs to it, and your handle goes into the coin\'s details, so traders see who made it on every terminal.</p>' +
+        (L.x ? '<div class="verdict go"><b>Linked as @lumen_lab</b><span class="note">Creator wallet: <span class="mono">7xKq…v9fP</span>. This is the only wallet that can sign your launches. Record: first launch.</span></div>' :
+          '<button class="btn go" type="button" id="linkX">Link X</button>') +
+        '<p class="note">Optional later: add a World ID proof for the "verified human" mark.</p>';
+      var lx = $("#linkX"); if (lx) lx.addEventListener("click", function () { L.x = true; renderStep(); });
+    } else if (s === 1) {
+      b.innerHTML = '<h2>How should your coin start trading?</h2><div class="modes">' +
+        '<button class="mode" type="button" data-mode="fair" aria-pressed="' + (L.mode === "fair") + '"><span class="row"><b>Fair Open</b><span class="chip go">default</span></span><span class="note">A 10-minute deposit window, then everyone in the pot buys at one price. You can deposit like anyone else, up to your tier\'s cap. Your share is locked: nothing for 7 days, all free by day 30.</span></button>' +
+        '<button class="mode" type="button" data-mode="instant" aria-pressed="' + (L.mode === "instant") + '"><b>Instant launch</b><span class="note">Trading starts the moment the coin exists. There is no creator buy: any buy in the first second, yours included, pays the 99% sniper tax.</span></button></div>';
+      $$("[data-mode]").forEach(function (x) { x.addEventListener("click", function () { L.mode = x.dataset.mode; renderStep(); renderPreview(); }); });
+    } else if (s === 2) {
+      var v = vamp(L.ticker, L.name);
+      b.innerHTML = '<h2>Your coin</h2><div class="grid3" style="grid-template-columns:repeat(2,minmax(0,1fr))">' +
+        '<div class="field"><label for="lName">Name</label><input class="input" id="lName" value="' + L.name.replace(/"/g, "&quot;") + '" maxlength="32"></div>' +
+        '<div class="field"><label for="lTicker">Ticker</label><input class="input mono" id="lTicker" value="' + L.ticker + '" maxlength="10" autocapitalize="characters"></div></div>' +
+        '<div class="field"><label>Image</label><div class="row"><span class="avatar" style="background:linear-gradient(135deg,#d7b43a,#4b3a8a)">LU</span><span class="note">lumen.png · 512 × 512 · checked against protected coins\' images</span></div></div>' +
+        '<div class="verdict ' + v.k + '" id="vampOut"><b>' + v.t + '</b><span class="note">' + v.d + "</span>" + (v.appeal ? '<a href="#launch" class="note">Appeal this refusal →</a>' : "") + "</div>" +
+        '<p class="note">Try <span class="mono">WIF</span>, <span class="mono">BABYWIF</span>, <span class="mono">BONKK</span> or <span class="mono">PIGEON</span> to see Vamp Shield refuse or label.</p>' +
+        (L.mode === "fair" ? '<div class="field"><label>Sealed until the open</label><span class="note">Only this fingerprint is public until the coin trades. The coin created at the open must match it.</span><span class="hash" id="hashOut">' + (L.hash || "computing…") + "</span></div>" : "");
+      var upd = function () { L.name = $("#lName").value; L.ticker = $("#lTicker").value.toUpperCase(); $("#lTicker").value = L.ticker; var v2 = vamp(L.ticker, L.name), o = $("#vampOut"); o.className = "verdict " + v2.k; o.innerHTML = "<b>" + v2.t + '</b><span class="note">' + v2.d + "</span>" + (v2.appeal ? '<a href="#launch" class="note">Appeal this refusal →</a>' : ""); computeHash(); $("#stepNext").disabled = !canNext(); renderPreview(); };
+      $("#lName").addEventListener("input", upd); $("#lTicker").addEventListener("input", upd);
+      computeHash();
+    } else if (s === 3) {
+      if (L.mode === "instant") { b.innerHTML = '<h2>No schedule for an Instant launch</h2><p class="muted">Your coin starts trading as soon as you sign. Continue to sign.</p>'; }
+      else {
+        var now = new Date(), max = new Date(now.getTime() + 7 * 864e5), iso = function (d) { return new Date(d.getTime() - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 16); };
+        b.innerHTML = '<h2>Schedule the Fair Open</h2><div class="grid3" style="grid-template-columns:repeat(2,minmax(0,1fr))">' +
+          '<div class="field"><label for="lWhen">Window opens (up to 7 days ahead)</label><input class="input" type="datetime-local" id="lWhen" min="' + iso(now) + '" max="' + iso(max) + '" value="' + L.when + '"></div>' +
+          '<div class="field"><label for="lMin">Minimum raise, SOL (optional)</label><input class="input mono" id="lMin" inputmode="decimal" placeholder="none" value="' + L.minRaise + '"></div></div>' +
+          '<div class="row"><span class="chip neutral">Window: 10 minutes, fixed</span><span class="chip neutral">Pot buys up to 17 SOL</span><span class="chip neutral">Caps: 2 / 0.5 / 0.1 SOL by tier</span></div>' +
+          '<div class="field"><label for="lTeaser">One-line teaser for the calendar</label><input class="input" id="lTeaser" maxlength="80" value="' + L.teaser.replace(/"/g, "&quot;") + '"><span class="note">Shown instead of the name, ticker and image until the open. <span class="placeholder" title="Free text or a fixed form is still open">free text for now</span></span></div>';
+        $("#lWhen").addEventListener("input", function () { L.when = this.value; $("#stepNext").disabled = !canNext(); renderPreview(); });
+        $("#lMin").addEventListener("input", function () { L.minRaise = this.value; renderPreview(); });
+        $("#lTeaser").addEventListener("input", function () { L.teaser = this.value; renderPreview(); });
+      }
+    } else if (s === 4) {
+      if (L.mode === "instant") { b.innerHTML = '<h2>Sign the launch</h2><p class="muted">One signature creates your coin and its pool. You are the coin\'s creator on every terminal.</p><div class="verdict caution"><b>No creator buy</b><span class="note">If you buy in the first second, you pay the 99% sniper tax like anyone else.</span></div>'; }
+      else {
+        b.innerHTML = '<h2>Sign your open in advance</h2><p class="muted">Your wallet signs the coin\'s creation now, once for each possible pot size (in SOL below). At the open, the Greenflag keeper sends the one the pot covers, and the others stop working. You can be offline at the open, and your wallet is what terminals show as the dev.</p>' +
+          '<div class="ladder" id="ladder">' + rungs.map(function (r, i) { return '<div class="rung' + (i < L.signed ? " signed" : "") + '">' + fmt(r) + "</div>"; }).join("") + "</div>" +
+          '<div class="row"><button class="btn go" type="button" id="signLadder"' + (L.signed === rungs.length ? " disabled" : "") + ">" + (L.signed === rungs.length ? "Signed 64 of 64" : "Sign 64 transactions in one approval") + '</button><span class="note">Each rung is 5% below the one above, so at most 5% of an undersubscribed pot goes unspent and is refunded.</span></div>' +
+          '<p class="note">Wallet cannot sign a batch? <a href="#launch">Sign at the open instead</a>: you will need to be online at the start time.</p>' +
+          '<p class="note">If the open does not happen within 15 minutes of its time, depositors can withdraw on chain by themselves.</p>';
+        var sl = $("#signLadder");
+        if (sl) sl.addEventListener("click", function () {
+          sl.disabled = true; sl.textContent = "Waiting for your wallet…";
+          var iv = setInterval(function () { L.signed++; var r = $$(".rung")[L.signed - 1]; if (r) r.classList.add("signed"); if (L.signed >= rungs.length) { clearInterval(iv); sl.textContent = "Signed 64 of 64"; $("#stepNext").disabled = false; } }, 30);
+        });
+      }
+    } else {
+      b.innerHTML = '<h2>' + (L.mode === "fair" ? "Scheduled" : "Launched") + "</h2>" + (L.mode === "fair" ?
+        '<p class="muted">Your Fair Open is on the launch calendar now, sealed. Deposits open at the time you set and close 10 minutes later.</p><div class="row"><a class="btn" href="#discover">See it on the calendar</a><a class="btn ghost" href="#creator">Your Creator record</a></div>' :
+        '<p class="muted">Your coin is trading. The sniper tax runs for the first minute.</p><a class="btn" href="#coin">Open the coin page</a>');
+    }
+    $("#stepBack").disabled = s === 0;
+    $("#stepNext").hidden = s === 5;
+    $("#stepNext").textContent = s === 4 ? (L.mode === "fair" ? "Schedule" : "Launch") : "Continue";
+    $("#stepNext").disabled = !canNext();
+    renderPreview();
+  }
+  function renderPreview() {
+    var v = vamp(L.ticker, L.name), whenTxt = L.when ? L.when.replace("T", " ") : "pick a time";
+    $("#launchPreview").innerHTML = L.mode === "fair" ?
+      '<div class="stack" style="gap:8px"><span class="eyebrow">Launch calendar entry</span><div class="panel pad stack" style="gap:8px;background:var(--panel-2)"><div class="spread"><span class="mono note">' + whenTxt + '</span><span class="chip neutral">10 min</span></div><div class="row"><span class="sealed" aria-hidden="true">?</span><span class="teaser">"' + (L.teaser || "No teaser") + '"</span></div>' +
+      '<div class="note"><span class="handle">@lumen_lab</span> · first launch</div><div class="row">' + chip("neutral", "Pot up to 17 SOL") + chip("neutral", L.minRaise ? "Min raise " + L.minRaise + " SOL" : "No minimum") + "</div></div>" +
+      '<span class="eyebrow">Public fingerprint</span><span class="hash">' + (L.hash || "appears when you enter the coin") + '</span><span class="note">Name and ticker stay private: only Greenflag\'s copycat check sees them before the open.</span></div>' :
+      '<div class="stack" style="gap:8px"><span class="eyebrow">Coin card at launch</span><div class="panel pad row" style="background:var(--panel-2)"><span class="avatar" style="background:linear-gradient(135deg,#d7b43a,#4b3a8a)">LU</span><div><b>$' + (L.ticker || "?") + '</b><div class="note">' + (L.name || "") + "</div></div>" + (v.k === "caution" ? chip("caution", "looks like", true) : "") + '</div><span class="note">Instant launch: visible and trading the moment it is created. No Creator lock, because there is no creator buy.</span></div>';
+  }
+  $("#stepNext").addEventListener("click", function () { if (canNext() && L.step < 5) { L.step++; renderStep(); } });
+  $("#stepBack").addEventListener("click", function () { if (L.step > 0) { L.step--; renderStep(); } });
+
+  /* creator */
+  var creatorView = "good";
+  var pubDeadline = 72 * 3600;
+  function barredView() {
+    return '<div class="verdict stop"><b style="font-size:1.15rem">Barred: confirmed creator bundle in $BABYWIF, 21 Oct 2026</b><span class="note">Published 24 Oct 2026. This X account, its Creator wallet and its World ID cannot launch on Greenflag again. First appeal: finding upheld on 26 Oct. A second appeal is open until 23 Nov 2026, only with new evidence.</span></div>' +
+      '<div class="coinhead"><span class="avatar" style="background:linear-gradient(135deg,#8a4b3c,#3c2e5f)">HD</span><div><h1>@hatdrop</h1><div class="row note"><span class="chip stop flag">barred from launching</span><span>Creator wallet <span class="mono">5hDw…t0Pz</span></span><span>no World ID</span></div></div></div>' +
+      '<div class="panel facts"><div><span class="eyebrow">Launches</span><b>2</b><span class="note">2 Instant</span></div><div><span class="eyebrow">Graduated</span><b>0</b><span class="note">of 2</span></div>' +
+      '<div><span class="eyebrow">Bundle Radar</span><b style="color:var(--stop)">1</b><span class="note">confirmed creator bundle</span></div><div><span class="eyebrow">Went quiet</span><b>1</b><span class="note">$HATSY, no trades 30 days</span></div></div>' +
+      evidencePack(true) +
+      '<div class="grid2"><div class="panel pad stack"><h3>Appeal history</h3><ol class="steps">' +
+      '<li><div><b>21 Oct: finding confirmed.</b> <span class="muted">The evidence pack was sent privately to @hatdrop.</span></div></li>' +
+      '<li><div><b>22 Oct: reply received.</b> <span class="muted">Published with the finding on 24 Oct, 72 hours after the notice.</span></div></li>' +
+      '<li><div><b>25 Oct: first appeal filed.</b> <span class="muted">"Those wallets belong to friends." Upheld on 26 Oct: the funding came from the Creator wallet itself.</span></div></li>' +
+      '<li><div><b>Until 23 Nov: second appeal possible.</b> <span class="muted">Only with evidence that was not in the first appeal.</span></div></li></ol></div>' +
+      '<form class="panel pad stack" id="appealForm" novalidate><div class="spread"><h3>File an appeal</h3><span class="chip neutral">first appeal used</span></div>' +
+      '<p class="note">Shown as @hatdrop would see it when signed in. One appeal within 30 days of publication; a second only with new evidence.</p>' +
+      '<div class="field"><label for="apReason">What the finding gets wrong</label><textarea class="input" id="apReason" rows="3"></textarea></div>' +
+      '<div class="field"><label for="apEvidence">New evidence (required for a second appeal)</label><input class="input" id="apEvidence" placeholder="Links to transactions or documents not in your first appeal"></div>' +
+      '<button class="btn go" type="submit" id="apBtn">File second appeal</button><div class="note" id="apMsg"></div></form></div>';
+  }
+  function privateView() {
+    return '<div class="verdict caution"><b style="font-size:1.15rem">Only you can see this. <span class="mono" id="pubCount">72:00:00</span> before this is published.</b><span class="note">Demo: what @hatdrop saw on 21 Oct 2026, before the finding was published.</span></div>' +
+      '<div class="panel pad stack"><h2>A creator bundle finding against you was confirmed</h2><p class="muted" style="max-width:72ch">In $BABYWIF, 6 wallets funded by your Creator wallet bought 31% of supply in the creation slot, in the same Jito bundle as the coin\'s creation. When this is published, your X account @hatdrop, your Creator wallet and your World ID will be barred from launching on Greenflag.</p></div>' +
+      evidencePack(false) +
+      '<form class="panel pad stack" id="replyForm" novalidate><h3>Your reply</h3><div class="field"><label for="replyBox">Published next to the finding, word for word</label><textarea class="input" id="replyBox" rows="4" maxlength="1000"></textarea></div>' +
+      '<div class="row"><button class="btn go" type="submit" id="replyBtn">Send reply</button><span class="note" id="replyMsg"></span></div>' +
+      '<p class="note">After publication you can appeal once within 30 days. A second appeal is possible only with new evidence.</p></form>';
+  }
+  function hms(sec) { sec = Math.max(0, Math.floor(sec)); var h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), x = sec % 60; return String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0") + ":" + String(x).padStart(2, "0"); }
+  function renderCreator() {
+    $$("[data-cview]").forEach(function (x) { x.setAttribute("aria-pressed", x.dataset.cview === creatorView ? "true" : "false"); });
+    var alt = $("#creatorAlt");
+    $("#creatorGood").hidden = creatorView !== "good";
+    alt.hidden = creatorView === "good";
+    if (creatorView === "barred") {
+      alt.innerHTML = barredView();
+      $("#appealForm").addEventListener("submit", function (e) {
+        e.preventDefault();
+        var ev = $("#apEvidence").value.trim(), m = $("#apMsg");
+        if (!ev) { m.innerHTML = '<span style="color:var(--stop)">A second appeal needs new evidence. Add at least one link that was not in your first appeal.</span>'; return; }
+        $("#apBtn").disabled = true; m.textContent = "Second appeal filed on 27 Oct. It shows on this record until it is decided.";
+      });
+    } else if (creatorView === "private") {
+      alt.innerHTML = privateView();
+      $("#replyForm").addEventListener("submit", function (e) {
+        e.preventDefault();
+        if (!$("#replyBox").value.trim()) { $("#replyMsg").textContent = "Write a reply first, or leave it empty to publish the finding without one."; return; }
+        $("#replyBtn").disabled = true; $("#replyMsg").textContent = "Reply saved. It will be published next to the finding.";
+      });
+      tickCreator();
+    }
+  }
+  function tickCreator() { var c = $("#pubCount"); if (c) c.textContent = hms(pubDeadline - secsSince()); }
+  $$("[data-cview]").forEach(function (b) { b.addEventListener("click", function () { creatorView = b.dataset.cview; renderCreator(); }); });
+  document.addEventListener("click", function (e) {
+    var a = e.target.closest && e.target.closest("[data-cv]");
+    if (a) { creatorView = a.dataset.cv; renderCreator(); }
+  });
+  $("#claimBtn").addEventListener("click", function () { this.disabled = true; this.textContent = "Claimed 4.60 SOL"; $("#claimMsg").textContent = "Claimed from both in one transaction. Sent to your Creator wallet."; });
+
+  /* boot */
+  applyName(); renderDiscover(); renderFO(); renderStep();
+  show(location.hash.slice(1));
+  setInterval(function () {
+    if ($("#s-discover").classList.contains("on")) tickDiscover();
+    if ($("#s-fairopen").classList.contains("on")) tickFO();
+    if ($("#s-coin").classList.contains("on")) { tickCoin(); maybeTrade(); }
+    if ($("#s-creator").classList.contains("on")) tickCreator();
+  }, 500);
+  tickDiscover();
+})();
+</script>
