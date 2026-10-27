@@ -545,7 +545,7 @@ Sources: [Stack](https://github.com/imDev2023/top-pad/issues/17), [Backend desig
 | API | Hono with a zod contract |
 | Data | Drizzle on Supabase Postgres through Hyperdrive; pgvector for image signatures |
 | Jobs | Cloudflare Workflows; Durable Objects for live rooms and alarms |
-| Containers | Cloudflare Containers for the LaserStream consumer and the vision service only |
+| Containers | Cloudflare Containers for the vision service, and for the LaserStream consumer once the paid Helius plan is in place |
 | Chain clients | Kit everywhere we own, generated with Codama; `@solana/web3.js` v1 only inside `packages/meteora` for the DBC and DAMM v2 SDKs' curve and quote maths, behind a narrow interface, with parity tests against real devnet swaps |
 | Meteora adapter | DBC and DAMM v2 only; no DLMM, no Alpha Vault |
 | Programs | Anchor 1.2.1 |
@@ -556,8 +556,11 @@ Sources: [Stack](https://github.com/imDev2023/top-pad/issues/17), [Backend desig
 
 ### 10.2 Components and data flow
 
-- **Indexer**: a Helius LaserStream (Yellowstone gRPC) consumer in a small Cloudflare Container, on devnet as on mainnet, decoding Meteora and our programs' events itself; it checkpoints its last slot and replays after a restart.
-  A reconciliation job re-reads history with `getTransactionsForAddress` (which also returns each transaction's position in its block).
+- **Indexer**: one ingestion entry point behind a narrow source interface, decoding Meteora's and our programs' events itself, with two sources **(owner, 2026-10-27)**:
+  - **during the devnet build, free-tier RPC**: standard WebSocket `logsSubscribe` on the DBC, DAMM v2 and our programs' ids, `getBlock` for each transaction's position in its block, and reconciliation from `getSignaturesForAddress` plus `getTransaction`;
+  - **when getting ready to launch, a Helius LaserStream (Yellowstone gRPC) stream** in a small Cloudflare Container, which checkpoints its last slot and replays after a restart, with reconciliation through `getTransactionsForAddress` (which also returns each transaction's position in its block).
+
+  Switching sources changes only the entry point, never the decoding or the tables.
   The browser's fast path reports a confirmed trade so it shows at once.
   No webhooks: they carry no in-block position, can lose an event after 3 failed retries, and take minutes to watch a new address.
 - **Live rooms**: one Durable Object per coin and one for the board, holding hibernatable WebSockets; the indexer publishes each decoded trade to its room; rooms batch every 100 ms; a reconnecting browser resyncs from its last slot through the API.
@@ -579,7 +582,7 @@ Sources: [Stack](https://github.com/imDev2023/top-pad/issues/17), [Backend desig
 - **Launch service**: X OAuth, Vamp Shield checks, the ticker reservation, Arweave data items, the nonce account, collecting the ladder's signatures, and co-signing Instant launches.
 - **Vision service**: PDQ (all 8 orientations) and SSCD on CPU in one Python Container behind a Durable Object, asleep when idle; signatures in Postgres (PDQ `bit(256)` with a Hamming HNSW index, SSCD `vector(512)` with a cosine HNSW index).
   The protected set refreshes from Jupiter's trending endpoints every minute, its verified and organic lists hourly, CoinGecko's top 1,000 daily, and our own coins as they cross the protection bar.
-- **Bundle Radar**: labels from the stream within seconds; one hour after each open a job builds the evidence pack (positions, Jito bundle membership on mainnet from Jito's public API, each linked buyer's direct transfers over the previous 7 days) and opens a case if it meets section 6.5's rules.
+- **Bundle Radar**: labels from the indexer within seconds; one hour after each open a job builds the evidence pack (positions, Jito bundle membership on mainnet from Jito's public API, each linked buyer's direct transfers over the previous 7 days) and opens a case if it meets section 6.5's rules.
 - **Operator app**: its own Worker behind Cloudflare Access (free for up to 50 users), never a route of the public site; every operator action writes an audit row through a database role that can only insert; the audit log is exported to R2 daily; evidence packs are stored with their case.
 - **Cohort tap**: gives each cohort member 1 devnet SOL once.
 
@@ -601,7 +604,8 @@ Sources: [Stack](https://github.com/imDev2023/top-pad/issues/17), [Backend desig
 
 ### 10.5 Providers
 
-- A dedicated Helius project on the Developer plan ($49 a month), its key in the project's own `.env`, not the owner's shared key file: LaserStream on devnet, `getTransactionsForAddress`, 10M credits, 50 requests and 5 sends per second; it also covers the Bundle Radar evaluation's mainnet reads.
+- **During the devnet build, free tiers only (owner, 2026-10-27)**: a devnet endpoint from the owner's Chainstack or QuickNode accounts for RPC, WebSockets and sending, with the shared Helius free key as a second (it sends 1 transaction per second and is rate-limited when agents run in parallel); devnet Fair Opens have tens of depositors, not hundreds, so pushes stay within these limits.
+- **When getting ready to launch**: a dedicated Helius project on the Developer plan ($49 a month) or higher, its key in the project's own `.env`, not the owner's shared key file: LaserStream, `getTransactionsForAddress`, 10M credits, 50 requests and 5 sends per second.
 - A second provider for sending and fallback reads: the owner's existing Chainstack or QuickNode endpoint.
 - Mainnet LaserStream needs Helius Business or Professional; that choice belongs to the mainnet effort.
 
@@ -642,6 +646,7 @@ All on devnet, against Meteora's deployed programs, with no Meteora binaries any
 
 About 60 SOL for the proof (about 6 to deploy two programs, about 26 for three graduations at 8.5 SOL, about 15 for simulation wallets, the rest margin) and about 130 for the cohort; most comes back by selling test coins.
 Every CLI airdrop was refused during the prototype, so the owner collects it (section 13).
+faucet.solana.com gives at most 10 SOL every 8 hours when signed in with GitHub (at most 30 SOL a day), so collection runs alongside the build: the first slices need only the deploys (about 6 SOL), the proof's 60 SOL is 2 to 3 days of requests, and the cohort's 130 accrues during the build, before slice 11 needs it.
 
 ### 11.5 The Bundle Radar evaluation
 
@@ -650,7 +655,7 @@ Every CLI airdrop was refused during the prototype, so the owner collects it (se
 - Creator wallets are in block 0 of about 1 in 5 launches, so about 400 bundled launches.
 - A signal passes when the low end of its 95% Wilson interval reaches 99%: at least 400 flagged wallets with none wrong, or 1,000 with at most 3.
 - The Cryptstarter and Harmonized fleet (about 70 wallets across five launches, funded through exchanges and hop wallets) is the second case, covering what Jito cannot see.
-- Built with Helius and Jito's API; no paid Bitquery archive.
+- Built with standard RPC reads on free tiers and Jito's public API; no paid Bitquery archive.
 
 ## 12. Parameters
 
@@ -701,8 +706,8 @@ Every CLI airdrop was refused during the prototype, so the owner collects it (se
 
 ## 13. Prerequisites and owner tasks
 
-1. **Devnet SOL**: about 190 (about 60 for the proof, about 130 for the cohort), collected by the owner through the Solana Foundation faucet signed in with GitHub and QuickNode's faucet (one drip per 12 hours), into `3hTTgfj2YqqYJeEgSF49U8ZyZwyHnwPhF9LRsXy4fMY8`; starting now, so the first deploy is not waiting.
-2. **A Helius Developer plan** ($49 a month) in a Greenflag project, its key in the project's `.env`.
+1. **Devnet SOL**: about 190 (about 60 for the proof, about 130 for the cohort), collected by the owner through the Solana Foundation faucet signed in with GitHub (at most 10 SOL every 8 hours) and QuickNode's faucet (one drip per 12 hours), into `3hTTgfj2YqqYJeEgSF49U8ZyZwyHnwPhF9LRsXy4fMY8`; started now and continued through the build, since at the faucet's limit 190 SOL takes at least a week (section 11.4).
+2. **A Helius Developer plan** ($49 a month or higher) in a Greenflag project, its key in the project's `.env`: not needed for the devnet build, which runs on free tiers; bought when getting ready to launch (section 10.5).
 3. **Meteora's written answer** ([Ask Meteora in writing](https://github.com/imDev2023/top-pad/issues/26), Discord ticket `devlaunch-6428`): commercial use, our program acting for creators, and testing with their binaries.
    It gates mainnet, not this devnet build; if Meteora says no to our program acting for depositors, [ADR 0002](adr/0002-fair-open-on-dbc-with-our-own-deposit-program.md) is reopened.
 4. **The Jupiter message** ([Ask Jupiter how it labels a launchpad's Fair Open pot buy](https://github.com/imDev2023/top-pad/issues/32)), drafted in that ticket, for the owner to send: how Jupiter labels the keeper's pot buy, the pushes out of the pot, and a Verified depositor holding about 4.3% of supply.
@@ -714,7 +719,7 @@ Thin end-to-end slices, in dependency order, each ending in something demonstrab
 
 1. **Skeleton and configs**: the monorepo, CI, Codama clients for DBC, DAMM v2 and Jupiter Lock, the copied Stoker modules; both DBC configs created on devnet with the section 3 values, `create_config` accepting the curve integers.
    Demo: two config accounts on devnet with the right parameters.
-2. **Instant launch and trading**: the fee program's `register_coin`; the launch service (X OAuth, Vamp Shield's text rules, the launch key co-signing); the LaserStream indexer, trades and candles; the coin page with the tax band, chart, trades and quick buy through server-built direct swaps.
+2. **Instant launch and trading**: the fee program's `register_coin`; the launch service (X OAuth, Vamp Shield's text rules, the launch key co-signing); the indexer on free-tier WebSockets, trades and candles; the coin page with the tax band, chart, trades and quick buy through server-built direct swaps.
    Demo: launch a coin, watch the 99% to 1.25% tax on real devnet trades.
 3. **Fee claims**: `claim_window_fees` at 60 s, `claim_fees` 50/50 to the creator role holder, `claim_surplus`; the creator page's one-transaction claim.
    Demo: the window's fees reach the treasury, later fees split 50/50.
@@ -733,6 +738,8 @@ Thin end-to-end slices, in dependency order, each ending in something demonstrab
 10. **Proof**: the four simulations and the integration test suite; the Bundle Radar evaluation on mainnet data; the cohort tap.
     Demo: the acceptance run in section 11.
 11. **Cohort**: two weeks, then the default-mode decision by section 11.3's rule.
+
+When getting ready to launch, outside these slices: buy the Helius plan and switch the indexer's source to LaserStream in a Container (section 10.2).
 
 ## 15. Out of scope
 
@@ -756,6 +763,7 @@ Unproven, and proved by section 11's tests:
 - How precisely a Workflow wakes (if the open lands more than 2 s late, it moves to a Durable Object alarm).
 - The exact curve and fee-scheduler integers being accepted by `create_config`, and the graduated pool's market-cap step encoding.
 - Whether Codama's output for Meteora's IDLs is clean (fallback: the SDK's own client inside the adapter).
+- The LaserStream Container source, untested until the paid Helius plan is bought; the devnet build tests the WebSocket source instead.
 
 Risks that devnet cannot settle:
 - **Meteora's terms**: users must act only for their own account; the pot buys for its depositors; the answer gates mainnet and could reopen [ADR 0002](adr/0002-fair-open-on-dbc-with-our-own-deposit-program.md).
