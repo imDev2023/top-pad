@@ -15,6 +15,18 @@ _Avoid_: launch type, launch style
 The launch mode that begins with a deposit window in which every depositor gets the coin at the same price, before public trading starts.
 _Avoid_: presale, IDO, whitelist sale
 
+**Pot**:
+Everything deposited in a Fair Open, which buys the coin for all its depositors at one price at the open.
+_Avoid_: vault (that is Meteora's Alpha Vault), presale pool, treasury
+
+**Open**:
+The moment a Fair Open's deposit window ends and its coin is created and starts trading, with the pot's buy first.
+_Avoid_: launch (that is the whole process), TGE, go-live
+
+**Depositor tier**:
+How much one person may put into a Fair Open, set by how strongly they have shown they are one person: Verified, Scored or Unverified.
+_Avoid_: whitelist level, allocation tier
+
 **Instant launch**:
 The launch mode in which a coin is open to public trading from the moment it is created, with no deposit window.
 _Avoid_: pump launch, standard launch, curve launch
@@ -28,10 +40,6 @@ _Avoid_: migration (that is Meteora's mechanism), bonding, completion
 The amount of quote asset a coin's curve must raise to graduate, fixed once at launch.
 _Avoid_: bonding target, market cap target
 
-**Creator lock**:
-The cap on the creator's own buy of their coin, together with its gradual release over time.
-_Avoid_: dev lock, team vesting
-
 **Quote asset**:
 The token a coin is priced in and bought with, such as SOL, USDC or a stock token.
 _Avoid_: pair token, base token (the base token is the coin itself)
@@ -44,11 +52,34 @@ _Avoid_: stock coin, xStock launch (Top-pad never issues stock tokens)
 Meteora's per-token approval that lets a token with special Token-2022 features be used in one of its pool programs.
 _Avoid_: whitelist, listing
 
+### Creators
+
+**Creator**:
+The person behind a launch, known by their Creator record.
+_Avoid_: dev, deployer (terminals' words for the Creator wallet); Stoker's "Creator" means the wallet, which here is the Creator wallet
+
+**Creator wallet**:
+The one wallet that signs a Creator's launches and that terminals show as the coin's dev; it changes only by a recorded handover.
+_Avoid_: dev wallet, deployer
+
+**Creator record**:
+The public history of a Creator's launches on Top-pad, tied to their X account and built only from facts anyone can check.
+_Avoid_: reputation score, trust score (it has no score), creator profile
+
+**Creator lock**:
+The lock on the Creator's share of their coin's Fair Open pot: nothing is released for a week after the open, then it releases steadily until all of it is free 30 days after the open.
+Only a Fair Open has one, because an Instant launch has no creator buy.
+_Avoid_: dev lock, team vesting
+
 ### Launch abuse
 
 **Vamp**:
 A copycat token launched with a trending coin's name, ticker or image to pull buyers away from the original.
 _Avoid_: clone, fake, vampire attack (that is a different thing: luring away a protocol's liquidity)
+
+**Protected coin**:
+A coin that a vamp may not imitate on Top-pad, because it has earned real traction; its protection lapses when the traction does.
+_Avoid_: reserved ticker, registered name (nobody reserves a name by launching first)
 
 **Sniper**:
 A bot that buys in the first seconds or slots after trading opens, to sell into the buyers who arrive after it.
