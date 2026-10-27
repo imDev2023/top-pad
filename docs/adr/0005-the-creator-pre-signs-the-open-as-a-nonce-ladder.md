@@ -8,7 +8,8 @@ The devnet proof is in [Fair Open creation transaction on devnet](https://github
 
 - **A durable-nonce ladder signed at scheduling (chosen).**
   On devnet a rung was sent 47 s after signing with the creator offline, and resending a second rung failed.
-  The cost: the creator signs several transactions in one go, the pot's buy is rounded down to the nearest rung (the rest is refunded), and a creator can spoil the open by advancing the nonce, which our program's 15-minute on-chain withdrawal covers.
+  The cost: the creator signs several transactions in one go, and the pot's buy is rounded down to the nearest rung (the rest is refunded).
+  Our keeper holds the nonce and our server generates the coin's mint key, so the creator cannot spoil a signed ladder; only a keeper failure can stop the open, which our program's 15-minute on-chain withdrawal covers (amended 2026-10-27 by [Our Fair Open program](https://github.com/imDev2023/top-pad/issues/28)).
 - **The creator signs at the open.**
   One signature and the exact amount, but the creator must be online at that moment; kept as the fallback for wallets that cannot sign the ladder.
 - **Our keeper creates the coin and hands the creator role over in the same transaction** (`transfer_pool_creator`).
@@ -19,5 +20,5 @@ The devnet proof is in [Fair Open creation transaction on devnet](https://github
 ## Consequences
 
 - Our program's `open` instruction checks the time, so no rung can open early, and checks the exact shape of the transaction by introspection, so a rung can do nothing but the open it was signed for.
-- Every Fair Open needs its own durable nonce account, and every open uses one shared address lookup table: the transaction is 979 bytes with it and 1,193 without, against a 1,232-byte limit.
-- The rung spacing sets how much of a pot can go unspent; the spec fixes it.
+- Every Fair Open needs its own durable nonce account, held by our keeper, and every open uses one shared address lookup table: the transaction is 979 bytes with it and 1,193 without, against a 1,232-byte limit.
+- Rungs fall in 5% steps from the pot's cap, at most 64, so an undersubscribed pot has at most 5% left unfilled and refunded; the program checks that the keeper sent the largest rung the pot covers.

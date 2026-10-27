@@ -93,6 +93,10 @@ _Avoid_: block-0 snipe, same-block buy
 A creator who secretly buys a large share of a coin's supply across many wallets at launch, in order to dump it later.
 _Avoid_: insider, dev wallet (a single disclosed creator wallet is not a bundler)
 
+**Bar**:
+A permanent stop on a Creator launching on Top-pad, imposed after a confirmed finding that they bundled their own launch; it can be lifted only on appeal and touches nothing already launched.
+_Avoid_: ban (too broad: a barred Creator may still trade and deposit), blacklist, suspension
+
 ### Fees
 
 **Sniper tax**:
