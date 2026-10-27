@@ -108,7 +108,7 @@ A sealed entry: a "?" tile, the time, the creator and their record summary, the 
 
   | Depositor tier | Proof | Cap per Fair Open |
   | - | - | - |
-  | Verified | World ID Orb, KYC or Civic Uniqueness | 2 SOL |
+  | Verified | World ID Orb or Civic Uniqueness (no KYC; owner, 2026-10-27) | 2 SOL |
   | Scored | a wallet-history attestation (such as Trusta) or a linked X account | 0.5 SOL |
   | Unverified | none | 0.1 SOL, and all Unverified deposits together buy at most 25% of what the pot spends |
 
@@ -578,7 +578,7 @@ Sources: [Stack](https://github.com/imDev2023/top-pad/issues/17), [Backend desig
   Graduation is its own Workflow, started when the indexer sees a curve complete.
   Every step is safe to repeat on chain.
   If the build measures the open landing more than 2 s late, the open alone moves to a Durable Object alarm.
-- **Admission server**: verifies personhood once (World ID server-side, KYC, Civic Uniqueness, Trusta-style attestations, X), runs the linkage pipeline, and signs each deposit's admission.
+- **Admission server**: verifies personhood once (World ID server-side, Civic Uniqueness, Trusta-style attestations, X; no KYC), runs the linkage pipeline, and signs each deposit's admission.
 - **Launch service**: X OAuth, Vamp Shield checks, the ticker reservation, Arweave data items, the nonce account, collecting the ladder's signatures, and co-signing Instant launches.
 - **Vision service**: PDQ (all 8 orientations) and SSCD on CPU in one Python Container behind a Durable Object, asleep when idle; signatures in Postgres (PDQ `bit(256)` with a Hamming HNSW index, SSCD `vector(512)` with a cosine HNSW index).
   The protected set refreshes from Jupiter's trending endpoints every minute, its verified and organic lists hourly, CoinGecko's top 1,000 daily, and our own coins as they cross the protection bar.
@@ -723,23 +723,28 @@ Thin end-to-end slices, in dependency order, each ending in something demonstrab
    Demo: two config accounts on devnet with the right parameters.
 2. **Instant launch and trading**: the fee program's `register_coin`; the launch service (X OAuth, Vamp Shield's text rules, the launch key co-signing); the indexer on free-tier WebSockets, trades and candles; the coin page with the tax band, chart, trades and quick buy through server-built direct swaps.
    Demo: launch a coin, watch the 99% to 1.25% tax on real devnet trades.
-3. **Fee claims**: `claim_window_fees` at 60 s, `claim_fees` 50/50 to the creator role holder, `claim_surplus`; the creator page's one-transaction claim.
+3. **Fee claims**: `claim_window_fees` at 60 s, `claim_fees` 50/50 to the creator role holder; the creator page's one-transaction claim.
    Demo: the window's fees reach the treasury, later fees split 50/50.
-4. **Fair Open core**: the Fair Open program (`create_launch`, `deposit` with the admission co-signature and seats, `withdraw`, `open` with the rung check, `settle`, `push`, `mark_failed`, `withdraw_failed`); the nonce ladder; the keeper Workflow; the Fair Open page.
+4. **Fair Open core**: the Fair Open program (`create_launch`, `deposit` with the admission co-signature and seats, `withdraw`, `open` with the rung check, `settle`, `push`, `mark_failed`, `withdraw_failed`); the nonce ladder; the keeper Workflow; the Fair Open page; the ticker reservation; the admission server's one-time verification and the linkage pipeline (section 6.3).
    Demo: a full Fair Open from scheduling to coins in depositors' wallets, and a failed one refunded on chain.
 5. **Creator lock and Tax Share**: `lock_creator` into Jupiter Lock, `push_tax_share`, closed seats; sealing with Arweave data items and the identity hash.
    Demo: the creator's escrow on chain with the right cliff; depositors receive their Tax Share.
-6. **Graduation**: the graduation Workflow at 8.5 SOL, both LP halves locked, the graduated pool's fee schedule, `claim_lp_fees`, the creator's LP fee claim.
+6. **Graduation**: the graduation Workflow at 8.5 SOL, both LP halves locked, the graduated pool's fee schedule, `claim_surplus`, `claim_lp_fees`, `burn_leftover`, the creator's LP fee claim.
    Demo: a coin graduates and trades on DAMM v2.
-7. **Anti-abuse**: the vision Container and the protected-set refresh; Vamp Shield's image rules and the ticker reservation; Bundle Radar labels; the case job; the operator app; Bars, the 72-hour private window and appeals.
+7. **Anti-abuse**: the vision Container and the protected-set refresh; Vamp Shield's image rules; Bundle Radar labels; the case job; the operator app; Bars, the 72-hour private window and appeals.
    Demo: the bundler simulation end to end.
 8. **Creators and discovery**: the Creator record, Creator wallet handover and rotation, the World ID mark, role-transfer tracking; the board, trending with the known-bot list, featured slots, the calendar.
    Demo: the board ranks a test cohort's coins.
-9. **Fairness and enforcement pages**: the Fairness card and its X image, "How this is enforced", the P&L share card, phone layouts.
+9. **Fairness and enforcement pages**: the Fairness card and its X image, "How this is enforced", the P&L share card, a review of every screen on phones and desktops in both themes.
    Demo: the screens in section 9 on real devnet data.
 10. **Proof**: the four simulations and the integration test suite; the Bundle Radar evaluation on mainnet data; the cohort tap.
     Demo: the acceptance run in section 11.
 11. **Cohort**: two weeks, then the default-mode decision by section 11.3's rule.
+
+Every screen ships its phone layout and both themes in the slice that builds it **(owner, 2026-10-27)**.
+
+The build tickets (2026-10-27): [#39](https://github.com/imDev2023/top-pad/issues/39) to [#64](https://github.com/imDev2023/top-pad/issues/64), sub-issues of the map labelled `build`, wired with native blocking edges in this order; each names the spec sections it implements and its devnet demo.
+The open `build` tickets with no open blocker are the build's frontier.
 
 When getting ready to launch, outside these slices: buy the Helius plan and switch the indexer's source to LaserStream in a Container (section 10.2).
 

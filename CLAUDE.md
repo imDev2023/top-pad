@@ -7,6 +7,7 @@ The owner's original brief is `resources.md`; the project's terms are in `GLOSSA
 Planning is finished: the build starts from **`docs/spec.md`**, the one build-ready spec (decisions in `docs/adr/0001` to `0006`).
 The wayfinder map (GitHub issue #1, label `wayfinder:map`) indexes every decision and its `## Next` section names the next unit of work.
 Start any session by reading that section: `gh issue view 1 --repo imDev2023/top-pad`.
+The build runs as tickets labelled `build` (#39 to #64), sub-issues of the map wired with native blocking edges; the open ones with no open blocker are the frontier.
 Greenflag stays a separate product from Stoker; merging is revisited only after the devnet cohort ([ADR 0001](docs/adr/0001-separate-product-from-stoker.md)).
 
 For anything about Jupiter or Meteora, read the owner's canonical knowledge base first, not this repo and not the web: `/Volumes/Farhan/Work Folder/Dev/AI/Research-Projects/jupiter-meteora` locally, or https://github.com/imDev2023/jupiter-meteora-resources in the cloud.
