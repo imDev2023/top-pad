@@ -2,7 +2,7 @@
 
 A fair-launch token launchpad on Solana, built on Meteora's pools.
 The owner's original brief is `resources.md`; the project's terms are in `GLOSSARY.md`.
-"Top-pad" is only the folder's working name: the owner will pick the real one later, in the screens ticket (#15), where the proposals are recorded.
+The product's name is **Greenflag** (owner, 2026-10-27, in the screens ticket #15); "Top-pad" stays only as the repo's and folder's working name.
 
 The work is being planned as a wayfinder map: one GitHub issue labelled `wayfinder:map`, with its tickets as sub-issues.
 Start any session by reading that map issue (`gh issue list --label wayfinder:map`).
