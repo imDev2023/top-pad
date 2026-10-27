@@ -347,7 +347,7 @@ footer { margin-top: 28px; font-size: .75rem; color: var(--faint); }
           </div>
         </div>
         <p class="teaser">"A pigeon that only flies on green."</p>
-        <div class="note">Name, ticker and image are revealed at the open. The creator committed to them in advance: <span class="hash" title="SHA-256 of name, ticker and image">c41f 9a07 2be3 55d0 81aa 6f3c 0e92 7d14</span>. The coin created at the open must match this hash, or the open fails and everyone is refunded.</div>
+        <div class="note">Name, ticker and image are revealed at the open. The creator committed to them in advance: <span class="hash" title="SHA-256 of the name, ticker and metadata URI, which fixes the image too">c41f 9a07 2be3 55d0 81aa 6f3c 0e92 7d14</span>. The coin created at the open must match this hash, or the open fails and everyone is refunded.</div>
       </div>
 
       <div class="grid3">
@@ -378,7 +378,7 @@ footer { margin-top: 28px; font-size: .75rem; color: var(--faint); }
         <div class="spread note">
           <span>0</span>
           <span>Unverified share: <span class="mono" id="unvUsed">2.10</span> of <span class="mono">4.25 SOL</span> (25% of the pot)</span>
-          <span class="mono">17 SOL cap <span class="placeholder" title="20% of the Graduation Target. The target itself is decided in the Curve and Graduation Target ticket; 85 SOL is a placeholder.">20% of 85 SOL</span></span>
+          <span class="mono">17 SOL cap · 20% of the 85 SOL Graduation Target</span>
         </div>
       </div>
 
@@ -424,7 +424,7 @@ footer { margin-top: 28px; font-size: .75rem; color: var(--faint); }
         <div class="spread"><span class="muted">Each person's share</span><span class="mono" id="estLevel">all filled</span></div>
         <div class="spread"><span class="muted">Your coins bought with</span><span class="mono" id="estFill">0.00 SOL</span></div>
         <div class="spread"><span class="muted">Your refund</span><span class="mono" id="estRefund">0.00 SOL</span></div>
-        <div class="spread"><span class="muted">Your token account rent</span><span class="mono">0.002 SOL</span></div>
+        <div class="spread"><span class="muted">Rent for your seat and coin account</span><span class="mono">0.0027 SOL, refundable</span></div>
         <p class="note">Worked example: a 15 SOL pot with 30 people asking 0.1 and 50 asking 0.5 to 2. The 30 get 0.1 each, the 50 get 0.24 each, the rest is refunded.</p>
       </div>
       <a class="btn" href="#coin" id="skipOpen">Demo: jump to the open</a>
@@ -521,7 +521,7 @@ footer { margin-top: 28px; font-size: .75rem; color: var(--faint); }
       <aside class="stack" style="gap:16px">
         <div class="panel pad stack">
           <h3>Creator Earnings</h3>
-          <div class="spread"><span class="muted">Curve fees, from the Greenflag program</span><span class="mono">3.42 SOL</span></div>
+          <div class="spread"><span class="muted">Curve fees, claimed from Meteora through the Greenflag fee program</span><span class="mono">3.42 SOL</span></div>
           <div class="spread"><span class="muted">Graduated pool fees, from Meteora</span><span class="mono">1.18 SOL</span></div>
           <button class="btn go" type="button" id="claimBtn">Claim both · 4.60 SOL</button>
           <p class="note" id="claimMsg">One transaction claims from both. You earn 0.50% of curve volume, then half the graduated pool's fees.</p>
@@ -826,7 +826,7 @@ footer { margin-top: 28px; font-size: .75rem; color: var(--faint); }
   }
   function gradBox() {
     var pct = coinState === "curve" ? 55 : 100;
-    return '<div class="panel pad stack" style="gap:8px"><div class="spread"><b>' + (pct === 100 ? "Graduated to a Meteora pool" : "To Graduation") + '</b><span class="mono note">' + (pct === 100 ? "85 / 85 SOL" : "46.8 / 85 SOL") + ' <span class="placeholder" title="The Graduation Target is decided in the Curve and Graduation Target ticket">target placeholder</span></span></div>' +
+    return '<div class="panel pad stack" style="gap:8px"><div class="spread"><b>' + (pct === 100 ? "Graduated to a Meteora pool" : "To Graduation") + '</b><span class="mono note">' + (pct === 100 ? "85 / 85 SOL" : "46.8 / 85 SOL") + '</span></div>' +
       '<div class="gradbar"><div class="track"><i style="width:' + pct + '%"></i></div><div class="checkered" title="Graduation"></div></div></div>';
   }
   function quickBuy() {
@@ -1025,7 +1025,7 @@ footer { margin-top: 28px; font-size: .75rem; color: var(--faint); }
         b.innerHTML = '<h2>Schedule the Fair Open</h2><div class="grid3" style="grid-template-columns:repeat(2,minmax(0,1fr))">' +
           '<div class="field"><label for="lWhen">Window opens (up to 7 days ahead)</label><input class="input" type="datetime-local" id="lWhen" min="' + iso(now) + '" max="' + iso(max) + '" value="' + L.when + '"></div>' +
           '<div class="field"><label for="lMin">Minimum raise, SOL (optional)</label><input class="input mono" id="lMin" inputmode="decimal" placeholder="none" value="' + L.minRaise + '"></div></div>' +
-          '<div class="row"><span class="chip neutral">Window: 10 minutes, fixed</span><span class="chip neutral">Pot buys up to 17 SOL</span><span class="chip neutral">Caps: 2 / 0.5 / 0.1 SOL by tier</span></div>' +
+          '<div class="row"><span class="chip neutral">Window: 10 minutes, fixed</span><span class="chip neutral">Pot buys up to 17 SOL</span><span class="chip neutral">Caps: 2 / 0.5 / 0.1 SOL by tier</span><span class="chip neutral">About 0.03 SOL of rent, refunded when the launch closes</span></div>' +
           '<div class="field"><label for="lTeaser">One-line teaser for the calendar</label><input class="input" id="lTeaser" maxlength="80" value="' + L.teaser.replace(/"/g, "&quot;") + '"><span class="note">Shown instead of the name, ticker and image until the open. <span class="placeholder" title="Free text or a fixed form is still open">free text for now</span></span></div>';
         $("#lWhen").addEventListener("input", function () { L.when = this.value; $("#stepNext").disabled = !canNext(); renderPreview(); });
         $("#lMin").addEventListener("input", function () { L.minRaise = this.value; renderPreview(); });
