@@ -708,8 +708,10 @@ faucet.solana.com gives at most 10 SOL every 8 hours when signed in with GitHub 
 
 1. **Devnet SOL**: about 190 (about 60 for the proof, about 130 for the cohort), collected by the owner through the Solana Foundation faucet signed in with GitHub (at most 10 SOL every 8 hours) and QuickNode's faucet (one drip per 12 hours), into `3hTTgfj2YqqYJeEgSF49U8ZyZwyHnwPhF9LRsXy4fMY8`; started now and continued through the build, since at the faucet's limit 190 SOL takes at least a week (section 11.4).
 2. **A Helius Developer plan** ($49 a month or higher) in a Greenflag project, its key in the project's `.env`: not needed for the devnet build, which runs on free tiers; bought when getting ready to launch (section 10.5).
-3. **Meteora's written answer** ([Ask Meteora in writing](https://github.com/imDev2023/top-pad/issues/26), Discord ticket `devlaunch-6428`): commercial use, our program acting for creators, and testing with their binaries.
-   It gates mainnet, not this devnet build; if Meteora says no to our program acting for depositors, [ADR 0002](adr/0002-fair-open-on-dbc-with-our-own-deposit-program.md) is reopened.
+3. **Meteora's follow-up** ([Ask Meteora in writing](https://github.com/imDev2023/top-pad/issues/26), Discord ticket `devlaunch-6428`).
+   Meteora's support answered on 2026-10-27: building on Meteora is permissionless and needs no approval, partner agreement or fee arrangement, as long as the product keeps to the Terms of Service and Privacy Policy, and a launchpad built on Meteora is not counted as competitive; licence files for the DLMM and Alpha Vault SDKs are being added.
+   Not yet answered, in a follow-up drafted on that ticket for the owner to send: whether our program may act for depositors (6.2(d)), whether Meteora's binaries may run in our tests, and whether the SDKs' IDLs may back CPI bindings.
+   None of it blocks this devnet build; a no on 6.2(d) would reopen [ADR 0002](adr/0002-fair-open-on-dbc-with-our-own-deposit-program.md).
 4. **The Jupiter message** ([Ask Jupiter how it labels a launchpad's Fair Open pot buy](https://github.com/imDev2023/top-pad/issues/32)), drafted in that ticket, for the owner to send: how Jupiter labels the keeper's pot buy, the pushes out of the pot, and a Verified depositor holding about 4.3% of supply.
 5. **The cohort**: recruiting about 30 creators and 100 traders from the owner's X following and memecoin Telegram groups.
 
@@ -766,7 +768,7 @@ Unproven, and proved by section 11's tests:
 - The LaserStream Container source, untested until the paid Helius plan is bought; the devnet build tests the WebSocket source instead.
 
 Risks that devnet cannot settle:
-- **Meteora's terms**: users must act only for their own account; the pot buys for its depositors; the answer gates mainnet and could reopen [ADR 0002](adr/0002-fair-open-on-dbc-with-our-own-deposit-program.md).
+- **Meteora's terms**: Meteora's support confirmed on 2026-10-27 that building on Meteora is permissionless and a launchpad is not competitive, but not yet that our program may act for depositors (6.2(d): users act only for their own account, and the pot buys for its depositors); a no would reopen [ADR 0002](adr/0002-fair-open-on-dbc-with-our-own-deposit-program.md).
 - **Terminals**: what terminals show as dev, whether Jupiter counts the pot's buy or the pushes as insiders, and how a 4.3% depositor holding reads; terminals do not index devnet.
 - **Demand**: no evidence yet shows anyone picking a launchpad for a deposit window, or depositing blind into a sealed coin; the cohort measures it weakly.
 - **Upgradeable dependencies**: Meteora can upgrade DBC and DAMM v2 (one shared upgrade authority, `JADaUV8kvDpDbJr55wxXJHVaBS3VCj8thZZHjfeuCVLd`), and Jupiter can upgrade the Lock program (`CvQZZ23qYDWF2RUpxYJ8y9K4skmuvYEEjH7fK58jtipQ`); Jupiter Lock's source repository now returns 404.

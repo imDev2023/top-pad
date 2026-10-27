@@ -14,7 +14,7 @@ For anything about Jupiter or Meteora, read the owner's canonical knowledge base
 - Research findings live on `research/<name>` branches, pushed and never merged, so `main` does not hold them; read one with `git show origin/research/<name>:research/<name>.md`.
 - An agent started with worktree isolation is refused any git or gh command its guard cannot prove stays in its own worktree: `cd` followed by git, loops, `source` or `.` of an env file, and even `git -C` on its own worktree path (likely the space in `Work Folder`).
   What works: one plain command per call, plain `git <cmd>` from the worktree itself, `git -C /private/tmp/claude-501/...` read-only commands on clones in the scratchpad (allowed in `~/.claude/settings.json`), and API keys through `direnv exec "<this folder>" <cmd>`.
-- Never download, dump or commit Meteora's program binaries: the licence research says that needs Meteora's written permission, which #26 has asked for.
+- Never download, dump or commit Meteora's program binaries: the licence research says that needs Meteora's written permission; Meteora's 2026-10-27 reply in #26 did not cover binaries, so the rule stands until a follow-up says otherwise.
 - Parallel agents share one free-tier Helius key and get rate-limited; stagger on-chain-heavy research.
 
 ## Agent skills
