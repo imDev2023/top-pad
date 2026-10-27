@@ -4,3 +4,23 @@
 .DS_Store
 node_modules/
 .claude/worktrees/
+
+# App workspace
+.wrangler/
+.next*/
+.open-next/
+dist/
+test-results/
+playwright-report/
+*.tsbuildinfo
+.dev.vars
+next-env.d.ts
+
+# Anchor and Rust build output; program keypairs never live in the repo (spec 10.3)
+target/
+.anchor/
+test-ledger/
+**/*-keypair.json
+
+# Meteora's program binaries are never committed (CLAUDE.md, Traps); our own builds land in target/ only
+*.so

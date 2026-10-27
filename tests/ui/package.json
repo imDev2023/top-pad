@@ -1,0 +1,13 @@
+{
+  "name": "@top-pad/tests-ui",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p ."
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "@solana/kit": "^8.5.0",
+    "@types/node": "^24.19.2"
+  }
+}

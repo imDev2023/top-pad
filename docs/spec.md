@@ -319,6 +319,7 @@ Sources: [Our Fair Open program](https://github.com/imDev2023/top-pad/issues/28)
 
 - Two programs: a small **fee program** and the **Fair Open program**.
 - Anchor 1.2.1; every deploy ships `security.txt` and an OtterSec verified build.
+- Built for SBPF v2, the newest version devnet and mainnet run: Anchor 1.2.1 defaults to v3, which neither has activated (checked 2026-10-27).
 - Every amount is in the quote's raw units and the quote mint is a parameter; nothing hard-codes SOL.
 - Kit clients are generated with Codama from the programs' IDLs.
 - Unit tests run in LiteSVM or Mollusk with our programs only; integration tests run against Meteora's programs deployed on devnet; no Meteora program binary is ever downloaded, dumped, committed or loaded in tests (Surfpool is out until Meteora answers in writing).
@@ -543,7 +544,7 @@ Sources: [Stack](https://github.com/imDev2023/top-pad/issues/17), [Backend desig
 | Repo | a new pnpm monorepo shaped like Stoker's |
 | Web | Next.js 16 on Cloudflare Workers through OpenNext, a pure client of our API |
 | API | Hono with a zod contract |
-| Data | Drizzle on Supabase Postgres through Hyperdrive; pgvector for image signatures |
+| Data | Drizzle on Postgres through Hyperdrive, on Neon for the devnet build **(owner, 2026-10-27)**; pgvector for image signatures |
 | Jobs | Cloudflare Workflows; Durable Objects for live rooms and alarms |
 | Containers | Cloudflare Containers for the vision service, and for the LaserStream consumer once the paid Helius plan is in place |
 | Chain clients | Kit everywhere we own, generated with Codama; `@solana/web3.js` v1 only inside `packages/meteora` for the DBC and DAMM v2 SDKs' curve and quote maths, behind a narrow interface, with parity tests against real devnet swaps |
@@ -596,11 +597,12 @@ Sources: [Stack](https://github.com/imDev2023/top-pad/issues/17), [Backend desig
 
 ### 10.4 Data
 
-- Supabase Postgres is the only system of record: launches, seats, coins, pools, trades, candles, transfers (the funding graph), the co-signed list mirror, creators (X account, Creator wallet history, World ID nullifier), admissions, protected coins and their signatures, the known-bot list, cases, appeals, bars, the audit log, job runs and indexer cursors.
+- Postgres is the only system of record: launches, seats, coins, pools, trades, candles, transfers (the funding graph), the co-signed list mirror, creators (X account, Creator wallet history, World ID nullifier), admissions, protected coins and their signatures, the known-bot list, cases, appeals, bars, the audit log, job runs and indexer cursors.
 - R2 holds blobs: an Arweave image cache, Fairness card images, evidence pack and audit exports.
 - KV holds only public caches (up to 60 s stale).
 - Durable Object storage holds only live-room state; D1 is not used.
-- One Supabase project for devnet; CI runs lint, typecheck, unit tests and `anchor build`.
+- One Neon project for devnet **(owner, 2026-10-27)**: Supabase's free plan allows two active projects and both are Stoker's; Convex was weighed and set aside, because the board's trending query, the funding graph, the candle rebuilds and the insert-only audit role are SQL.
+- CI runs lint, typecheck, unit tests and `anchor build`.
 
 ### 10.5 Providers
 
@@ -769,7 +771,8 @@ Unproven, and proved by section 11's tests:
 - Turbo serving an upload within 10 s.
 - How precisely a Workflow wakes (if the open lands more than 2 s late, it moves to a Durable Object alarm).
 - The exact curve and fee-scheduler integers being accepted by `create_config`, and the graduated pool's market-cap step encoding.
-- Whether Codama's output for Meteora's IDLs is clean (fallback: the SDK's own client inside the adapter).
+- Codama's output for Meteora's IDLs, settled in [#39](https://github.com/imDev2023/top-pad/issues/39) (2026-10-27): clean for DAMM v2 and Jupiter Lock; for DBC, two generic fixes applied to the IDL before generation (two fields with the same camelCase name, and a type embedding an account's struct), so no client falls back to the SDK.
+- Whether Neon's free plan (100 compute-hours a project a month) lasts a month of the always-on indexer and the 15 s trending query; if not, the devnet database moves to a paid plan.
 - The LaserStream Container source, untested until the paid Helius plan is bought; the devnet build tests the WebSocket source instead.
 
 Risks that devnet cannot settle:

@@ -1,0 +1,15 @@
+# Local development database: `docker compose up -d`. Devnet runs on Neon through Hyperdrive (spec 10.4).
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: top-pad-postgres
+    environment:
+      POSTGRES_USER: toppad
+      POSTGRES_PASSWORD: toppad
+      POSTGRES_DB: toppad
+    ports:
+      - "127.0.0.1:5452:5432"
+    volumes:
+      - top-pad-postgres:/var/lib/postgresql/data
+volumes:
+  top-pad-postgres:

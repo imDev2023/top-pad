@@ -1,0 +1,22 @@
+{
+  "name": "@top-pad/api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --port 8801",
+    "typecheck": "tsc -p .",
+    "test": "vitest run",
+    "types": "wrangler types --env-interface CloudflareBindings"
+  },
+  "dependencies": {
+    "@top-pad/contract": "workspace:*",
+    "@top-pad/db": "workspace:*",
+    "hono": "^4.13.14"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261027.1",
+    "@types/node": "^24.19.2",
+    "vitest": "^5.0.5",
+    "wrangler": "^4.154.0"
+  }
+}

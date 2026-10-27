@@ -1,0 +1,24 @@
+{
+  "name": "@top-pad/clients",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./dbc": "./src/generated/dbc/index.ts",
+    "./damm-v2": "./src/generated/damm-v2/index.ts",
+    "./jupiter-lock": "./src/generated/jupiter-lock/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "generate": "tsx scripts/generate.ts"
+  },
+  "dependencies": {
+    "@solana/kit": "^8.5.0"
+  },
+  "devDependencies": {
+    "@codama/nodes-from-anchor": "^1.5.6",
+    "@codama/renderers-js": "^2.8.0",
+    "@types/node": "^24.19.2",
+    "codama": "^1.11.0"
+  }
+}

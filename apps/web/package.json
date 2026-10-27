@@ -1,0 +1,25 @@
+{
+  "name": "@top-pad/web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev --port 3110",
+    "build": "next build",
+    "typecheck": "next typegen && tsc -p . --noEmit",
+    "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
+    "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy"
+  },
+  "dependencies": {
+    "@top-pad/contract": "workspace:*",
+    "next": "^16.4.3",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@opennextjs/cloudflare": "^1.20.13",
+    "@types/node": "^24.19.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "wrangler": "^4.154.0"
+  }
+}

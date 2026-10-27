@@ -1,0 +1,26 @@
+{
+  "name": "top-pad",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.0.8",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "typecheck": "pnpm -r typecheck",
+    "lint": "eslint .",
+    "test": "pnpm -r --filter !@top-pad/tests-devnet --if-present test",
+    "test:devnet": "pnpm --filter @top-pad/tests-devnet test",
+    "programs": "ANCHOR_BUILD_SBF_ARCH=v2 anchor build",
+    "test:programs": "cargo test",
+    "clients": "pnpm --filter @top-pad/clients generate",
+    "db:migrate": "pnpm --filter @top-pad/db migrate"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.13.0",
+    "tsx": "^4.23.15",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.72.1"
+  }
+}

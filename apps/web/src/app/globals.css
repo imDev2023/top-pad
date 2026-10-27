@@ -1,0 +1,55 @@
+/* Design tokens, light by default and dark when the system asks for it. Every screen ships both themes (spec 14). */
+:root {
+  color-scheme: light dark;
+  --bg: #f6f7f6;
+  --surface: #ffffff;
+  --border: #dde2de;
+  --text: #16201a;
+  --muted: #5b6760;
+  --ok: #157f3d;
+  --ok-bg: #e3f4e8;
+  --warn: #9a5b00;
+  --warn-bg: #fdf0d9;
+  --bad: #b42318;
+  --bad-bg: #fde7e5;
+  --radius: 12px;
+  --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1310;
+    --surface: #161d19;
+    --border: #2a332e;
+    --text: #e8eee9;
+    --muted: #9aa69f;
+    --ok: #5fd48a;
+    --ok-bg: #173323;
+    --warn: #f2b45a;
+    --warn-bg: #3a2a10;
+    --bad: #ff8a80;
+    --bad-bg: #3d1a17;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}

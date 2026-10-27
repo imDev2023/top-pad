@@ -1,0 +1,31 @@
+# The two programs (spec 5): the fee program and the Fair Open program, on Anchor 1.2.1 (spec 5.1).
+# Build with `pnpm programs`, not a bare `anchor build`: it targets SBPF v2, the newest version devnet and mainnet run,
+# where Anchor 1.2.1 defaults to v3, which neither has activated (checked 2026-10-27). `cargo build-sbf` fetches
+# platform-tools v1.57 into ~/.cache/solana, so the machine's own Solana install is never switched.
+skip_local_validator = true
+
+[toolchain]
+anchor_version = "1.2.1"
+package_manager = "pnpm"
+
+[features]
+resolution = true
+skip-lint = false
+
+# Temporary ids until the product is named (#65); the fixed ids are then ground with its prefix, their keypairs kept
+# offline under ~/.config/top-pad/devnet/, never in the repo.
+[programs.localnet]
+fair_open = "F1LGuaMt6A92NpgnnfreNNk9WJ2aaV3uiovkVYCJC4ah"
+fee = "GE2pTRgdvaHtZzejvD99gdphxoqiZh6baoxjpw5MBt8B"
+
+[programs.devnet]
+fair_open = "F1LGuaMt6A92NpgnnfreNNk9WJ2aaV3uiovkVYCJC4ah"
+fee = "GE2pTRgdvaHtZzejvD99gdphxoqiZh6baoxjpw5MBt8B"
+
+[provider]
+cluster = "devnet"
+# The upgrade key, kept offline (spec 10.3); only a deploy reads it.
+wallet = "~/.config/top-pad/devnet/upgrade-authority.json"
+
+[scripts]
+test = "cargo test"

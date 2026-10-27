@@ -1,0 +1,18 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "top-pad-web",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-10-20",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": { "directory": ".open-next/assets", "binding": "ASSETS" },
+  "observability": { "enabled": true },
+  // Each environment is built against its own API: NEXT_PUBLIC_API_URL is baked in at build time, then
+  // `opennextjs-cloudflare deploy --env devnet`.
+  "env": {
+    "devnet": {
+      "name": "top-pad-web-devnet",
+      "workers_dev": true,
+      "assets": { "directory": ".open-next/assets", "binding": "ASSETS" }
+    }
+  }
+}

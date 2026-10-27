@@ -1,0 +1,17 @@
+packages:
+  - apps/*
+  - packages/*
+  - tests/*
+allowBuilds:
+  bigint-buffer: true
+  bufferutil: true
+  esbuild: true
+  sharp: true
+  utf-8-validate: true
+  workerd: true
+peerDependencyRules:
+  allowedVersions:
+    # @solana/codecs declares typescript ^5 for its types only; the workspace is pinned to 6, the newest typescript-eslint supports.
+    typescript: "6"
+    # ws@7 (via jayson in @solana/web3.js v1, inside packages/meteora only) asks for ^5; version 6 keeps the same API.
+    ws>utf-8-validate: "6"

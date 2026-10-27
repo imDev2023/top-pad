@@ -1,0 +1,35 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "top-pad-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-20",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "vars": {
+    "CLUSTER": "localnet",
+    // The web app's origins, comma-separated; the only ones a browser may call the API from.
+    "WEB_ORIGIN": "http://localhost:3110"
+  },
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      "id": "00000000000000000000000000000000",
+      // The docker database (`docker compose up -d`).
+      "localConnectionString": "postgres://toppad:toppad@127.0.0.1:5452/toppad"
+    }
+  ],
+  // The devnet build (spec 10.4): `pnpm exec wrangler deploy --env devnet`. Bindings and vars are not inherited by an
+  // environment, so everything is named again.
+  "env": {
+    "devnet": {
+      "name": "top-pad-api-devnet",
+      "workers_dev": true,
+      "vars": {
+        "CLUSTER": "devnet",
+        "WEB_ORIGIN": "https://top-pad-web-devnet.WORKERS_SUBDOMAIN.workers.dev"
+      },
+      // The Neon devnet database (spec 10.4), its id from `wrangler hyperdrive create top-pad-devnet`.
+      "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "HYPERDRIVE_DEVNET_ID" }]
+    }
+  }
+}

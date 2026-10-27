@@ -1,0 +1,36 @@
+[package]
+name = "fee"
+version = "0.1.0"
+description = "The fee program: the partner and fee claimer on every config"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "fee"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build"]
+anchor-debug = []
+custom-heap = []
+custom-panic = []
+
+[dependencies]
+anchor-lang.workspace = true
+solana-security-txt.workspace = true
+
+[dev-dependencies]
+litesvm.workspace = true
+solana-message.workspace = true
+solana-transaction.workspace = true
+solana-signer.workspace = true
+solana-keypair.workspace = true
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

@@ -1,0 +1,29 @@
+{
+  "dbc.json": {
+    "program": "dynamic_bonding_curve",
+    "programVersion": "0.2.2",
+    "address": "dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN",
+    "package": "@meteora-ag/dynamic-bonding-curve-sdk",
+    "packageVersion": "2.0.0",
+    "licence": "MIT",
+    "licenceText": true
+  },
+  "damm_v2.json": {
+    "program": "cp_amm",
+    "programVersion": "0.2.5",
+    "address": "cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG",
+    "package": "@meteora-ag/cp-amm-sdk",
+    "packageVersion": "1.5.1",
+    "licence": "MIT",
+    "licenceText": true
+  },
+  "jupiter_lock.json": {
+    "program": "locker",
+    "programVersion": "0.5.0",
+    "address": "LocpQgucEQHbqNABEYvBvwoxCPsSbG91A1QaQhQQqjn",
+    "package": "@meteora-ag/met-lock-sdk",
+    "packageVersion": "1.0.1",
+    "licence": "MIT",
+    "licenceText": false
+  }
+}

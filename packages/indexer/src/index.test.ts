@@ -1,0 +1,88 @@
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { createDb, indexerCursors, type Db } from "@top-pad/db";
+import { createTestDatabase } from "@top-pad/db/testing";
+import { IndexBatchError, indexTransactions, reconcileAccount, type HistorySource, type RawTransaction, type TransactionHandler } from "./index";
+
+let db: Db;
+let cleanup: () => Promise<void>;
+beforeAll(async () => {
+  const test = await createTestDatabase();
+  const conn = createDb(test.url);
+  db = conn.db;
+  cleanup = async () => {
+    await conn.close();
+    await test.drop();
+  };
+});
+afterAll(() => cleanup());
+beforeEach(() => db.delete(indexerCursors));
+
+const ACCOUNT = "dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN";
+const tx = (signature: string, slot: number): RawTransaction => ({ slot, blockTime: null, transaction: { signatures: [signature], message: {} }, meta: { err: null } });
+
+/** A chain of `n` transactions on one account, oldest first, served newest first as a node lists them. */
+function chain(n: number, missing = new Set<string>()) {
+  const txs = Array.from({ length: n }, (_, i) => tx(`sig${i}`, 100 + i));
+  const source: HistorySource = {
+    async listSignatures(_account, { before, until, limit }) {
+      const newestFirst = [...txs].reverse().map((t) => ({ signature: t.transaction.signatures[0]!, slot: t.slot, failed: false }));
+      const from = before ? newestFirst.findIndex((s) => s.signature === before) + 1 : 0;
+      const to = until ? newestFirst.findIndex((s) => s.signature === until) : newestFirst.length;
+      return newestFirst.slice(from, to === -1 ? newestFirst.length : to).slice(0, limit);
+    },
+    fetchTransaction: async (signature) => (missing.has(signature) ? null : (txs.find((t) => t.transaction.signatures[0] === signature) ?? null)),
+  };
+  return { txs, source };
+}
+
+const recorder = () => {
+  const seen: string[] = [];
+  const handle: TransactionHandler = async (_db, t) => {
+    seen.push(t.transaction.signatures[0]!);
+    return { trades: 1 };
+  };
+  return { seen, handle };
+};
+
+describe("reconciliation", () => {
+  it("indexes an account's transactions oldest first, then resumes from its cursor with only the new ones", async () => {
+    const { source } = chain(5);
+    const { seen, handle } = recorder();
+    const first = await reconcileAccount(db, source, handle, ACCOUNT);
+    expect(first).toEqual({ indexed: { trades: 5 }, seen: 5, complete: true });
+    expect(seen).toEqual(["sig0", "sig1", "sig2", "sig3", "sig4"]);
+    expect((await db.select().from(indexerCursors))[0]).toMatchObject({ account: ACCOUNT, signature: "sig4", slot: 104 });
+
+    const again = await reconcileAccount(db, source, handle, ACCOUNT);
+    expect(again).toEqual({ indexed: {}, seen: 0, complete: true });
+  });
+
+  it("stops at a transaction the node can't serve yet, so the cursor never passes an unindexed one", async () => {
+    const { seen, handle } = recorder();
+    const result = await reconcileAccount(db, chain(5, new Set(["sig2"])).source, handle, ACCOUNT);
+    expect(result).toMatchObject({ seen: 2, complete: false });
+    expect(seen).toEqual(["sig0", "sig1"]);
+    expect((await db.select().from(indexerCursors))[0]?.signature).toBe("sig1");
+
+    await reconcileAccount(db, chain(5).source, handle, ACCOUNT);
+    expect(seen).toEqual(["sig0", "sig1", "sig2", "sig3", "sig4"]);
+  });
+
+  it("stops after `limit` transactions for a caller that comes back", async () => {
+    const { handle } = recorder();
+    expect(await reconcileAccount(db, chain(5).source, handle, ACCOUNT, 3)).toMatchObject({ seen: 3, complete: false });
+  });
+});
+
+describe("the ingestion entry point", () => {
+  it("indexes the rest of a batch when one transaction fails, and names the one that failed", async () => {
+    const handle: TransactionHandler = async (_db, t) => {
+      if (t.transaction.signatures[0] === "bad") throw new Error("undecodable");
+      return { trades: 1 };
+    };
+    const error = await indexTransactions(db, handle, [tx("a", 1), tx("bad", 2), tx("b", 3)]).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(IndexBatchError);
+    expect((error as IndexBatchError).result).toEqual({ trades: 2 });
+    expect((error as IndexBatchError).failed).toEqual([{ signature: "bad", error: "undecodable" }]);
+  });
+});
