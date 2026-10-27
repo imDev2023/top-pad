@@ -20,3 +20,5 @@ Whether to reuse Stoker's code (indexer, public ledger, Arweave metadata, Cloudf
 - Top-pad keeps its own repo, tracker, glossary and decision records.
 - Where Top-pad and Stoker name the same concept (Quote Asset, Creator, Graduation), Top-pad uses Stoker's word, so that option C stays cheap if it is ever taken.
 - Stoker is read-only from Top-pad sessions; another session works in it.
+- Revisited 2026-10-27, with the spec finished: kept separate (owner).
+  Option C is next weighed after the devnet cohort ([docs/spec.md](../spec.md) section 11.3): if Fair Open proves itself there, either Fair Open becomes a launch mode inside Stoker or Greenflag takes over Stoker's any-asset launches; attention and liquidity split across two launchpads is the cost to weigh.
