@@ -12,15 +12,16 @@ package_manager = "pnpm"
 resolution = true
 skip-lint = false
 
-# Temporary ids until the product is named (#65); the fixed ids are then ground with its prefix, their keypairs kept
-# offline under ~/.config/top-pad/devnet/, never in the repo.
+# Fixed ids, ground with the product name's prefix (#65): HeatF for the fee program, HeatP for the Fair Open program.
+# Their keypairs live only in the gitignored target/deploy on the owner's Mac, backed up in the owner's password
+# manager, never in the repo, CI or Cloudflare; a fresh checkout's build makes random ones, so never `anchor keys sync`.
 [programs.localnet]
-fair_open = "F1LGuaMt6A92NpgnnfreNNk9WJ2aaV3uiovkVYCJC4ah"
-fee = "GE2pTRgdvaHtZzejvD99gdphxoqiZh6baoxjpw5MBt8B"
+fair_open = "HeatPiBAgiwq6VJr8eqyagQiQ2gvaK2y85q26bbBu4bo"
+fee = "HeatFEzySQiaWqxR7cDza9WP2B15AxMfsgSS5p6Bdn97"
 
 [programs.devnet]
-fair_open = "F1LGuaMt6A92NpgnnfreNNk9WJ2aaV3uiovkVYCJC4ah"
-fee = "GE2pTRgdvaHtZzejvD99gdphxoqiZh6baoxjpw5MBt8B"
+fair_open = "HeatPiBAgiwq6VJr8eqyagQiQ2gvaK2y85q26bbBu4bo"
+fee = "HeatFEzySQiaWqxR7cDza9WP2B15AxMfsgSS5p6Bdn97"
 
 [provider]
 cluster = "devnet"

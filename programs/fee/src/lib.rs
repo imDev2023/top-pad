@@ -3,11 +3,11 @@
 //! PDA.
 use anchor_lang::prelude::*;
 
-declare_id!("GE2pTRgdvaHtZzejvD99gdphxoqiZh6baoxjpw5MBt8B");
+declare_id!("HeatFEzySQiaWqxR7cDza9WP2B15AxMfsgSS5p6Bdn97");
 
 #[cfg(not(feature = "no-entrypoint"))]
 solana_security_txt::security_txt! {
-    name: "Top-pad fee program",
+    name: "Heat fee program",
     project_url: "https://github.com/imDev2023/top-pad",
     contacts: "link:https://github.com/imDev2023/top-pad/security/advisories/new",
     policy: "https://github.com/imDev2023/top-pad/blob/main/SECURITY.md",

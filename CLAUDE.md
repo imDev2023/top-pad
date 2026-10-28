@@ -1,7 +1,7 @@
 # Top-pad
 
 A fair-launch token launchpad on Solana, built on Meteora's pools.
-The product was named **Greenflag**, and the owner wants a new name (2026-10-27, [#65](https://github.com/imDev2023/top-pad/issues/65)); the code, its packages, Workers and database use the working name `top-pad`, so the rename touches no code.
+The product is named **Heat** (owner, 2026-10-28, [#65](https://github.com/imDev2023/top-pad/issues/65); it was Greenflag until 2026-10-27); the code, its packages, Workers and database keep the working name `top-pad`.
 The owner's original brief is `resources.md`; the project's terms are in `GLOSSARY.md`.
 
 The build follows **`docs/spec.md`**, the one build-ready spec (decisions in `docs/adr/0001` to `0006`), as tickets labelled `build` (#39 to #64), sub-issues of the map wired with native blocking edges; the open ones with no open blocker are the frontier.
@@ -31,7 +31,8 @@ A pnpm monorepo shaped like Stoker's: `apps/api` (Hono on Workers), `apps/web` (
 - The devnet build runs on free-tier RPC (spec 10.5), and of the endpoints in `global.env` only the shared Helius key serves Solana devnet (the Chainstack and Validation Cloud URLs are other chains', QuickNode has a token but no endpoint); it sends 1 transaction per second and is rate-limited when agents run in parallel, so tests default to the public `api.devnet.solana.com` and on-chain-heavy work is staggered.
 - Devnet SOL is scarce: CLI airdrops are refused, and faucet.solana.com gives at most 10 SOL every 8 hours (spec 11.4); the owner collects it into `3hTTgfj2YqqYJeEgSF49U8ZyZwyHnwPhF9LRsXy4fMY8`.
 - Build the programs with `pnpm programs`, never a bare `anchor build`: Anchor 1.2.1 defaults to SBPF v3, which neither devnet nor mainnet has activated (2026-10-27), and the program tests fail on a v3 binary.
-  The program ids in the source are temporary until the product is named ([#65](https://github.com/imDev2023/top-pad/issues/65)); the keypairs are in `target/deploy` only, so a fresh checkout's build warns of a mismatch, which is expected.
+  The program ids are fixed (`HeatF…` the fee program, `HeatP…` the Fair Open program, [#65](https://github.com/imDev2023/top-pad/issues/65)); their keypairs live only in the gitignored `target/deploy` on the owner's Mac, backed up in the owner's password manager, never in the repo, CI or Cloudflare.
+  A fresh checkout's build makes random keypairs there and warns of a mismatch, which is expected; never run `anchor keys sync`, which would write those random ids into the source.
 - Anchor 1.2.1 is pinned in `Anchor.toml` (`[toolchain]`), so avm's `anchor` runs it here while the machine's default stays 0.31.1 for other projects; `avm install` switches the default, so run `avm use 0.31.1` after installing another version.
 - Codama's output for the DBC IDL is not clean on its own; `packages/clients/scripts/generate.ts` fixes the IDL first (see its comment), so always generate through `pnpm clients`.
 - The devnet database is on Neon, not Supabase (spec 10.4).

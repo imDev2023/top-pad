@@ -1,7 +1,7 @@
-# Greenflag devnet prototype: build spec
+# Heat devnet prototype: build spec
 
 Assembled on 2026-10-27 from the wayfinder map, [Top-pad: the spec for the fair-launch launchpad prototype](https://github.com/imDev2023/top-pad/issues/1), in [Assemble the spec](https://github.com/imDev2023/top-pad/issues/38).
-The product is named **Greenflag**; the repo and folder keep the working name Top-pad.
+The product is named **Heat** (owner, 2026-10-28, [#65](https://github.com/imDev2023/top-pad/issues/65); it was Greenflag until 2026-10-27); the repo and folder keep the working name Top-pad.
 Every decision below was made by the owner in a ticket on the map; each section links its tickets and ADRs so a reader can zoom in, but the decision itself is stated here.
 Terms are used exactly as defined in [GLOSSARY.md](../GLOSSARY.md).
 
@@ -12,7 +12,7 @@ The small parameters the map left for this spec to fix are marked **(owner, 2026
 
 ## Contents
 
-1. [What Greenflag is](#1-what-greenflag-is)
+1. [What Heat is](#1-what-heat-is)
 2. [Launch modes, end to end](#2-launch-modes-end-to-end)
 3. [The coin and the two DBC configs](#3-the-coin-and-the-two-dbc-configs)
 4. [Fees](#4-fees)
@@ -30,9 +30,9 @@ The small parameters the map left for this spec to fix are marked **(owner, 2026
 16. [Risks and what is unproven](#16-risks-and-what-is-unproven)
 17. [Sources](#17-sources)
 
-## 1. What Greenflag is
+## 1. What Heat is
 
-Greenflag is a fair-launch token launchpad on Solana, built on Meteora's Dynamic Bonding Curve (DBC) and DAMM v2 pools.
+Heat is a fair-launch token launchpad on Solana, built on Meteora's Dynamic Bonding Curve (DBC) and DAMM v2 pools.
 Its reason to exist is that the people who launch and buy a coin are not beaten to it by bots, insiders or copycats.
 The first audience is memecoin creators and traders.
 
@@ -40,7 +40,7 @@ The owner's standing preferences (2026-10-26), which every later choice follows:
 - **Lead with stopping creator bundling, snipers second**: on pump.fun, creator bundles made more than $579M against $31.5M for sniper bots.
 - **Prefer rules the chain enforces over promises the server makes**; a small on-chain program of our own is allowed wherever Meteora's programs cannot enforce a rule.
 - **Weigh quality, robustness and long-term maintainability over development cost.**
-- Where Greenflag and Stoker name the same concept, use Stoker's word; the one deliberate exception is that Stoker's "Creator" (a wallet) is Greenflag's Creator wallet, and Greenflag's Creator is the person.
+- Where Heat and Stoker name the same concept, use Stoker's word; the one deliberate exception is that Stoker's "Creator" (a wallet) is Heat's Creator wallet, and Heat's Creator is the person.
 - Plain ASCII hyphens only, never em or en dashes.
 
 What this build is:
@@ -50,14 +50,14 @@ What this build is:
 - Done when the acceptance criteria in section 11 pass; mainnet is a separate, later effort (section 15).
 
 The retention bet, recorded as **unproven** ([Retention](https://github.com/imDev2023/top-pad/issues/18)): no platform token and no paid incentives.
-Creators come back because their Creator record and Creator Earnings build up only on Greenflag.
-Traders come back because Greenflag coins are measurably less bundled and Fair Open depositors earn a Tax Share.
+Creators come back because their Creator record and Creator Earnings build up only on Heat.
+Traders come back because Heat coins are measurably less bundled and Fair Open depositors earn a Tax Share.
 
 ## 2. Launch modes, end to end
 
 There are two launch modes: **Fair Open**, the default and the brand, and **Instant launch** ([Launch mechanism](https://github.com/imDev2023/top-pad/issues/10), [ADR 0002](adr/0002-fair-open-on-dbc-with-our-own-deposit-program.md)).
-Both are DBC curves on Greenflag's own configs, both use the same curve, Graduation Target and sniper tax, and both graduate into DAMM v2.
-There is no transfer hook on Greenflag coins.
+Both are DBC curves on Heat's own configs, both use the same curve, Graduation Target and sniper tax, and both graduate into DAMM v2.
+There is no transfer hook on Heat coins.
 
 ### 2.1 A Fair Open's life
 
@@ -98,13 +98,13 @@ Fair Open is preselected.
 **7. Prepay the launch's rent.**
 About 0.03 SOL, all of it rent: the DBC pool accounts (about 0.02 SOL), the launch account (about 1,100 bytes, 0.0062 SOL) and the nonce account (0.00106 SOL).
 The launch and nonce rent come back when the launch closes, and all of it comes back if the Fair Open fails.
-It is not a Greenflag fee; it puts a small, refundable price on filling the launch calendar.
+It is not a Heat fee; it puts a small, refundable price on filling the launch calendar.
 
 **8. The calendar entry.**
 A sealed entry: a "?" tile, the time, the creator and their record summary, the terms (pot up to 17 SOL, minimum raise, 10 minutes) and the teaser.
 
 **9. The 10-minute window: deposits.**
-- A depositor verifies once on Greenflag, not per launch, and gets a Depositor tier (section 6.3).
+- A depositor verifies once on Heat, not per launch, and gets a Depositor tier (section 6.3).
 
   | Depositor tier | Proof | Cap per Fair Open |
   | - | - | - |
@@ -141,14 +141,14 @@ The keeper holds the broadcast up to 10 s if the metadata URI is not yet served.
 
 **12. Pushes.**
 Right after the open anyone can run the push, and our keeper does it at once, in parallel batches of 10 transactions.
-One push transaction pays about 8 depositors their coins and refund; a 500-depositor Fair Open needs about 100 push transactions, paid by Greenflag (about 0.0005 SOL in base fees plus priority fees).
+One push transaction pays about 8 depositors their coins and refund; a 500-depositor Fair Open needs about 100 push transactions, paid by Heat (about 0.0005 SOL in base fees plus priority fees).
 Every seat gets its coins and refund within 2 minutes of the open; anything a push cannot deliver stays in the seat for the depositor to claim.
 There is no vesting for depositors: the 60 s sniper tax also taxes sells, so a first-minute dump pays up to 99%.
 
 **13. The Creator lock.**
 Right after the open, anyone can run the lock instruction, which moves the creator's share of the pot's coins into a Jupiter Lock vesting escrow ([Creator lock](https://github.com/imDev2023/top-pad/issues/11), [ADR 0004](adr/0004-the-creator-buys-only-through-the-fair-open-pot.md)):
 - nothing released for 7 days after the open, then a straight-line release, all free 30 days after the open;
-- nobody can cancel it, Greenflag included;
+- nobody can cancel it, Heat included;
 - only the recipient, the Creator wallet, can change who receives it.
 
 Its rent (about 0.0036 SOL) comes out of the creator's deposit.
@@ -174,7 +174,7 @@ The creator may later buy on the curve from their own wallet, unlocked; those ho
    The creator signs as `creator` and pays the pool's rent; our launch key co-signs, and the same transaction registers the coin's record in the fee program.
    Our launch key co-signs only launches signed by the record's current Creator wallet that pass Vamp Shield.
 3. There is no creator buy: every buy in the creation slot, the creator's included, pays the 99% cliff, so a creation-slot bundle loses about 99%.
-4. The tax window's fees go to Greenflag's treasury, and the coin's Fairness card says so openly.
+4. The tax window's fees go to Heat's treasury, and the coin's Fairness card says so openly.
 5. There is no Creator lock in an Instant launch; a creator who wants to hold supply honestly uses Fair Open.
 
 ### 2.3 Graduation
@@ -182,13 +182,13 @@ The creator may later buy on the curve from their own wallet, unlocked; those ho
 When a coin's curve holds the Graduation Target (85 SOL on mainnet, 8.5 SOL on devnet), our keeper's graduation Workflow migrates it to DAMM v2 ([Curve and Graduation Target](https://github.com/imDev2023/top-pad/issues/33)).
 Meteora's mainnet keepers only migrate at a 10 SOL threshold, so our keeper does it; anyone may call the migration.
 The graduated pool starts with about 85 SOL and 200 million coins, at a 425 SOL market cap.
-Both halves of its LP are permanently locked: the creator's half as their own position NFT, Greenflag's half held by the fee program ([Launch liquidity](https://github.com/imDev2023/top-pad/issues/30)).
+Both halves of its LP are permanently locked: the creator's half as their own position NFT, Heat's half held by the fee program ([Launch liquidity](https://github.com/imDev2023/top-pad/issues/30)).
 
 ### 2.4 Coins made around our flow
 
-Anyone can create a pool directly on Greenflag's DBC configs.
-The Creator lock, Vamp Shield and every Greenflag guarantee cover only coins our launch key co-signed ([Creator lock](https://github.com/imDev2023/top-pad/issues/11)).
-Such pools never appear on Greenflag's board or search; opened by address, their page shows a red "Not launched through Greenflag" banner and no Fairness card ([Discovery and ranking](https://github.com/imDev2023/top-pad/issues/37)).
+Anyone can create a pool directly on Heat's DBC configs.
+The Creator lock, Vamp Shield and every Heat guarantee cover only coins our launch key co-signed ([Creator lock](https://github.com/imDev2023/top-pad/issues/11)).
+Such pools never appear on Heat's board or search; opened by address, their page shows a red "Not launched through Heat" banner and no Fairness card ([Discovery and ranking](https://github.com/imDev2023/top-pad/issues/37)).
 The fee split, the sniper tax and the LP locks still bind them, because those live in the config.
 
 ## 3. The coin and the two DBC configs
@@ -290,7 +290,7 @@ The exact encoding of the step parameter is checked against DAMM v2's `fee_marke
 Sources: [Fee model](https://github.com/imDev2023/top-pad/issues/13), [ADR 0003](adr/0003-our-program-splits-every-curve-fee.md), [Our Fair Open program](https://github.com/imDev2023/top-pad/issues/28).
 The model is the same in both launch modes, so creators pick a mode for its fairness and the cohort is not skewed by price.
 
-| When | Trader pays | Meteora | Creator | Greenflag |
+| When | Trader pays | Meteora | Creator | Heat |
 | - | - | - | - | - |
 | Curve, after the tax window | 1.25% | 0.25% (20%) | 0.50% | 0.50%, plus about 0.05% referral share on swaps our site builds (out of Meteora's cut) |
 | Curve, during the tax window | the sniper tax | 20% | nothing | Instant launch: the rest. Fair Open: the rest is the depositors' Tax Share, except the pot's own fee, split 50/50 |
@@ -301,12 +301,12 @@ The model is the same in both launch modes, so creators pick a mode for its fair
 - **The pot's own fee is not part of the Tax Share**: it is split 50/50 like a normal trade, recorded in the creation transaction.
 - **No one-off fees**: no pool creation fee, no graduation fee (Meteora's fixed 0.2% at migration applies), no surcharge on our own site, and a platform fee of 0 on trades routed through Jupiter.
 - **No holder share** beyond the Tax Share; holder rewards are a mainnet-effort option, for which every coin's record keeps an empty earnings-recipient override.
-- **One treasury address** receives Greenflag's Platform Fee: a plain key on devnet, a Squads multisig on mainnet.
+- **One treasury address** receives Heat's Platform Fee: a plain key on devnet, a Squads multisig on mainnet.
 
 How fees move:
 - The configs give the creator 0% and name the fee program as partner, so the split binds every pool on the configs, including pools created by calling DBC directly.
 - **Creator Earnings never sit in our programs**: they wait in Meteora's pool until claimed.
-  A claim, which anyone can send, pulls a pool's partner fees from DBC and pays both halves in the same instruction: the creator's half to whoever holds the pool's DBC creator role at that moment, Greenflag's half to the treasury.
+  A claim, which anyone can send, pulls a pool's partner fees from DBC and pays both halves in the same instruction: the creator's half to whoever holds the pool's DBC creator role at that moment, Heat's half to the treasury.
 - The window claim at 60 s routes the window's fees to the launch's Tax Share (a Fair Open record exists) or to the treasury (every Instant launch, and pools made around our flow).
 - A late window claim moves normal fees into the window; our keeper claims at 60 s, so at most a few seconds of 1.25% fees move.
 - After Graduation the creator claims their LP fees from Meteora directly; the creator page claims curve earnings and LP fees in one transaction.
@@ -318,6 +318,7 @@ Sources: [Our Fair Open program](https://github.com/imDev2023/top-pad/issues/28)
 ### 5.1 Common rules
 
 - Two programs: a small **fee program** and the **Fair Open program**.
+- Their ids are fixed, ground with the name's prefix ([#65](https://github.com/imDev2023/top-pad/issues/65)): the fee program `HeatFEzySQiaWqxR7cDza9WP2B15AxMfsgSS5p6Bdn97`, the Fair Open program `HeatPiBAgiwq6VJr8eqyagQiQ2gvaK2y85q26bbBu4bo`, the same on devnet and mainnet.
 - Anchor 1.2.1; every deploy ships `security.txt` and an OtterSec verified build.
 - Built for SBPF v2, the newest version devnet and mainnet run: Anchor 1.2.1 defaults to v3, which neither has activated (checked 2026-10-27).
 - Every amount is in the quote's raw units and the quote mint is a parameter; nothing hard-codes SOL.
@@ -328,12 +329,12 @@ Sources: [Our Fair Open program](https://github.com/imDev2023/top-pad/issues/28)
 
 ### 5.2 The fee program
 
-The partner on every Greenflag config, forever; it should rarely change.
+The partner on every Heat config, forever; it should rarely change.
 
 Accounts:
 - `FeeConfig`: the treasury address, the launch key, the Fair Open program id.
-- `fee_claimer` PDA: the configs' partner and fee claimer; receives Greenflag's graduated LP position NFTs and holds them permanently locked.
-- `CoinRecord` PDA, one per mint (the on-chain list of Greenflag coins): mint, pool, launch mode, the Fair Open launch it came from if any, the pot's own fee, whether the window claim has run, and an empty earnings-recipient override.
+- `fee_claimer` PDA: the configs' partner and fee claimer; receives Heat's graduated LP position NFTs and holds them permanently locked.
+- `CoinRecord` PDA, one per mint (the on-chain list of Heat coins): mint, pool, launch mode, the Fair Open launch it came from if any, the pot's own fee, whether the window claim has run, and an empty earnings-recipient override.
 
 Instructions:
 - `register_coin`: creates a `CoinRecord`; requires the launch key's signature (Instant launch, in the creation transaction) or a CPI from the Fair Open program's `settle` (Fair Open); about 0.001 SOL of rent per coin.
@@ -341,7 +342,7 @@ Instructions:
 - `claim_window_fees`: the first partner-fee claim after the pool's 60 s window; anyone may send it; pays the window's fees, minus the pot's own fee split 50/50, to the launch's Tax Share account or to the treasury.
 - `claim_fees`: anyone may send it; claims the pool's partner fees by CPI and pays half to the current DBC creator role holder (read from the pool account) and half to the treasury.
 - `claim_surplus`: after the curve completes, splits the partner surplus the same way.
-- `claim_lp_fees`: claims Greenflag's graduated LP fees to the treasury.
+- `claim_lp_fees`: claims Heat's graduated LP fees to the treasury.
 - `burn_leftover`: withdraws any DBC fixed-supply leftover after migration and burns it **(owner, 2026-10-27)**.
 
 Invariants:
@@ -390,7 +391,7 @@ Invariants:
 
 Every buy and sell pays the config's fee scheduler: 99% in the creation slot, falling linearly each second to 1.25% at 60 s, in both launch modes (section 3.2, [Sniper tax curve](https://github.com/imDev2023/top-pad/issues/23)).
 It lives in the config, so it taxes trades routed through Jupiter and Titan exactly like ours.
-A DBC config has one fee scheduler, so there is no separate humans-first window; Fair Open admission is Greenflag's humans-first window ([Block or label](https://github.com/imDev2023/top-pad/issues/12)).
+A DBC config has one fee scheduler, so there is no separate humans-first window; Fair Open admission is Heat's humans-first window ([Block or label](https://github.com/imDev2023/top-pad/issues/12)).
 On devnet the prototype measured the pot at 1.250%, a second buy in the same transaction at 99.000%, and a buy about 1 s later at 97.371%.
 
 ### 6.2 Vamp Shield
@@ -404,15 +405,15 @@ Every refusal is our launch key declining to co-sign; nothing on chain refuses a
   - an SSCD similarity of 0.75 or more.
 - **Labelled "looks like X"** on a near match: a derivative affix (BABY, INU), an edit distance of 1 on keys of 5 or more letters, or SSCD 0.60 to 0.75.
 - All thresholds are starting values, re-measured against the refusal logs.
-- **Protected coins** are earned by traction, never first-come: Jupiter-verified coins; Solana coins with real organic activity; coins trending now (protected for 72 hours); CoinGecko's top 1,000; Greenflag coins that completed a Fair Open or reached 100 holders.
-  A Greenflag coin's protection lapses when it falls below the activity bar (organic score under 30 and under 300 holders over 7 days).
+- **Protected coins** are earned by traction, never first-come: Jupiter-verified coins; Solana coins with real organic activity; coins trending now (protected for 72 hours); CoinGecko's top 1,000; Heat coins that completed a Fair Open or reached 100 holders.
+  A Heat coin's protection lapses when it falls below the activity bar (organic score under 30 and under 300 holders over 7 days).
   108 strict keys are shared among verified tokens, so a dictionary word alone is never protected.
-- **Ticker uniqueness** lives in the database, not on chain: a partial unique index on the strict key covers coins in an open deposit window and protected Greenflag coins, and a failed launch releases its key; our launch key refuses to co-sign a duplicate.
+- **Ticker uniqueness** lives in the database, not on chain: a partial unique index on the strict key covers coins in an open deposit window and protected Heat coins, and a failed launch releases its key; our launch key refuses to co-sign a duplicate.
 - **Appeals** go to the operator queue before launch; relaunches and community takeovers pass by linking the original mint and proving control.
 
 ### 6.3 Fair Open admission
 
-- Verification is once per person on Greenflag, giving the Depositor tier in section 2.1.
+- Verification is once per person on Heat, giving the Depositor tier in section 2.1.
 - The linkage pipeline (off chain) ties wallets to one person: that person's wallets become one admission with one cap, enforced on chain by the one-seat rule.
 - Wallets tied to the creator's cluster, other than the creator's own wallet, are refused.
 - No other linkage signal refuses anyone, because no Solana linkage method has published accuracy.
@@ -463,21 +464,21 @@ Sources: [Creator record](https://github.com/imDev2023/top-pad/issues/21), [Conf
 - **One Creator wallet at a time**: the only wallet that signs the record's launches, and the wallet terminals show as dev.
   It changes by a handover the old wallet signs, shown on the record.
   A lost wallet rotates through the X account after a public cooldown of 7 days, which the current Creator wallet can cancel **(owner, 2026-10-27)**.
-- **An optional World ID Orb "verified human" mark**, checked on our server, with one action shared across Greenflag so each human has one nullifier, bound to their record; a Bar then follows the person.
+- **An optional World ID Orb "verified human" mark**, checked on our server, with one action shared across Heat so each human has one nullifier, bound to their record; a Bar then follows the person.
 - **History stays with the launcher; earnings follow the creator role**: our indexer follows every `transfer_pool_creator`, made on our site or not; Creator Earnings go to whoever holds the role; the coin stays on the original Creator's record, marked "handed over to ..." on both records.
 - **The record shows only facts anyone can recompute**, with no composite score: launches by mode; graduations and the graduation rate; Creator lock status; sells from the Creator wallet; coins handed over; coins that never graduated and went quiet; Bundle Radar findings with their evidence; any Bar.
 - **A good record earns visibility, never exceptions**: the record on the coin page and the Fairness card, a verified-creator mark, and priority for the calendar's featured slots.
-  A good record means at least one graduated Greenflag coin, no Bar and no open bundling case.
+  A good record means at least one graduated Heat coin, no Bar and no open bundling case.
   Locks, caps, the sniper tax and the fee split are the same for everyone.
 
 ## 8. Discovery and ranking
 
 Source: [Discovery and ranking](https://github.com/imDev2023/top-pad/issues/37).
 
-- **Only coins our launch key co-signed are Greenflag coins**: the board, search and calendar list nothing else; the list is the fee program's `CoinRecord` accounts on chain, mirrored by a public API and a signed daily snapshot.
+- **Only coins our launch key co-signed are Heat coins**: the board, search and calendar list nothing else; the list is the fee program's `CoinRecord` accounts on chain, mirrored by a public API and a signed daily snapshot.
 - **The board's order**: Live now (Fair Open windows in progress, with countdowns); Up next (the sealed calendar for the next 7 days); Trending; New (Instant launches at creation, Fair Opens at their open, newest first); Graduated.
 - **Trending counts people, not volume**: unique net buyers in the last hour, decayed by age, with per-wallet-capped buy volume as the tie-break.
-  Never counted: wallets Bundle Radar ties to the coin's creator, wallets on Greenflag's known-bot list, and a buy and sell inside one transaction.
+  Never counted: wallets Bundle Radar ties to the coin's creator, wallets on Heat's known-bot list, and a buy and sell inside one transaction.
   The known-bot list holds wallets that bought in the first 2 seconds of 3 or more launches and wallets that made a buy and sell inside one transaction; an operator can remove a wallet; thresholds are tuned against the Bundle Radar evaluation set.
   Trending is recomputed every 15 s.
 - **Labels only mark; a confirmed bundle demotes**: "looks like X" and unconfirmed Bundle Radar labels show on a coin's row but never move it; a coin with a confirmed creator bundle leaves Trending and every featured slot, and stays in New and search with its banner.
@@ -486,11 +487,13 @@ Source: [Discovery and ranking](https://github.com/imDev2023/top-pad/issues/37).
 
 ## 9. Screens
 
-Sources: [What should Top-pad look like?](https://github.com/imDev2023/top-pad/issues/15), [Greenflag screens mockup](https://claude.ai/artifact/TCCQ6amBP6ic2tDuvfB4ZH) (a private page; the owner can share it), branch [`prototype/screens-mockup`](https://github.com/imDev2023/top-pad/tree/prototype/screens-mockup).
+Sources: [What should Top-pad look like?](https://github.com/imDev2023/top-pad/issues/15), [screens mockup](https://claude.ai/artifact/TCCQ6amBP6ic2tDuvfB4ZH) (a private page, made under the old name Greenflag; the owner can share it), branch [`prototype/screens-mockup`](https://github.com/imDev2023/top-pad/tree/prototype/screens-mockup).
 The mockup is throwaway; the build implements these choices, not its code.
 
 Design decisions:
-- **The name is Greenflag** (`greenflag.fun`); a legal check against the UK roadside-recovery brand Green Flag belongs to the mainnet effort.
+- **The name is Heat** ([#65](https://github.com/imDev2023/top-pad/issues/65), owner, 2026-10-28): a heat is a race in which everyone starts together, and "heat" is trader slang for hype.
+  It is short and promises nothing about the coins, so a rug cannot turn it into a joke; Greenflag was dropped for being long and for a promise every rug would mock.
+  The owner buys the domain (on 2026-10-28 `heat.ag` was free at the standard $82.50 a year, and `heat.fun` was premium); a legal check (Miami Heat; HEAT Ledger, an old chain; dead HEAT memecoins; a small launchpad called HEAT that closed in October 2026) belongs to the mainnet effort.
 - **Race-marshal flags are the visual language**: green proven on chain, yellow labelled, red a Bundle Radar finding, a checkered flag at Graduation.
 - **Dark-first** on asphalt grey, with a mirrored light theme.
 - **Fair Opens lead the board** (section 8's order).
@@ -500,12 +503,12 @@ Design decisions:
 - **On phones, the deposit panel comes first**, the explainer of the open below it.
 - **The sniper tax is a yellow band** with the live percentage, a countdown and "never to the creator", turning green when the minute ends.
 - **One plain signing step** for the nonce ladder, the rungs behind a details link.
-- **An Instant launch's card says openly** that the first minute's tax went to Greenflag.
+- **An Instant launch's card says openly** that the first minute's tax went to Heat.
 
 The screens:
 1. **Discover**: the board in section 8's order, each coin row with its flags.
 2. **Fair Open page**: the countdown, the pot filling (with the 25% Unverified line), the minimum raise, the depositor's tier and cap with "Verify once", deposit and withdraw, the refundable rent, "if the window closed now" (each person's share, your fill, your refund), and what happens at the open.
-3. **Coin page**: name, ticker, mint, price, market cap, holders; the flags strip and Fairness card; the tax band during the first minute; the chart (TradingView Lightweight Charts v5, 1 s, 15 s and coarser candles); the graduation bar to 85 SOL; quick buy showing the fee before signing; trades with the fee each paid, the labelled keeper's pot buy pinned; banners for a confirmed bundle, a Meteora-paused pool, or "Not launched through Greenflag".
+3. **Coin page**: name, ticker, mint, price, market cap, holders; the flags strip and Fairness card; the tax band during the first minute; the chart (TradingView Lightweight Charts v5, 1 s, 15 s and coarser candles); the graduation bar to 85 SOL; quick buy showing the fee before signing; trades with the fee each paid, the labelled keeper's pot buy pinned; banners for a confirmed bundle, a Meteora-paused pool, or "Not launched through Heat".
 4. **Launch flow**: link X; Fair Open (preselected) or Instant launch; the coin with live Vamp Shield verdicts (clear, "looks like X", refused with an appeal link); schedule (time up to 7 days ahead, minimum raise, teaser, about 0.03 SOL refundable rent); sign; done.
 5. **Creator record**: the facts in section 7, Creator wallet history, the verified-human and verified-creator marks, Creator Earnings from both sources with one claim, and for a barred Creator the banner, evidence pack and appeal history; the accused creator's private 72-hour view with a reply box.
 6. **How this is enforced**: each promise, what keeps it, and who could still change it (below).
@@ -518,17 +521,17 @@ The Fairness card's rows:
 - Liquidity: before Graduation "Liquidity sits in Meteora's bonding curve; nobody can withdraw it"; after Graduation "100% of liquidity locked forever", linking both positions.
 - Bundle Radar findings with evidence, and any "confirmed creator bundle".
 - The creator and their record summary.
-- The labelled Greenflag keeper that sent the pot's buy.
-- The Tax Share paid to depositors, or for an Instant launch the tax that went to Greenflag.
+- The labelled Heat keeper that sent the pot's buy.
+- The Tax Share paid to depositors, or for an Instant launch the tax that went to Heat.
 - A link to "How this is enforced".
 
 "How this is enforced" says, at least:
 - the sniper tax and fee split live in Meteora's config and nobody can edit them after launch;
 - Fair Open rules and the 15-minute withdrawal live in the Fair Open program, upgradeable only through the 7-day timelock on mainnet (a plain key on devnet);
-- nobody can cancel the Creator lock, Greenflag included;
+- nobody can cancel the Creator lock, Heat included;
 - nobody can withdraw liquidity before Graduation or unlock it after;
 - Meteora's operators can pause a graduated pool (withdrawals still work) and change its dynamic fee, but not its base fee until the schedule expires; Meteora can upgrade its own programs;
-- copycat and bundling labels are Greenflag's judgement, with the evidence linked; the counts of bars, appeals and overturned findings;
+- copycat and bundling labels are Heat's judgement, with the evidence linked; the counts of bars, appeals and overturned findings;
 - the guarantees cover only coins our launch key co-signed, and only those are listed.
 
 Also in the build: a P&L share card for a trader's own position (one of the core trading basics in the brief; owner, 2026-10-27), and the Fairness card as an image for X link cards (2:1, under 5 MB), the one channel to traders fully ours ([How can Top-pad's fairness data reach the trading terminals](https://github.com/imDev2023/top-pad/issues/20)).
@@ -594,6 +597,8 @@ Sources: [Stack](https://github.com/imDev2023/top-pad/issues/17), [Backend desig
   - the **keeper key**: fee payer for the lock, pushes, claims and graduation, the pot's delegate and the nonce authority, and the launch key that co-signs creation transactions and registers coins, holding a capped SOL float with a low-balance alert **(owner, 2026-10-27)**;
   - the **admission signer**, holding no funds.
 - The upgrade and treasury keys never touch Cloudflare: kept offline on devnet, held by Squads on mainnet.
+- The two program keypairs only ever sign the first deploy at the fixed ids (section 5.1), on devnet and later on mainnet; a leak before the mainnet deploy would let anyone deploy their own program at our ids there first.
+  They live only in the gitignored `target/deploy` on the owner's Mac, backed up in the owner's password manager, never in the repo, CI or Cloudflare (owner, 2026-10-28).
 
 ### 10.4 Data
 
@@ -667,7 +672,7 @@ faucet.solana.com gives at most 10 SOL every 8 hours when signed in with GitHub 
 | Curve / graduated pool supply | 80% / 20% | [#33](https://github.com/imDev2023/top-pad/issues/33) |
 | Graduation Target | 85 SOL mainnet, 8.5 SOL devnet | [#33](https://github.com/imDev2023/top-pad/issues/33) |
 | Market cap at the start / at Graduation | 37.09 SOL / 425 SOL | [#33](https://github.com/imDev2023/top-pad/issues/33) |
-| Curve fee after the tax window | 1.25% (Meteora 0.25%, creator 0.50%, Greenflag 0.50%) | [#13](https://github.com/imDev2023/top-pad/issues/13) |
+| Curve fee after the tax window | 1.25% (Meteora 0.25%, creator 0.50%, Heat 0.50%) | [#13](https://github.com/imDev2023/top-pad/issues/13) |
 | Sniper tax | 99% cliff, linear, 60 one-second periods, ending at 1.25% | [#23](https://github.com/imDev2023/top-pad/issues/23) |
 | Sniper tax integers | cliff 989,999,960, reduction 16,291,666 per period (owner, 2026-10-27) | this spec |
 | Tax window | 60 s | [#23](https://github.com/imDev2023/top-pad/issues/23) |
@@ -709,7 +714,7 @@ faucet.solana.com gives at most 10 SOL every 8 hours when signed in with GitHub 
 ## 13. Prerequisites and owner tasks
 
 1. **Devnet SOL**: about 190 (about 60 for the proof, about 130 for the cohort), collected by the owner through the Solana Foundation faucet signed in with GitHub (at most 10 SOL every 8 hours) and QuickNode's faucet (one drip per 12 hours), into `3hTTgfj2YqqYJeEgSF49U8ZyZwyHnwPhF9LRsXy4fMY8`; started now and continued through the build, since at the faucet's limit 190 SOL takes at least a week (section 11.4).
-2. **A Helius Developer plan** ($49 a month or higher) in a Greenflag project, its key in the project's `.env`: not needed for the devnet build, which runs on free tiers; bought when getting ready to launch (section 10.5).
+2. **A Helius Developer plan** ($49 a month or higher) in a Heat project, its key in the project's `.env`: not needed for the devnet build, which runs on free tiers; bought when getting ready to launch (section 10.5).
 3. **Meteora's follow-up** ([Ask Meteora in writing](https://github.com/imDev2023/top-pad/issues/26), Discord ticket `devlaunch-6428`).
    Meteora's support answered on 2026-10-27: building on Meteora is permissionless and needs no approval, partner agreement or fee arrangement, as long as the product keeps to the Terms of Service and Privacy Policy, and a launchpad built on Meteora is not counted as competitive; licence files for the DLMM and Alpha Vault SDKs are being added.
    Not yet answered, in a follow-up drafted on that ticket for the owner to send: whether our program may act for depositors (6.2(d)), whether Meteora's binaries may run in our tests, and whether the SDKs' IDLs may back CPI bindings.
@@ -753,13 +758,13 @@ When getting ready to launch, outside these slices: buy the Helius plan and swit
 ## 15. Out of scope
 
 Not in this build; each returns only as its own effort, mostly the mainnet effort:
-- Mainnet itself: legal work and country blocking, a security audit, the entity's jurisdiction, a signed partner agreement with Meteora, the legal check of the Greenflag name.
+- Mainnet itself: legal work and country blocking, a security audit, the entity's jurisdiction, a signed partner agreement with Meteora, the legal check of the Heat name.
 - Giving up the programs' upgrade keys, the members of the Squads multisig, a faster emergency rotation of the admission key than the timelock allows, an external signer or KMS for hot keys, and the mainnet LaserStream plan.
 - Integration requests to trading terminals (a Jupiter launchpad listing and custom tag, GMGN, Codex, Photon, Axiom, DexScreener), including asking GMGN to stop reading vault claims as phishing, to credit Jupiter Lock escrows as locked, and asking terminals to use the co-signed coin list; publishing the Creator record as a Solana Attestation Service attestation.
 - A platform token with buybacks; holder rewards, holder calls, user referrals, and a realized-profit leaderboard; cashback is dropped for good.
 - Stock-priced coins and any non-SOL quote on the site (the code stays quote-agnostic).
-- DLMM launch pools and DLMM markets; a Greenflag transfer hook; the DAMM v2 launch pool with an Alpha Vault as Fair Open's fallback (not needed, since the DBC creation transaction works on devnet).
-- Building Greenflag as a launch mode inside Stoker ([ADR 0001](adr/0001-separate-product-from-stoker.md), option C).
+- DLMM launch pools and DLMM markets; a Heat transfer hook; the DAMM v2 launch pool with an Alpha Vault as Fair Open's fallback (not needed, since the DBC creation transaction works on devnet).
+- Building Heat as a launch mode inside Stoker ([ADR 0001](adr/0001-separate-product-from-stoker.md), option C).
 - Livestreams, native mobile apps, and chains other than Solana.
 
 ## 16. Risks and what is unproven

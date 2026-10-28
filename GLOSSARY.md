@@ -1,4 +1,4 @@
-# Greenflag
+# Heat
 
 A fair-launch token launchpad on Solana, built on Meteora's pools.
 Its repo and folder keep the working name Top-pad.
@@ -9,7 +9,7 @@ Its reason to exist is that the people who launch and buy a coin are not beaten 
 ### Launches
 
 **Launch mode**:
-How a coin first reaches public trading on Greenflag: a Fair Open, the default, or an Instant launch.
+How a coin first reaches public trading on Heat: a Fair Open, the default, or an Instant launch.
 _Avoid_: launch type, launch style
 
 **Fair Open**:
@@ -47,7 +47,7 @@ _Avoid_: pair token, base token (the base token is the coin itself)
 
 **Stock-priced coin**:
 A coin whose quote asset is a stock token such as TSLAx; the coin itself is not a stock.
-_Avoid_: stock coin, xStock launch (Greenflag never issues stock tokens)
+_Avoid_: stock coin, xStock launch (Heat never issues stock tokens)
 
 **Token badge**:
 Meteora's per-token approval that lets a token with special Token-2022 features be used in one of its pool programs.
@@ -64,7 +64,7 @@ The one wallet that signs a Creator's launches and that terminals show as the co
 _Avoid_: dev wallet, deployer
 
 **Creator record**:
-The public history of a Creator's launches on Greenflag, tied to their X account and built only from facts anyone can check.
+The public history of a Creator's launches on Heat, tied to their X account and built only from facts anyone can check.
 _Avoid_: reputation score, trust score (it has no score), creator profile
 
 **Creator lock**:
@@ -79,7 +79,7 @@ A copycat token launched with a trending coin's name, ticker or image to pull bu
 _Avoid_: clone, fake, vampire attack (that is a different thing: luring away a protocol's liquidity)
 
 **Protected coin**:
-A coin that a vamp may not imitate on Greenflag, because it has earned real traction; its protection lapses when the traction does.
+A coin that a vamp may not imitate on Heat, because it has earned real traction; its protection lapses when the traction does.
 _Avoid_: reserved ticker, registered name (nobody reserves a name by launching first)
 
 **Sniper**:
@@ -95,7 +95,7 @@ A creator who secretly buys a large share of a coin's supply across many wallets
 _Avoid_: insider, dev wallet (a single disclosed creator wallet is not a bundler)
 
 **Bar**:
-A permanent stop on a Creator launching on Greenflag, imposed after a confirmed finding that they bundled their own launch; it can be lifted only on appeal and touches nothing already launched.
+A permanent stop on a Creator launching on Heat, imposed after a confirmed finding that they bundled their own launch; it can be lifted only on appeal and touches nothing already launched.
 _Avoid_: ban (too broad: a barred Creator may still trade and deposit), blacklist, suspension
 
 ### Fees
@@ -106,7 +106,7 @@ None of it goes to the coin's creator.
 _Avoid_: anti-sniper fee, snipe tax, launch tax
 
 **Tax window**:
-The first minute of a coin's trading, during which the sniper tax applies and the fees traders pay go to the Fair Open's depositors as their Tax Share, or to Greenflag in an Instant launch.
+The first minute of a coin's trading, during which the sniper tax applies and the fees traders pay go to the Fair Open's depositors as their Tax Share, or to Heat in an Instant launch.
 _Avoid_: deposit window (that is the Fair Open's window before trading starts), launch window
 
 **Tax Share**:
@@ -114,7 +114,7 @@ A Fair Open depositor's share of the sniper tax their coin collected, in proport
 _Avoid_: rebate (it is not their own money coming back), cashback, airdrop, holder rewards
 
 **Platform Fee**:
-Greenflag's share of the fees on trades of its coins, on the curve and after Graduation.
+Heat's share of the fees on trades of its coins, on the curve and after Graduation.
 _Avoid_: partner fee (Meteora's name for the role), protocol fee (that is Meteora's own cut)
 
 **Creator Earnings**:
