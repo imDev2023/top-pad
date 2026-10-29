@@ -1,0 +1,390 @@
+/*
+ * A coin's page (spec 9, screen 3): its head, the sniper tax, the chart and the way to Graduation beside the coin's facts,
+ * then its trades. One column on a phone, the facts after the chart.
+ */
+.page {
+  display: grid;
+  gap: 16px;
+}
+
+/* Head: the coin, then its market */
+.head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px 32px;
+}
+
+.identity {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.image,
+.initials {
+  flex: none;
+  width: 56px;
+  height: 56px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+}
+
+.image {
+  object-fit: cover;
+}
+
+.initials {
+  display: grid;
+  place-items: center;
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.title {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.title h1 {
+  overflow-wrap: anywhere;
+}
+
+.ticker {
+  font-family: var(--font-mono);
+  font-size: 1rem;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--muted);
+}
+
+.mint {
+  color: var(--muted);
+}
+
+.stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 28px;
+  margin: 0;
+}
+
+.stats div {
+  display: grid;
+  gap: 2px;
+}
+
+.stats dt {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.stats dd {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 500;
+}
+
+/* The sniper tax: yellow while it runs, green once it has */
+.taxBand {
+  display: grid;
+  grid-template-columns: 168px minmax(0, 1fr);
+  gap: 18px;
+  align-items: center;
+  padding: 12px 16px;
+  border: 1px solid var(--caution);
+  border-radius: var(--radius);
+  background: var(--caution-soft);
+}
+
+.taxDone {
+  border-color: var(--go);
+  background: var(--go-soft);
+}
+
+.taxRate {
+  font-size: 2rem;
+  font-weight: 500;
+  line-height: 1.15;
+  color: var(--caution);
+}
+
+.taxDone .taxRate {
+  color: var(--go);
+}
+
+.taxBody {
+  display: grid;
+  gap: 8px;
+}
+
+.taxTrack {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--panel-2);
+}
+
+.taxTrack i {
+  display: block;
+  height: 100%;
+  background: var(--caution);
+  transition: width 0.2s linear;
+}
+
+/* The chart and the way to Graduation, beside the coin's facts */
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 16px;
+  align-items: start;
+}
+
+.main {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.chartPanel {
+  display: grid;
+  overflow: hidden;
+}
+
+.chartHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.lengths {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+.length {
+  min-width: 34px;
+  min-height: 28px;
+  padding: 2px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.length:hover {
+  color: var(--fg);
+}
+
+.length[aria-pressed="true"] {
+  border-color: var(--line-strong);
+  background: var(--panel-2);
+  color: var(--fg);
+}
+
+.chartBox {
+  position: relative;
+  height: 340px;
+}
+
+/* Its own stacking context, so the chart's canvases (which set their own z-index) stay under the note. */
+.chart {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+
+.chartNote {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  pointer-events: none;
+}
+
+.graduation {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+}
+
+.gradBar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 22px;
+  height: 14px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+}
+
+.gradTrack {
+  position: relative;
+  background: var(--panel-2);
+}
+
+.gradTrack i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--go);
+}
+
+.facts {
+  display: grid;
+}
+
+.fact {
+  display: grid;
+  gap: 3px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+
+.fact:first-child {
+  border-top: 0;
+}
+
+/* Trades */
+.tradesPanel {
+  display: grid;
+  overflow: hidden;
+}
+
+.tradesHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.empty {
+  padding: 18px 16px;
+}
+
+.trades {
+  overflow-x: auto;
+}
+
+.tradeTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.tradeTable th {
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-align: left;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.tradeTable td {
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.tradeTable tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.tradeTable .right {
+  text-align: right;
+}
+
+.buy {
+  color: var(--go);
+}
+
+.sell {
+  color: var(--stop);
+}
+
+.taxed {
+  color: var(--caution);
+}
+
+.heavy {
+  color: var(--stop);
+}
+
+.feeSol {
+  color: var(--muted);
+}
+
+.fresh {
+  animation: fresh 1.6s ease-out;
+}
+
+@keyframes fresh {
+  from {
+    background: var(--go-soft);
+  }
+
+  to {
+    background: transparent;
+  }
+}
+
+@media (max-width: 900px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .head {
+    gap: 14px;
+  }
+
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px 16px;
+    width: 100%;
+  }
+
+  .taxBand {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .chartBox {
+    height: 280px;
+  }
+
+  .tradeTable th,
+  .tradeTable td {
+    padding: 8px 10px;
+  }
+
+  .wide,
+  .feeSol {
+    display: none;
+  }
+}

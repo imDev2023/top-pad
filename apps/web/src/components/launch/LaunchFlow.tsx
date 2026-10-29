@@ -3,6 +3,7 @@
 // The launch flow (spec 9, screen 4): link X, choose the launch mode, enter the coin with Vamp Shield's live verdicts,
 // sign, done. Fair Open is preselected, as it will be the default, and shown as coming until its scheduling lands; an
 // Instant launch goes through end to end.
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { LaunchRefusal, LaunchStatus, Me, Platform, VampShieldVerdict } from "@top-pad/contract";
@@ -431,12 +432,14 @@ export function LaunchFlow({ linkOutcome: arrived }: { linkOutcome: LinkOutcome 
             </button>
           </div>
         )}
-        {step === 4 && (
+        {step === 4 && landed && (
           <div className="spread">
-            <span />
-            <button type="button" className="btn btn-go" onClick={restart}>
+            <button type="button" className="btn btn-ghost" onClick={restart}>
               Launch another
             </button>
+            <Link className="btn btn-go" href={`/coin/${landed.mint}`}>
+              Watch it trade
+            </Link>
           </div>
         )}
       </div>

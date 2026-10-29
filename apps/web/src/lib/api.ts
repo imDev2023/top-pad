@@ -1,5 +1,8 @@
 import {
   ApiError,
+  Coin,
+  CoinCandles,
+  CoinTrades,
   Health,
   LaunchRefusal,
   LaunchStatus,
@@ -7,6 +10,7 @@ import {
   Platform,
   PreparedLaunch,
   VampShieldVerdict,
+  type CandleSeconds,
   type LaunchForm,
 } from "@top-pad/contract";
 import type { z } from "zod";
@@ -74,14 +78,7 @@ export async function getPlatformOrNull(): Promise<Platform | null> {
 }
 
 /** The Creator this browser linked, or null when it has not linked X. */
-export async function getMe(): Promise<Me | null> {
-  try {
-    return await call(Me, "/me");
-  } catch (e) {
-    if (e instanceof ApiProblem && e.status === 401) return null;
-    throw e;
-  }
-}
+export const getMe = (): Promise<Me | null> => call(Me.nullable(), "/me");
 
 export const logout = () => fetch(`${API_URL}/auth/logout`, { method: "POST", credentials: "include" });
 
@@ -111,3 +108,28 @@ export const submitLaunch = (id: string, transaction: string) =>
   });
 
 export const getLaunch = (id: string) => call(LaunchStatus, `/launches/${id}`);
+
+/** A coin as the server renders its page: "missing" when Heat has no coin at the address, "unavailable" when the API did not answer. */
+export async function loadCoin(mint: string): Promise<Coin | "missing" | "unavailable"> {
+  try {
+    const res = await fetch(`${API_URL}/coins/${encodeURIComponent(mint)}`, { cache: "no-store", signal: AbortSignal.timeout(8_000) });
+    if (res.status === 404) return "missing";
+    const parsed = Coin.safeParse(await res.json());
+    return res.ok && parsed.success ? parsed.data : "unavailable";
+  } catch {
+    return "unavailable";
+  }
+}
+
+export const getCoin = (mint: string) => call(Coin, `/coins/${encodeURIComponent(mint)}`);
+
+/** A coin's latest trades, newest first; or with `after`, every trade since that order key, oldest first. */
+export function getCoinTrades(mint: string, query: { after?: string; before?: string; limit?: number } = {}) {
+  const params = new URLSearchParams(Object.entries(query).flatMap(([k, v]) => (v === undefined ? [] : [[k, String(v)]])));
+  return call(CoinTrades, `/coins/${encodeURIComponent(mint)}/trades${params.size ? `?${params}` : ""}`);
+}
+
+export const getCoinCandles = (mint: string, seconds: CandleSeconds) => call(CoinCandles, `/coins/${encodeURIComponent(mint)}/candles?seconds=${seconds}`);
+
+/** A coin's live room: its trades as they land (spec 10.2). */
+export const coinLiveUrl = (mint: string) => `${API_URL.replace(/^http/, "ws")}/live/coins/${encodeURIComponent(mint)}`;

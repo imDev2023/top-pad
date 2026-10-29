@@ -6,6 +6,8 @@ const config: NextConfig = {
   poweredByHeader: false,
   transpilePackages: ["@top-pad/contract", "@top-pad/vamp-shield"],
   images: { unoptimized: true },
+  // Next's dev badge would sit over the pages the end-to-end tests photograph.
+  devIndicators: false,
 };
 
 initOpenNextCloudflareForDev();
