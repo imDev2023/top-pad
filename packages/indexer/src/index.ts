@@ -68,21 +68,22 @@ const FETCH_BATCH = 8;
 
 /**
  * Reconciliation (spec 10.2): indexes each confirmed transaction of one account newer than its cursor, oldest first, and
- * moves the cursor to the newest it got to. One the live source already indexed is passed over without being fetched.
- * A listed transaction that can't be fetched yet (an RPC node behind the one that listed it, say) stops it there, so
- * the cursor never moves past a transaction that was not indexed. `limit` stops it after that many transactions, for a
- * caller that comes back; `complete` says whether it reached the newest one.
+ * moves the cursor to the newest it got to. One the live source already indexed is passed over without being fetched,
+ * and a failed one is passed over too, since it changed nothing. A listed transaction that can't be fetched yet (an RPC
+ * node behind the one that listed it, say) stops it there, so the cursor never moves past a transaction that was not
+ * indexed. `limit` stops it after that many transactions, for a caller that comes back; `complete` says whether it
+ * reached the newest one, and `cursor` is where it now stands.
  */
 export async function reconcileAccount(
   db: Db, source: HistorySource, handle: TransactionHandler, account: string, limit = Infinity,
-): Promise<{ indexed: IndexResult; seen: number; complete: boolean }> {
+): Promise<{ indexed: IndexResult; seen: number; complete: boolean; cursor: string | null }> {
   const [cursor] = await db.select().from(indexerCursors).where(eq(indexerCursors.account, account)).limit(1);
   const until = cursor?.signature ?? undefined;
   const listed: ListedSignature[] = [];
   let before: string | undefined;
   for (;;) {
     const page = await source.listSignatures(account, { before, until, limit: SIGNATURE_PAGE });
-    listed.push(...page.filter((s) => !s.failed));
+    listed.push(...page);
     if (page.length < SIGNATURE_PAGE) break;
     before = page.at(-1)!.signature;
   }
@@ -101,9 +102,9 @@ export async function reconcileAccount(
           .where(inArray(indexedTransactions.signature, batch.map((s) => s.signature)))
       ).map((r) => r.signature),
     );
-    const raws = await Promise.all(batch.map((s) => (known.has(s.signature) ? null : source.fetchTransaction(s.signature))));
+    const raws = await Promise.all(batch.map((s) => (known.has(s.signature) || s.failed ? null : source.fetchTransaction(s.signature))));
     for (const [j, listedSig] of batch.entries()) {
-      if (known.has(listedSig.signature)) {
+      if (known.has(listedSig.signature) || listedSig.failed) {
         newest = listedSig;
         seen++;
         continue;
@@ -127,7 +128,7 @@ export async function reconcileAccount(
         target: indexerCursors.account,
         set: { signature: newest.signature, slot: newest.slot, updatedAt: sql`now()` },
       });
-  return { indexed, seen, complete };
+  return { indexed, seen, complete, cursor: newest?.signature ?? until ?? null };
 }
 
 /** Reconciliation over a plain RPC endpoint: Kit lists the signatures, and transactions come back as raw JSON. */

@@ -57,6 +57,8 @@ export class Indexer extends DurableObject<Bindings> {
   private reconciledAt = 0;
   private lastError: string | null = null;
   private handle: TransactionHandler | null = null;
+  /** Where reconciliation stands on each account, read from Postgres once per instance, then kept here. */
+  private cursors = new Map<string, string | null>();
 
   /** The accounts whose transactions are Heat's: both configs (every pool and swap on them) and the fee program. */
   private watching(): string[] {
@@ -185,16 +187,30 @@ export class Indexer extends DurableObject<Bindings> {
     }
   }
 
+  /**
+   * Reconciliation, asking the chain first: an account with nothing past its cursor needs no database, so a quiet Heat
+   * lets the devnet database sleep (Neon scales to zero after 5 idle minutes; spec 16) rather than waking it every minute.
+   */
   private async reconcile() {
-    const cfg = config(this.env);
-    const { db, close } = createDb(this.env.HYPERDRIVE.connectionString);
-    try {
-      const source = rpcSource(cfg.rpcUrl);
-      for (const account of this.watching()) await reconcileAccount(db, source, this.handler(), account, RECONCILE_LIMIT);
-      this.reconciledAt = Date.now();
-    } finally {
-      await close();
+    const source = rpcSource(config(this.env).rpcUrl);
+    const behind: string[] = [];
+    for (const account of this.watching()) {
+      const cursor = this.cursors.get(account);
+      const quiet = cursor !== undefined && (await source.listSignatures(account, { until: cursor ?? undefined, limit: 1 })).length === 0;
+      if (!quiet) behind.push(account);
     }
+    if (behind.length) {
+      const { db, close } = createDb(this.env.HYPERDRIVE.connectionString);
+      try {
+        for (const account of behind) {
+          const { cursor } = await reconcileAccount(db, source, this.handler(), account, RECONCILE_LIMIT);
+          this.cursors.set(account, cursor);
+        }
+      } finally {
+        await close();
+      }
+    }
+    this.reconciledAt = Date.now();
   }
 
   /** Sends what a transaction added to its coins' rooms and the board's. */
