@@ -1,0 +1,18 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "top-pad-x-stand-in",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-10-20",
+  "observability": { "enabled": true },
+  // The callbacks it sends a browser back to, as an X app lists them; locally it runs in Node instead (src/node.ts).
+  "vars": { "CALLBACKS": "http://localhost:8801/auth/x/callback" },
+  // The devnet API links X through this Worker until Heat has its own X app; deployed by `pnpm deploy:devnet` at the
+  // repo root, before the API.
+  "env": {
+    "devnet": {
+      "name": "top-pad-x-stand-in-devnet",
+      "workers_dev": true,
+      "vars": { "CALLBACKS": "https://top-pad-api-devnet.imdev2023.workers.dev/auth/x/callback" }
+    }
+  }
+}

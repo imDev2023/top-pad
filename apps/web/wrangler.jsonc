@@ -1,5 +1,5 @@
 {
-  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "$schema": "node_modules/wrangler/config-schema.json",
   "name": "top-pad-web",
   "main": ".open-next/worker.js",
   "compatibility_date": "2026-10-20",

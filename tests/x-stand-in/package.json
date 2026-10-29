@@ -1,0 +1,21 @@
+{
+  "name": "@top-pad/x-stand-in",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/handler.ts",
+    "./node": "./src/node.ts"
+  },
+  "scripts": {
+    "dev": "tsx src/node.ts",
+    "typecheck": "tsc -p .",
+    "test": "vitest run",
+    "deploy:devnet": "wrangler deploy --env devnet"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "tsx": "^4.23.15",
+    "vitest": "^5.0.5",
+    "wrangler": "^4.154.0"
+  }
+}

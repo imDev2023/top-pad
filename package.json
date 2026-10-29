@@ -15,7 +15,7 @@
     "test:programs": "cargo test",
     "clients": "pnpm --filter @top-pad/clients generate",
     "db:migrate": "pnpm --filter @top-pad/db migrate",
-    "deploy:devnet": "pnpm db:migrate && pnpm --filter @top-pad/api deploy:devnet && pnpm --filter @top-pad/web deploy:devnet"
+    "deploy:devnet": "pnpm db:migrate && pnpm --filter @top-pad/x-stand-in deploy:devnet && pnpm --filter @top-pad/api deploy:devnet && pnpm --filter @top-pad/web deploy:devnet"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

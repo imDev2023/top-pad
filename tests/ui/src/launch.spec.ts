@@ -81,6 +81,11 @@ test("a creator launches an Instant launch from the site", async ({ page }) => {
   await snap(page, "1-link-x");
 
   await page.getByRole("link", { name: "Link X" }).click();
+  // The stand-in for X's authorize page (tests/x-stand-in): link as this run's own new creator.
+  await expect(page.getByRole("heading", { name: "Heat wants to read your X account" })).toBeVisible();
+  await page.getByLabel("Handle").fill(handle);
+  await snap(page, "1b-x-stand-in");
+  await page.getByRole("button", { name: "Authorize app" }).click();
   await expect(page.getByText("Your X account is linked.")).toBeVisible();
   await expect(page.getByRole("heading", { name: "How should your coin start trading?" })).toBeVisible();
   await expect(page.getByText(`@${handle}`)).toBeVisible();

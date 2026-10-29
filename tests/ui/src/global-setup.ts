@@ -1,14 +1,14 @@
 import { randomInt } from "node:crypto";
-import { startFakeX } from "./fake-x";
+import { serveXStandIn } from "@top-pad/x-stand-in/node";
 
 /**
- * Serves the stand-in X on 8890, as a creator new to Heat each run: a fresh X user id makes a fresh Creator record, so
- * the run's own wallet becomes its Creator wallet. The id and handle reach the tests through the environment.
+ * The run's creator, new to Heat each run: a fresh handle on the stand-in for X makes a fresh Creator record, so the
+ * run's own wallet becomes its Creator wallet. The handle reaches the tests through the environment. Locally it also
+ * serves the stand-in on 8890 for the local API; against devnet the API links the deployed stand-in.
  */
 export default async function globalSetup() {
-  const id = String(randomInt(1e12, 9e12));
-  const username = `e2e_${id.slice(-6)}`;
-  process.env.E2E_X_HANDLE = username;
-  const server = await startFakeX(8890, { id, username, name: "E2E Creator" });
+  process.env.E2E_X_HANDLE = `e2e_creator_${randomInt(1e9, 1e10)}`;
+  if (process.env.E2E_TARGET === "devnet") return;
+  const server = await serveXStandIn(8890, { callbacks: ["http://localhost:8801/auth/x/callback"] });
   return () => new Promise<void>((done) => server.close(() => done()));
 }
