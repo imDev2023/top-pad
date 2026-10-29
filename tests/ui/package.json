@@ -13,6 +13,8 @@
     "@solana/kit": "^8.5.0",
     "@top-pad/chain": "workspace:*",
     "@top-pad/clients": "workspace:*",
+    "@top-pad/contract": "workspace:*",
+    "@top-pad/tests-devnet": "workspace:*",
     "@top-pad/x-stand-in": "workspace:*",
     "@types/node": "^24.19.2"
   }

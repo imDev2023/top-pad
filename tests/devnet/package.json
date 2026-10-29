@@ -2,6 +2,9 @@
   "name": "@top-pad/tests-devnet",
   "private": true,
   "type": "module",
+  "exports": {
+    "./devnet": "./src/devnet.ts"
+  },
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc -p ."
@@ -13,6 +16,9 @@
     "@solana/kit": "^8.5.0",
     "@top-pad/chain": "workspace:*",
     "@top-pad/clients": "workspace:*",
+    "@top-pad/contract": "workspace:*",
+    "@top-pad/db": "workspace:*",
+    "@top-pad/indexer": "workspace:*",
     "@top-pad/meteora": "workspace:*",
     "@types/node": "^24.19.2",
     "vitest": "^5.0.5"

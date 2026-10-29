@@ -2,83 +2,21 @@
 // sign once. The coin then exists on devnet as a Heat coin, its metadata on Arweave naming the creator's X, and no other
 // wallet can launch for the same record. Each step is photographed on a phone and a desktop, in both themes, for the
 // pixel check (spec 14: every screen ships both).
-import { mkdirSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { expect, test, type Page } from "@playwright/test";
-import {
-  address,
-  appendTransactionMessageInstruction,
-  createKeyPairSignerFromBytes,
-  createSolanaRpc,
-  createSolanaRpcSubscriptions,
-  createTransactionMessage,
-  generateKeyPairSigner,
-  pipe,
-  sendAndConfirmTransactionFactory,
-  setTransactionMessageFeePayerSigner,
-  setTransactionMessageLifetimeUsingBlockhash,
-  signTransactionMessageWithSigners,
-  assertIsTransactionWithBlockhashLifetime,
-} from "@solana/kit";
-import { getTransferSolInstruction } from "@solana-program/system";
+import { readFileSync } from "node:fs";
+import { expect, test } from "@playwright/test";
+import { address, generateKeyPairSigner } from "@solana/kit";
 import { CLUSTERS } from "@top-pad/chain";
 import { fetchVirtualPool } from "@top-pad/clients/dbc";
 import { fetchCoinRecord, findCoinRecordPda, LaunchMode } from "@top-pad/clients/fee";
+import { fundedWallets, rpc } from "@top-pad/tests-devnet/devnet";
+import { coinImage, newHandle, newTicker, pageErrors, short, snap } from "./steps";
 import { TARGET } from "./target";
 import { connectTestWallet, installTestWallet } from "./wallet";
 
-const here = dirname(fileURLToPath(import.meta.url));
-const shots = join(here, "..", "test-results", "shots");
-const rpcUrl = process.env.DEVNET_RPC_URL || "https://api.devnet.solana.com";
-const rpc = createSolanaRpc(rpcUrl);
-const coinImage = join(here, "..", "fixtures", "coin.png");
-/** An address as the pages and the API shorten it. */
-const short = (a: string) => `${a.slice(0, 4)}\u{2026}${a.slice(-4)}`;
-const newTicker = () => `E2E${Math.random().toString(36).slice(2, 7).toUpperCase().replace(/[^A-Z0-9]/g, "X")}`;
-
-const VIEWS = [
-  { name: "desktop-dark", width: 1440, height: 900, colorScheme: "dark" },
-  { name: "desktop-light", width: 1440, height: 900, colorScheme: "light" },
-  { name: "phone-dark", width: 390, height: 844, colorScheme: "dark" },
-  { name: "phone-light", width: 390, height: 844, colorScheme: "light" },
-] as const;
-
-/** The page as it is now, in every view, then back to the desktop in dark. */
-async function snap(page: Page, step: string) {
-  mkdirSync(shots, { recursive: true });
-  for (const view of VIEWS) {
-    await page.setViewportSize({ width: view.width, height: view.height });
-    await page.emulateMedia({ colorScheme: view.colorScheme });
-    await page.waitForTimeout(150);
-    await page.screenshot({ path: join(shots, `${step}-${view.name}.png`), fullPage: true });
-  }
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.emulateMedia({ colorScheme: "dark" });
-}
-
-/** A creator's wallet with a little devnet SOL from the Solana CLI's wallet: enough for the rent and the fees. */
-async function fundedCreator() {
-  const bank = await createKeyPairSignerFromBytes(Uint8Array.from(JSON.parse(readFileSync(join(homedir(), ".config/solana/id.json"), "utf8"))));
-  const creator = await generateKeyPairSigner();
-  const { value: blockhash } = await rpc.getLatestBlockhash({ commitment: "confirmed" }).send();
-  const transfer = await signTransactionMessageWithSigners(
-    pipe(
-      createTransactionMessage({ version: 0 }),
-      (m) => setTransactionMessageFeePayerSigner(bank, m),
-      (m) => setTransactionMessageLifetimeUsingBlockhash(blockhash, m),
-      (m) => appendTransactionMessageInstruction(getTransferSolInstruction({ source: bank, destination: creator.address, amount: 30_000_000n }), m),
-    ),
-  );
-  assertIsTransactionWithBlockhashLifetime(transfer);
-  await sendAndConfirmTransactionFactory({ rpc, rpcSubscriptions: createSolanaRpcSubscriptions(rpcUrl.replace(/^http/, "ws")) })(transfer, { commitment: "confirmed" });
-  return creator;
-}
-
 test("a creator launches an Instant launch from the site", async ({ browser, page }) => {
-  const handle = process.env.E2E_X_HANDLE!;
-  const creator = await fundedCreator();
+  const errors = pageErrors(page);
+  const handle = newHandle();
+  const [creator] = await fundedWallets(30_000_000n);
   const wallet = await installTestWallet(page, creator);
   const ticker = newTicker();
 
@@ -194,4 +132,5 @@ test("a creator launches an Instant launch from the site", async ({ browser, pag
     code: "not_the_creator_wallet",
   });
   await other.close();
+  expect(errors).toEqual([]);
 });
