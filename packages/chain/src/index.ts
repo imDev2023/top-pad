@@ -25,6 +25,12 @@ export type HeatCluster = {
   graduationTarget: bigint;
   /** Heat's two DBC configs, once created by `pnpm --filter @top-pad/meteora configs <cluster> --send`. */
   configs: { fairOpen: Address; instant: Address } | null;
+  /**
+   * Who the fee program's `FeeConfig` names (spec 5.2, 10.3), set by `pnpm --filter @top-pad/chain fee-config <cluster>`:
+   * the treasury, which receives Heat's Platform Fee, and the keeper key, which is also the launch key that co-signs
+   * launches and registers coins.
+   */
+  keys: { treasury: Address; keeper: Address } | null;
 };
 
 /**
@@ -41,10 +47,19 @@ export const CLUSTERS: Record<Cluster, HeatCluster | null> = {
       fairOpen: address("rPqMj6mwJp9qnZBMeawF8s2iC74EkhpbUSvhWd9XTnC"),
       instant: address("CMSi1oRQsZJbogjxajFCuGYze3NW9oieuKNrxGPjg8Mi"),
     },
+    // Made on 2026-10-29 (#41): plain keys on devnet, kept outside the repo in ~/.config/top-pad/devnet.
+    keys: {
+      treasury: address("F7mn4DAccxre57wjoNoQzDgmk7H6mYG2NuWwG8Yt3oTG"),
+      keeper: address("GpDvDUpEC9ynHTJBt3XaZcTvBUw1HaMnU9Wwox18xfNi"),
+    },
   },
   mainnet: {
     quote: { mint: WSOL_MINT, decimals: 9 },
     graduationTarget: 85_000_000_000n,
     configs: null,
+    keys: null,
   },
 };
+
+export * from "./dbc";
+export * from "./launch";

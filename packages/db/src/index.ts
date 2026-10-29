@@ -14,6 +14,9 @@ export function createDb(connectionString: string) {
 
 export type Db = ReturnType<typeof createDb>["db"];
 
+/** A database client or an open transaction on one: what a query that may run inside a transaction takes. */
+export type DbOrTransaction = Db | Parameters<Parameters<Db["transaction"]>[0]>[0];
+
 /** The database's clock and how many migrations it has applied, read in one round trip for the health route. */
 export async function probe(db: Db): Promise<{ serverTime: Date; migrations: number }> {
   const rows = await db.execute<{ server_time: Date | string; migrations: number | string }>(sql`

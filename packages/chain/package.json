@@ -7,10 +7,13 @@
   },
   "scripts": {
     "typecheck": "tsc -p .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "fee-config": "tsx scripts/fee-config.ts"
   },
   "dependencies": {
+    "@solana-program/compute-budget": "^0.20.0",
     "@solana/kit": "^8.5.0",
+    "@top-pad/clients": "workspace:*",
     "@top-pad/contract": "workspace:*"
   },
   "devDependencies": {
