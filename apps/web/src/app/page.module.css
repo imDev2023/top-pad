@@ -1,0 +1,56 @@
+.hero {
+  display: grid;
+  gap: 14px;
+  padding: 28px 28px 30px;
+  border-left: 4px solid var(--go);
+}
+
+.title {
+  font-size: 2.6rem;
+}
+
+.lead {
+  max-width: 62ch;
+  color: var(--muted);
+  font-size: 1.02rem;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.facts li {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+}
+
+.facts p {
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.facts :global(.chip) {
+  justify-self: start;
+}
+
+@media (max-width: 900px) {
+  .facts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 560px) {
+  .hero {
+    padding: 20px 18px 22px;
+  }
+
+  .title {
+    font-size: 2.1rem;
+  }
+}

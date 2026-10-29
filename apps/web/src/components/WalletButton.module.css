@@ -1,0 +1,114 @@
+.wrap {
+  position: relative;
+}
+
+.inline {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+}
+
+.glyph {
+  flex: none;
+}
+
+.icon {
+  flex: none;
+  border-radius: 4px;
+}
+
+.connected {
+  gap: 8px;
+  padding-inline: 12px;
+  font-weight: 500;
+}
+
+.menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  display: grid;
+  min-width: 240px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.inline .menu {
+  right: auto;
+  left: 0;
+}
+
+.menu button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menu button:hover,
+.menu button:focus-visible {
+  background: var(--panel-2);
+}
+
+.menuNote {
+  display: grid;
+  gap: 2px;
+  padding: 6px 10px 8px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.menuNote span {
+  color: var(--fg);
+}
+
+.empty {
+  max-width: 280px;
+  padding: 8px 10px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.problem {
+  color: var(--stop);
+  font-size: 0.82rem;
+}
+
+@media (max-width: 640px) {
+  /* On a phone the header's button is its glyph alone; the words stay as its accessible name. */
+  .header .connectWord {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .header .connect {
+    width: 40px;
+    padding: 0;
+  }
+
+  .header .connected {
+    padding-inline: 10px;
+  }
+
+  .inline,
+  .inline .connect {
+    width: 100%;
+  }
+}

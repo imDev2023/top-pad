@@ -1,9 +1,12 @@
+import type { Metadata } from "next";
 import type { Health } from "@top-pad/contract";
 import { getHealth } from "@/lib/api";
 import styles from "./page.module.css";
 
 // Read on every request: the page is the deployed build's live health check.
 export const dynamic = "force-dynamic";
+
+export const metadata: Metadata = { title: "Status" };
 
 const utc = (iso: string) => `${iso.slice(0, 10)} ${iso.slice(11, 19)} UTC`;
 
@@ -23,7 +26,7 @@ export default async function StatusPage() {
   return (
     <main className={styles.page}>
       <header className={styles.header}>
-        <h1 className={styles.title}>Devnet status</h1>
+        <h1 className={styles.title}>Status</h1>
         <p className={styles.checked}>Checked {utc(checkedAt)}</p>
       </header>
 

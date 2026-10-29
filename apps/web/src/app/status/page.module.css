@@ -24,8 +24,8 @@
 }
 
 .card {
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: var(--panel);
+  border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 20px;
 }
@@ -64,18 +64,18 @@
 }
 
 .ok {
-  color: var(--ok);
-  background: var(--ok-bg);
+  color: var(--go);
+  background: var(--go-soft);
 }
 
 .warn {
-  color: var(--warn);
-  background: var(--warn-bg);
+  color: var(--caution);
+  background: var(--caution-soft);
 }
 
 .bad {
-  color: var(--bad);
-  background: var(--bad-bg);
+  color: var(--stop);
+  background: var(--stop-soft);
 }
 
 .summary {
@@ -86,7 +86,7 @@
 
 .rows {
   margin: 20px 0 0;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--line);
 }
 
 .row {
@@ -95,7 +95,7 @@
   align-items: baseline;
   gap: 16px;
   padding: 12px 0;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--line);
 }
 
 .row:last-child {

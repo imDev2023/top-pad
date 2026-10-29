@@ -1,0 +1,25 @@
+.footer {
+  border-top: 1px solid var(--line);
+  color: var(--faint);
+  font-size: 0.8rem;
+}
+
+.inner {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px 16px;
+  width: 100%;
+  max-width: calc(var(--page) + 2 * var(--gutter));
+  margin: 0 auto;
+  padding: 18px var(--gutter) 28px;
+}
+
+.links {
+  display: flex;
+  gap: 16px;
+}
+
+.links a {
+  color: var(--muted);
+}

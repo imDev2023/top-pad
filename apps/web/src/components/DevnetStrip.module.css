@@ -1,0 +1,21 @@
+.strip {
+  border-bottom: 1px dashed var(--line);
+  background: var(--bg);
+}
+
+.inner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  width: 100%;
+  max-width: calc(var(--page) + 2 * var(--gutter));
+  margin: 0 auto;
+  padding: 6px var(--gutter);
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.inner b {
+  color: var(--caution);
+  font-weight: 600;
+}
