@@ -6,8 +6,9 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "typecheck": "tsc -p .",
-    "test": "vitest run"
+    "typecheck": "tsc -p . && tsc -p scripts",
+    "test": "vitest run",
+    "check-candles": "tsx scripts/check-candles.ts"
   },
   "dependencies": {
     "@solana/kit": "^8.5.0",
@@ -18,6 +19,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.19.2",
+    "tsx": "^4.23.15",
     "vitest": "^5.0.5"
   }
 }
