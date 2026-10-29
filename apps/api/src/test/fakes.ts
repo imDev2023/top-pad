@@ -72,6 +72,8 @@ export class Fakes {
   blockHeight = 900n;
   lastValidBlockHeight = 1_000n;
   signatureStatus: "confirmed" | "none" | "failed" = "confirmed";
+  /** The custom error a failed transaction's instruction returned. */
+  failedWith = 6005;
   sent: Transaction[] = [];
   simulated: Transaction[] = [];
   /** The chain's accounts, by address: what `getAccountInfo`, `getMultipleAccounts` and `getProgramAccounts` read. */
@@ -136,7 +138,7 @@ export class Fakes {
       case "getSignatureStatuses": {
         const asked = params[0] as string[];
         if (this.signatureStatus === "none") return ok({ context, value: asked.map(() => null) });
-        const err = this.signatureStatus === "failed" ? { InstructionError: [2, { Custom: 6005 }] } : null;
+        const err = this.signatureStatus === "failed" ? { InstructionError: [2, { Custom: this.failedWith }] } : null;
         const status = { slot: 4_242, confirmations: null, err, confirmationStatus: "confirmed", status: err ? { Err: err } : { Ok: null } };
         return ok({ context, value: asked.map(() => status) });
       }

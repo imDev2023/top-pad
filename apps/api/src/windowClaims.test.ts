@@ -87,6 +87,13 @@ describe("the window claim", () => {
     fakes.signatureStatus = "failed";
     await expect(sendWindowClaim(cfg, keeperKey(), coin.mint)).rejects.toThrow(/the window claim .* failed/);
   });
+
+  it("is done when another keeper's claim of the coin landed first", async () => {
+    const coin = await heatCoin({ windowClaimed: false });
+    fakes.signatureStatus = "failed";
+    fakes.failedWith = 6010;
+    expect(await sendWindowClaim(config(testBindings(url)), keeperKey(), coin.mint)).toEqual({ signature: null, sentLateMs: null });
+  });
 });
 
 /** A stand-in for the Workflow binding: the instances made, and what was asked of each. */

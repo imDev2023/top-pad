@@ -5,6 +5,7 @@ import {
   createSolanaRpc,
   getBase64EncodedWireTransaction,
   getSignatureFromTransaction,
+  isSolanaError,
   signTransactionMessageWithSigners,
   type Address,
   type Signature,
@@ -23,6 +24,21 @@ const limited = () => ({ abortSignal: AbortSignal.timeout(RPC_TIMEOUT_MS) });
 /** How long one try waits for its claim to confirm before the step tries again. */
 const CONFIRM_WAIT_MS = 30_000;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** The fee program's `WindowAlreadyClaimed` (programs/fee, `FeeError`). */
+const WINDOW_ALREADY_CLAIMED = 6010;
+
+/** The custom error code a failed transaction's instruction returned, if any. */
+function customError(err: unknown): number | null {
+  const custom = (err as { InstructionError?: [unknown, { Custom?: number | bigint }] } | null)?.InstructionError?.[1]?.Custom;
+  return custom === undefined ? null : Number(custom);
+}
+
+/** Why a send was refused, with the program's own log line when its preflight caught it. */
+function refusal(e: unknown): string {
+  if (!isSolanaError(e)) return (e as Error).message;
+  const logs = (e.context as { logs?: string[] } | undefined)?.logs ?? [];
+  return logs.find((line) => line.includes("Error Message:"))?.replace(/^.*Error Message:\s*/, "") ?? e.message;
+}
 
 /** What one Workflow needs to keep an Instant launch: the coin it keeps. */
 export type KeeperParams = { mint: string };
@@ -74,7 +90,12 @@ export async function sendWindowClaim(cfg: Config, keeperKey: SecretBinding, min
   const transaction = await signTransactionMessageWithSigners(message);
   const signature = getSignatureFromTransaction(transaction);
   const sentAt = Date.now();
-  await rpc.sendTransaction(getBase64EncodedWireTransaction(transaction), { encoding: "base64", preflightCommitment: "confirmed" }).send(limited());
+  try {
+    await rpc.sendTransaction(getBase64EncodedWireTransaction(transaction), { encoding: "base64", preflightCommitment: "confirmed" }).send(limited());
+  } catch (e) {
+    // Most often "The pool's Tax window has not ended": the chain's clock trails this Worker's by a second or so.
+    throw new Error(`the window claim was refused: ${refusal(e)}`, { cause: e });
+  }
 
   const until = Date.now() + CONFIRM_WAIT_MS;
   for (;;) {
@@ -85,6 +106,8 @@ export async function sendWindowClaim(cfg: Config, keeperKey: SecretBinding, min
       .send(limited())
       .catch(() => null);
     const status = answer?.value[0];
+    // Another keeper's claim of the coin landed first, as when a local API and the deployed one keep the same devnet coin.
+    if (status?.err && customError(status.err) === WINDOW_ALREADY_CLAIMED) return { signature: null, sentLateMs: null };
     if (status?.err) throw new Error(`the window claim ${signature} failed: ${JSON.stringify(status.err, (_, v) => (typeof v === "bigint" ? `${v}` : v))}`);
     if (status?.confirmationStatus === "confirmed" || status?.confirmationStatus === "finalized") break;
     if (Date.now() > until) throw new Error(`the window claim ${signature} did not confirm in time`);
