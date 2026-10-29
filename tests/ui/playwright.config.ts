@@ -5,8 +5,8 @@
 // (~/.config/top-pad/devnet/keeper.json), so it runs by hand, like the devnet tests, never in CI. Local servers already
 // running on the ports are reused.
 import { defineConfig } from "@playwright/test";
+import { TARGET } from "./src/target";
 
-const DEVNET = process.env.E2E_TARGET === "devnet";
 const X_STAND_IN = "http://localhost:8890";
 
 /** The API and the web app on this Mac, against devnet, as `wrangler dev` and `next dev`. */
@@ -50,10 +50,10 @@ export default defineConfig({
   outputDir: "./test-results",
   globalSetup: "./src/global-setup.ts",
   use: {
-    baseURL: DEVNET ? "https://top-pad-web-devnet.imdev2023.workers.dev" : "http://localhost:3110",
+    baseURL: TARGET.web,
     trace: "retain-on-failure",
     viewport: { width: 1440, height: 900 },
     colorScheme: "dark",
   },
-  webServer: DEVNET ? [] : localServers(),
+  webServer: TARGET.name === "devnet" ? [] : localServers(),
 });

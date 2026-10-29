@@ -333,9 +333,14 @@ export function LaunchFlow({ linkOutcome: arrived }: { linkOutcome: LinkOutcome 
               {!account ? (
                 <div className="stack">
                   <p className="note">
-                    {creatorWallet
-                      ? `Connect your Creator wallet, ${shortAddress(creatorWallet)}: it is the only wallet that can sign your launches.`
-                      : "The wallet that signs this launch becomes your Creator wallet, the only one that can sign your launches."}
+                    {creatorWallet ? (
+                      <>
+                        Connect your Creator wallet, <span className="mono">{shortAddress(creatorWallet)}</span>: it is the only wallet
+                        that can sign your launches.
+                      </>
+                    ) : (
+                      "The wallet that signs this launch becomes your Creator wallet, the only one that can sign your launches."
+                    )}
                   </p>
                   <WalletButton variant="inline" />
                 </div>
@@ -343,8 +348,8 @@ export function LaunchFlow({ linkOutcome: arrived }: { linkOutcome: LinkOutcome 
                 <div className="verdict verdict-stop" role="alert">
                   <b>This is not your Creator wallet</b>
                   <span className="note">
-                    Your launches are signed by {shortAddress(creatorWallet!)}. Connect that wallet to launch; a new Creator wallet
-                    comes by a handover the old one signs.
+                    Your launches are signed by <span className="mono">{shortAddress(creatorWallet!)}</span>. Connect that wallet to
+                    launch; a new Creator wallet comes by a handover the old one signs.
                   </span>
                 </div>
               ) : (
@@ -459,9 +464,14 @@ function Linked({ me, onUnlink }: { me: Me; onUnlink: () => void }) {
     <div className="verdict verdict-go">
       <b>Linked as @{me.x.handle}</b>
       <span className="note">
-        {me.creatorWallet
-          ? `Creator wallet: ${shortAddress(me.creatorWallet)}. It is the only wallet that can sign your launches.`
-          : "Your first launch makes the wallet that signs it your Creator wallet, the only one that can sign your launches."}{" "}
+        {me.creatorWallet ? (
+          <>
+            Creator wallet: <span className="mono">{shortAddress(me.creatorWallet)}</span>. It is the only wallet that can sign your
+            launches.
+          </>
+        ) : (
+          "Your first launch makes the wallet that signs it your Creator wallet, the only one that can sign your launches."
+        )}{" "}
         {me.launches > 0 ? `${me.launches} launch${me.launches === 1 ? "" : "es"} so far.` : "Record: first launch."}
       </span>
       <span>

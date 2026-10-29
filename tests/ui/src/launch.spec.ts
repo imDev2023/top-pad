@@ -1,6 +1,7 @@
 // A creator launches an Instant launch from the site: link X, choose Instant launch, enter the coin, connect a wallet,
-// sign once. The coin then exists on devnet as a Heat coin, its metadata on Arweave naming the creator's X. Each step is
-// photographed on a phone and a desktop, in both themes, for the pixel check (spec 14: every screen ships both).
+// sign once. The coin then exists on devnet as a Heat coin, its metadata on Arweave naming the creator's X, and no other
+// wallet can launch for the same record. Each step is photographed on a phone and a desktop, in both themes, for the
+// pixel check (spec 14: every screen ships both).
 import { mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -25,12 +26,17 @@ import { getTransferSolInstruction } from "@solana-program/system";
 import { CLUSTERS } from "@top-pad/chain";
 import { fetchVirtualPool } from "@top-pad/clients/dbc";
 import { fetchCoinRecord, findCoinRecordPda, LaunchMode } from "@top-pad/clients/fee";
+import { TARGET } from "./target";
 import { connectTestWallet, installTestWallet } from "./wallet";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const shots = join(here, "..", "test-results", "shots");
 const rpcUrl = process.env.DEVNET_RPC_URL || "https://api.devnet.solana.com";
 const rpc = createSolanaRpc(rpcUrl);
+const coinImage = join(here, "..", "fixtures", "coin.png");
+/** An address as the pages and the API shorten it. */
+const short = (a: string) => `${a.slice(0, 4)}\u{2026}${a.slice(-4)}`;
+const newTicker = () => `E2E${Math.random().toString(36).slice(2, 7).toUpperCase().replace(/[^A-Z0-9]/g, "X")}`;
 
 const VIEWS = [
   { name: "desktop-dark", width: 1440, height: 900, colorScheme: "dark" },
@@ -70,11 +76,11 @@ async function fundedCreator() {
   return creator;
 }
 
-test("a creator launches an Instant launch from the site", async ({ page }) => {
+test("a creator launches an Instant launch from the site", async ({ browser, page }) => {
   const handle = process.env.E2E_X_HANDLE!;
   const creator = await fundedCreator();
   const wallet = await installTestWallet(page, creator);
-  const ticker = `E2E${Math.random().toString(36).slice(2, 7).toUpperCase().replace(/[^A-Z0-9]/g, "X")}`;
+  const ticker = newTicker();
 
   await page.goto("/launch");
   await expect(page.getByRole("heading", { name: "Link your X account" })).toBeVisible();
@@ -109,7 +115,7 @@ test("a creator launches an Instant launch from the site", async ({ page }) => {
   await page.getByLabel("Ticker").fill(ticker.toLowerCase());
   await expect(page.getByLabel("Ticker")).toHaveValue(ticker);
   await page.getByLabel("Name").fill("E2E Lumen");
-  await page.locator('input[type="file"]').setInputFiles(join(here, "..", "fixtures", "coin.png"));
+  await page.locator('input[type="file"]').setInputFiles(coinImage);
   await expect(page.getByText("No protected coin matches this ticker or name.")).toBeVisible();
   await expect(page.getByText(/coin\.png · 160 × 160/)).toBeVisible();
   await snap(page, "4-coin-clear");
@@ -139,10 +145,53 @@ test("a creator launches an Instant launch from the site", async ({ page }) => {
   const metadata = (await (await fetch(metadataUri!)).json()) as { name: string; symbol: string; image: string; twitter: string };
   expect(metadata).toMatchObject({ name: "E2E Lumen", symbol: ticker, twitter: `https://x.com/${handle}` });
   const image = new Uint8Array(await (await fetch(metadata.image)).arrayBuffer());
-  expect(image).toEqual(new Uint8Array(readFileSync(join(here, "..", "fixtures", "coin.png"))));
+  expect(image).toEqual(new Uint8Array(readFileSync(coinImage)));
 
   // The record now has its Creator wallet: the one that signed its first launch.
   await page.getByRole("button", { name: "Launch another" }).click();
   await page.getByRole("button", { name: "Link X" }).click();
-  await expect(page.getByText(`Creator wallet: ${creator.address.slice(0, 4)}…${creator.address.slice(-4)}`)).toBeVisible();
+  await expect(page.getByText(`Creator wallet: ${short(creator.address)}`)).toBeVisible();
+
+  // Another wallet on the same record cannot launch: the page says why and offers no launch, and the API refuses it
+  // even when the page is bypassed.
+  const otherWallet = await generateKeyPairSigner();
+  const other = await browser.newContext({
+    storageState: await page.context().storageState(),
+    baseURL: TARGET.web,
+    viewport: { width: 1440, height: 900 },
+    colorScheme: "dark",
+  });
+  const otherPage = await other.newPage();
+  await installTestWallet(otherPage, otherWallet);
+  const otherTicker = newTicker();
+  await otherPage.goto("/launch");
+  await otherPage.getByRole("radio", { name: /Instant launch/ }).check();
+  await otherPage.getByRole("button", { name: "Continue" }).click();
+  await otherPage.getByLabel("Ticker").fill(otherTicker);
+  await otherPage.getByLabel("Name").fill("E2E Lumen");
+  await otherPage.locator('input[type="file"]').setInputFiles(coinImage);
+  await expect(otherPage.getByText("No protected coin matches this ticker or name.")).toBeVisible();
+  await otherPage.getByRole("button", { name: "Continue" }).click();
+  await connectTestWallet(otherPage, otherPage.getByRole("main").getByRole("button", { name: "Connect wallet" }));
+  await expect(otherPage.getByText("This is not your Creator wallet")).toBeVisible();
+  await expect(otherPage.getByText(`Your launches are signed by ${short(creator.address)}`)).toBeVisible();
+  await expect(otherPage.getByRole("button", { name: "Launch", exact: true })).toHaveCount(0);
+  await snap(otherPage, "8-not-the-creator-wallet");
+
+  const refused = await otherPage.request.post(`${TARGET.api}/launches`, {
+    headers: { origin: TARGET.web },
+    multipart: {
+      mode: "instant",
+      name: "E2E Lumen",
+      ticker: otherTicker,
+      wallet: otherWallet.address,
+      image: { name: "coin.png", mimeType: "image/png", buffer: readFileSync(coinImage) },
+    },
+  });
+  expect(refused.status()).toBe(403);
+  expect(await refused.json()).toEqual({
+    error: `Your Creator wallet is ${short(creator.address)}, the only wallet that can sign your launches. Connect it to launch.`,
+    code: "not_the_creator_wallet",
+  });
+  await other.close();
 });
