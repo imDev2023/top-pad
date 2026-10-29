@@ -46,9 +46,20 @@ export default defineConfig(
             ...web3Only,
             { group: ["@top-pad/db", "@top-pad/db/*"], message: "The web app reads data through the API (spec 10.1)." },
             { group: ["@top-pad/meteora", "@top-pad/indexer", "@top-pad/jobs"], message: "Server-side only; the web app calls the API." },
+            {
+              regex: "^@top-pad/vamp-shield(?!/rules$)",
+              message: "Only @top-pad/vamp-shield/rules runs in the browser; the rest carries the whole confusables table (spec 6.2).",
+            },
           ],
         },
       ],
+    },
+  },
+  {
+    // Vamp Shield's browser entry point imports nothing, so the confusables table can never reach the web app through it.
+    files: ["packages/vamp-shield/src/rules.ts"],
+    rules: {
+      "no-restricted-imports": ["error", { patterns: [{ regex: ".", message: "rules.ts runs in the browser and imports nothing." }] }],
     },
   },
 );

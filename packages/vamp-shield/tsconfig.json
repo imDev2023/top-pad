@@ -1,0 +1,6 @@
+{
+  // No Node types: src runs in Workers and, for ./rules, in the browser, so a Node-only API must not typecheck here.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "types": [] },
+  "include": ["src"]
+}
