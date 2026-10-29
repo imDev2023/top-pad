@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Health } from "@top-pad/contract";
 import { createTestDatabase } from "@top-pad/db/testing";
-import app from "./index";
+import { app } from "./index";
 import type { Bindings } from "./env";
 
 const migrationsDir = join(dirname(fileURLToPath(import.meta.url)), "../../../packages/db/migrations");
@@ -17,7 +17,12 @@ afterAll(() => drop());
 
 const pending: Promise<unknown>[] = [];
 const ctx = { waitUntil: (p: Promise<unknown>) => void pending.push(p), passThroughOnException: () => {}, props: {} };
-const env = (connectionString: string): Bindings => ({ CLUSTER: "localnet", WEB_ORIGIN: "http://localhost:3110", HYPERDRIVE: { connectionString } });
+const env = (connectionString: string): Bindings => ({
+  CLUSTER: "localnet",
+  WEB_ORIGIN: "http://localhost:3110",
+  API_ORIGIN: "http://localhost:8801",
+  HYPERDRIVE: { connectionString },
+});
 const health = (connectionString: string, init?: RequestInit) => app.request("/health", init, env(connectionString), ctx as never);
 
 describe("GET /health", () => {

@@ -10,8 +10,15 @@
     "deploy:devnet": "wrangler deploy --env devnet"
   },
   "dependencies": {
+    "@solana/kit": "^8.5.0",
+    "@top-pad/arweave": "workspace:*",
+    "@top-pad/chain": "workspace:*",
+    "@top-pad/clients": "workspace:*",
     "@top-pad/contract": "workspace:*",
     "@top-pad/db": "workspace:*",
+    "@top-pad/jobs": "workspace:*",
+    "@top-pad/vamp-shield": "workspace:*",
+    "drizzle-orm": "^0.45.4",
     "hono": "^4.13.14"
   },
   "devDependencies": {

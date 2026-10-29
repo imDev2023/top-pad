@@ -5,10 +5,16 @@
   "compatibility_date": "2026-10-20",
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
+  // Every five minutes: the keeper's float against its floor, housekeeping, then any open alert to the operator.
+  "triggers": { "crons": ["*/5 * * * *"] },
+  // Local development (`wrangler dev`) runs against devnet, the one cluster with Heat's configs, on the docker database.
+  // The keeper key and the X app's client come in as vars from outside the repo (CLAUDE.md, "The build").
   "vars": {
-    "CLUSTER": "localnet",
+    "CLUSTER": "devnet",
     // The web app's origins, comma-separated; the only ones a browser may call the API from.
-    "WEB_ORIGIN": "http://localhost:3110"
+    "WEB_ORIGIN": "http://localhost:3110",
+    "API_ORIGIN": "http://localhost:8801",
+    "KEEPER_FLOAT_MIN_LAMPORTS": "250000000"
   },
   "hyperdrive": [
     {
@@ -18,19 +24,27 @@
       "localConnectionString": "postgres://toppad:toppad@127.0.0.1:5452/toppad"
     }
   ],
+  // Signed Arweave data items wait here until uploaded, then stay as the cache (spec 10.4); simulated locally.
+  "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "top-pad-blobs-local" }],
   // The devnet build (spec 10.4), deployed with the web Worker by `pnpm deploy:devnet` at the repo root. Bindings and
-  // vars are not inherited by an environment, so everything is named again.
+  // vars are not inherited by an environment, so everything is named again. Its secrets, set with `wrangler secret put
+  // --env devnet`: RPC_URL (the Helius devnet URL, which carries the key), X_CLIENT_ID and X_CLIENT_SECRET, and
+  // optionally ALERT_WEBHOOK_URL.
   "env": {
     "devnet": {
       "name": "top-pad-api-devnet",
       "workers_dev": true,
+      "triggers": { "crons": ["*/5 * * * *"] },
       "vars": {
         "CLUSTER": "devnet",
-        "WEB_ORIGIN": "https://top-pad-web-devnet.imdev2023.workers.dev"
+        "WEB_ORIGIN": "https://top-pad-web-devnet.imdev2023.workers.dev",
+        "API_ORIGIN": "https://top-pad-api-devnet.imdev2023.workers.dev",
+        "KEEPER_FLOAT_MIN_LAMPORTS": "250000000"
       },
       // `top-pad-devnet`, in front of the Neon devnet database (spec 10.4), with its query cache off: Hyperdrive never
       // invalidates a cached read on a write, and our reads must see the last write.
-      "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "4226d6abb4c54484a3e6ab28a6b2a421" }]
+      "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "4226d6abb4c54484a3e6ab28a6b2a421" }],
+      "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "top-pad-blobs-devnet" }]
     }
   }
 }
