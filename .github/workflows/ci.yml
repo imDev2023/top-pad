@@ -52,6 +52,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.89.0
+        with:
+          components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - name: Install Solana
         run: |
@@ -63,5 +65,10 @@ jobs:
           curl -sSfL -o "$HOME/.local/bin/anchor" https://github.com/otter-sec/anchor/releases/download/v1.2.1/anchor-1.2.1-x86_64-unknown-linux-gnu
           chmod +x "$HOME/.local/bin/anchor"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - run: cargo fmt --all --check
       - run: anchor build
+      # The committed IDL is what the generated clients came from: the program's own build must not change it.
+      - run: cp target/idl/fee.json packages/clients/idl/fee.json && git diff --exit-code packages/clients/idl
+      # After the build, since the tests embed the built programs.
+      - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test

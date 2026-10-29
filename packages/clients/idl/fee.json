@@ -1,0 +1,715 @@
+{
+  "address": "HeatFEzySQiaWqxR7cDza9WP2B15AxMfsgSS5p6Bdn97",
+  "metadata": {
+    "name": "fee",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "The fee program: the partner and fee claimer on every config"
+  },
+  "instructions": [
+    {
+      "name": "initialize",
+      "docs": [
+        "Creates the `FeeConfig`. Only the program's upgrade authority may, so whoever controls upgrades also controls",
+        "the treasury and the launch key: a plain offline key on devnet, Squads behind a 7-day timelock on mainnet",
+        "(spec 5.1)."
+      ],
+      "discriminator": [
+        175,
+        175,
+        109,
+        31,
+        13,
+        152,
+        155,
+        237
+      ],
+      "accounts": [
+        {
+          "name": "fee_config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "program_data",
+          "docs": [
+            "This program's ProgramData, at the address the upgradeable loader derives from the program id."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  247,
+                  91,
+                  203,
+                  2,
+                  54,
+                  231,
+                  66,
+                  230,
+                  228,
+                  44,
+                  124,
+                  47,
+                  183,
+                  121,
+                  47,
+                  68,
+                  79,
+                  144,
+                  3,
+                  153,
+                  60,
+                  107,
+                  201,
+                  68,
+                  156,
+                  107,
+                  10,
+                  147,
+                  75,
+                  252,
+                  140,
+                  74
+                ]
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                2,
+                168,
+                246,
+                145,
+                78,
+                136,
+                161,
+                176,
+                226,
+                16,
+                21,
+                62,
+                247,
+                99,
+                174,
+                43,
+                0,
+                194,
+                185,
+                61,
+                22,
+                193,
+                36,
+                210,
+                192,
+                83,
+                122,
+                16,
+                4,
+                128,
+                0,
+                0
+              ]
+            }
+          }
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "settings",
+          "type": {
+            "defined": {
+              "name": "FeeSettings"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "register_coin",
+      "docs": [
+        "Puts a coin on the list of Heat coins (spec 8): creates its `CoinRecord`, with the launch key's signature, in the",
+        "Instant launch's creation transaction (spec 2.2). The Fair Open program's `settle` registers its coins by CPI",
+        "once it exists. The pool must be a DBC pool on a config that names our `fee_claimer`, so a record can only ever",
+        "describe a pool whose fees this program splits."
+      ],
+      "discriminator": [
+        79,
+        37,
+        188,
+        46,
+        209,
+        104,
+        90,
+        10
+      ],
+      "accounts": [
+        {
+          "name": "fee_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "launch_key",
+          "signer": true,
+          "relations": [
+            "fee_config"
+          ]
+        },
+        {
+          "name": "payer",
+          "docs": [
+            "Pays the record's rent: the creator, in an Instant launch."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "pool"
+        },
+        {
+          "name": "config"
+        },
+        {
+          "name": "coin_record",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  105,
+                  110,
+                  95,
+                  114,
+                  101,
+                  99,
+                  111,
+                  114,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "update_fee_config",
+      "docs": [
+        "Replaces the `FeeConfig`'s settings, again only by the upgrade authority: how a lost launch key is rotated."
+      ],
+      "discriminator": [
+        104,
+        184,
+        103,
+        242,
+        88,
+        151,
+        107,
+        20
+      ],
+      "accounts": [
+        {
+          "name": "fee_config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "program_data",
+          "docs": [
+            "This program's ProgramData, at the address the upgradeable loader derives from the program id."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  247,
+                  91,
+                  203,
+                  2,
+                  54,
+                  231,
+                  66,
+                  230,
+                  228,
+                  44,
+                  124,
+                  47,
+                  183,
+                  121,
+                  47,
+                  68,
+                  79,
+                  144,
+                  3,
+                  153,
+                  60,
+                  107,
+                  201,
+                  68,
+                  156,
+                  107,
+                  10,
+                  147,
+                  75,
+                  252,
+                  140,
+                  74
+                ]
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                2,
+                168,
+                246,
+                145,
+                78,
+                136,
+                161,
+                176,
+                226,
+                16,
+                21,
+                62,
+                247,
+                99,
+                174,
+                43,
+                0,
+                194,
+                185,
+                61,
+                22,
+                193,
+                36,
+                210,
+                192,
+                83,
+                122,
+                16,
+                4,
+                128,
+                0,
+                0
+              ]
+            }
+          }
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "settings",
+          "type": {
+            "defined": {
+              "name": "FeeSettings"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "CoinRecord",
+      "discriminator": [
+        69,
+        11,
+        66,
+        85,
+        204,
+        175,
+        156,
+        90
+      ]
+    },
+    {
+      "name": "FeeConfig",
+      "discriminator": [
+        143,
+        52,
+        146,
+        187,
+        219,
+        123,
+        76,
+        155
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "CoinRegistered",
+      "discriminator": [
+        73,
+        189,
+        19,
+        88,
+        236,
+        80,
+        205,
+        170
+      ]
+    },
+    {
+      "name": "FeeConfigChanged",
+      "discriminator": [
+        31,
+        78,
+        245,
+        160,
+        140,
+        141,
+        55,
+        178
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "NotUpgradeAuthority",
+      "msg": "Only the program's upgrade authority can change Heat's settings"
+    },
+    {
+      "code": 6001,
+      "name": "MissingSetting",
+      "msg": "A setting is the default address"
+    },
+    {
+      "code": 6002,
+      "name": "NotTheLaunchKey",
+      "msg": "The launch key did not sign"
+    },
+    {
+      "code": 6003,
+      "name": "NotADbcPool",
+      "msg": "The pool is not a DBC pool"
+    },
+    {
+      "code": 6004,
+      "name": "NotADbcConfig",
+      "msg": "The config is not a DBC config"
+    },
+    {
+      "code": 6005,
+      "name": "PoolConfigMismatch",
+      "msg": "The pool is on another config"
+    },
+    {
+      "code": 6006,
+      "name": "PoolMintMismatch",
+      "msg": "The pool trades another mint"
+    },
+    {
+      "code": 6007,
+      "name": "NotAHeatConfig",
+      "msg": "The config does not name the fee program's fee claimer"
+    }
+  ],
+  "types": [
+    {
+      "name": "CoinRecord",
+      "docs": [
+        "One per Heat coin, at the PDA of its mint: what the fee program needs to split the coin's fees, and the on-chain",
+        "list of coins Heat stands behind (spec 5.2, 8)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "launch_mode",
+            "type": {
+              "defined": {
+                "name": "LaunchMode"
+              }
+            }
+          },
+          {
+            "name": "fair_open_launch",
+            "docs": [
+              "The Fair Open launch account the coin opened from; none for an Instant launch."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "pot_fee",
+            "docs": [
+              "The Fair Open pot's own fee, in the quote's raw units, split 50/50 rather than going to the Tax Share."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "window_claimed",
+            "docs": [
+              "Whether the first partner-fee claim after the tax window has run."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "earnings_recipient",
+            "docs": [
+              "Empty: who receives the coin's Creator Earnings if not the creator role holder, kept for holder rewards in the",
+              "mainnet effort (spec 4)."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "registered_at",
+            "docs": [
+              "When the coin was registered, as a Unix timestamp."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CoinRegistered",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "config",
+            "type": "pubkey"
+          },
+          {
+            "name": "creator",
+            "docs": [
+              "The pool's creator role holder when the coin was registered: the Creator wallet that signed the launch."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "launch_mode",
+            "type": {
+              "defined": {
+                "name": "LaunchMode"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "FeeConfig",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "treasury",
+            "type": "pubkey"
+          },
+          {
+            "name": "launch_key",
+            "type": "pubkey"
+          },
+          {
+            "name": "fair_open_program",
+            "type": "pubkey"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "FeeConfigChanged",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "treasury",
+            "type": "pubkey"
+          },
+          {
+            "name": "launch_key",
+            "type": "pubkey"
+          },
+          {
+            "name": "fair_open_program",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "FeeSettings",
+      "docs": [
+        "Heat's settings: where Heat's Platform Fee goes, which key co-signs launches, and which program runs Fair Opens."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "treasury",
+            "docs": [
+              "Receives Heat's half of every fee and the Instant launches' tax windows (spec 4)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "launch_key",
+            "docs": [
+              "The keeper key, which co-signs Instant launches and registers their coins (spec 10.3)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "fair_open_program",
+            "docs": [
+              "The Fair Open program, the only one whose CPI may register a Fair Open's coin."
+            ],
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LaunchMode",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "FairOpen"
+          },
+          {
+            "name": "Instant"
+          }
+        ]
+      }
+    }
+  ]
+}

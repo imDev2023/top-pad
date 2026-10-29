@@ -22,7 +22,7 @@ custom-heap = []
 custom-panic = []
 
 [dependencies]
-anchor-lang.workspace = true
+anchor-lang = { workspace = true, features = ["event-cpi"] }
 solana-security-txt.workspace = true
 
 [dev-dependencies]
@@ -31,6 +31,7 @@ solana-message.workspace = true
 solana-transaction.workspace = true
 solana-signer.workspace = true
 solana-keypair.workspace = true
+solana-account.workspace = true
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }
