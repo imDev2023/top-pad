@@ -168,7 +168,7 @@ export async function currentCreatorWallet(db: DbOrTransaction, creatorId: strin
 /** `GET /me`. */
 export async function me(c: Context<AppEnv>) {
   const creator = await sessionCreator(c);
-  if (!creator) return c.json({ error: "Link your X account first." }, 401);
+  if (!creator) return c.json(null);
   const [{ count } = { count: 0 }] = await c.var.db
     .select({ count: sql<number>`count(*)::int` })
     .from(launches)

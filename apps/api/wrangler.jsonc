@@ -1,14 +1,26 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "top-pad-api",
-  "main": "src/index.ts",
+  "main": "src/worker.ts",
   "compatibility_date": "2026-10-20",
   // global_fetch_strictly_public: on devnet the API fetches the X stand-in, another Worker on the same workers.dev zone,
   // which fails with error 1042 unless fetch() routes as if from the public internet.
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "observability": { "enabled": true },
-  // Every five minutes: the keeper's float against its floor, housekeeping, then any open alert to the operator.
+  // Every five minutes: the indexer woken if a deploy stopped it, the keeper's float against its floor, housekeeping,
+  // then any open alert to the operator.
   "triggers": { "crons": ["*/5 * * * *"] },
+  // The indexer and the live rooms (spec 10.2), SQLite-backed; environments inherit this.
+  "exports": {
+    "Indexer": { "type": "durable-object", "storage": "sqlite" },
+    "LiveRoom": { "type": "durable-object", "storage": "sqlite" }
+  },
+  "durable_objects": {
+    "bindings": [
+      { "name": "INDEXER", "class_name": "Indexer" },
+      { "name": "LIVE_ROOMS", "class_name": "LiveRoom" }
+    ]
+  },
   // Local development (`wrangler dev`) runs against devnet, the one cluster with Heat's configs, on the docker database.
   // The keeper key and the X app's client come in as vars from outside the repo (CLAUDE.md, "The build").
   "vars": {
@@ -52,6 +64,12 @@
       // invalidates a cached read on a write, and our reads must see the last write.
       "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "4226d6abb4c54484a3e6ab28a6b2a421" }],
       "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "top-pad-blobs-devnet" }],
+      "durable_objects": {
+        "bindings": [
+          { "name": "INDEXER", "class_name": "Indexer" },
+          { "name": "LIVE_ROOMS", "class_name": "LiveRoom" }
+        ]
+      },
       // The keeper key, which is also the launch key (spec 10.3), from the account's Secrets Store and bound to this Worker
       // alone; put there by the owner on 2026-10-29, read only when a launch is signed.
       "secrets_store_secrets": [

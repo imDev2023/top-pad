@@ -139,9 +139,11 @@ describe("linking X", () => {
     }
   });
 
-  it("answers /me with 401 for a browser that has not linked X", async () => {
-    expect((await request("/me")).status).toBe(401);
-    expect((await request("/me", { headers: { cookie: "heat_session=made-up" } })).status).toBe(401);
+  it("answers /me with null for a browser that has not linked X", async () => {
+    for (const res of [await request("/me"), await request("/me", { headers: { cookie: "heat_session=made-up" } })]) {
+      expect(res.status).toBe(200);
+      expect(await res.json()).toBeNull();
+    }
   });
 
   it("signs out on a request from the web app, and only from there", async () => {
@@ -150,7 +152,7 @@ describe("linking X", () => {
     expect((await request("/auth/logout", { method: "POST", headers: { cookie } })).status).toBe(403);
     expect((await request("/auth/logout", { method: "POST", headers: { cookie, origin: "http://elsewhere.test" } })).status).toBe(403);
     expect((await request("/auth/logout", { method: "POST", headers: { cookie, origin: ORIGINS.web } })).status).toBe(204);
-    expect((await request("/me", { headers: { cookie } })).status).toBe(401);
+    expect(await (await request("/me", { headers: { cookie } })).json()).toBeNull();
   });
 
   it("says linking is off when the X app is not configured", async () => {

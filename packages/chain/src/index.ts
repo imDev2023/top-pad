@@ -19,8 +19,8 @@ export const FEE_CLAIMER_ADDRESS = address("4Garg7N38ShAr8z38ZKkHrgP9Lj5nRKiy3HG
 export const WSOL_MINT = address("So11111111111111111111111111111111111111112");
 
 export type HeatCluster = {
-  /** What every coin trades against: SOL in the prototype (spec 3.2), with its decimals for display. */
-  quote: { mint: Address; decimals: number };
+  /** What every coin trades against: SOL in the prototype (spec 3.2), with its symbol and decimals for display. */
+  quote: { mint: Address; symbol: string; decimals: number };
   /** The Graduation Target, in the quote's raw units (spec 3.2). */
   graduationTarget: bigint;
   /**
@@ -45,7 +45,7 @@ export type HeatCluster = {
 export const CLUSTERS: Record<Cluster, HeatCluster | null> = {
   localnet: null,
   devnet: {
-    quote: { mint: WSOL_MINT, decimals: 9 },
+    quote: { mint: WSOL_MINT, symbol: "SOL", decimals: 9 },
     graduationTarget: 8_500_000_000n,
     sqrtStartPrice: 35_525_023_424_642_174n,
     // Created on 2026-10-29 (#40).
@@ -60,7 +60,7 @@ export const CLUSTERS: Record<Cluster, HeatCluster | null> = {
     },
   },
   mainnet: {
-    quote: { mint: WSOL_MINT, decimals: 9 },
+    quote: { mint: WSOL_MINT, symbol: "SOL", decimals: 9 },
     graduationTarget: 85_000_000_000n,
     sqrtStartPrice: 112_339_987_482_345_485n,
     configs: null,
@@ -71,3 +71,4 @@ export const CLUSTERS: Record<Cluster, HeatCluster | null> = {
 export * from "./coin";
 export * from "./dbc";
 export * from "./launch";
+export * from "./swap";

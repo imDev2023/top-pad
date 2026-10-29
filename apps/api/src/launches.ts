@@ -32,7 +32,7 @@ import { findCoinRecordPda } from "@top-pad/clients/fee";
 import { LaunchForm, SubmitLaunch, type LaunchStatus, type PreparedLaunch } from "@top-pad/contract";
 import { coins, creators, creatorWallets, launches, metadataItems, type Db } from "@top-pad/db";
 import { currentCreatorWallet, sessionCreator } from "./auth";
-import { instantLaunchSetup, webApp, type Config } from "./env";
+import { explorerUrl, instantLaunchSetup, webApp, type Config } from "./env";
 import { refuse, type AppEnv } from "./http";
 import { loadKeeper } from "./keeper";
 import { MetadataUploadFailed, signItems, sniffImageType, storeItems, uploadItem, waitServed } from "./metadata";
@@ -380,9 +380,6 @@ async function recordLanded(db: Db, launch: Launch, slot: number): Promise<Launc
   });
 }
 
-const explorer = (cfg: Config, kind: "tx" | "address", id: string) =>
-  `https://explorer.solana.com/${kind}/${id}${cfg.cluster === "mainnet" ? "" : `?cluster=${cfg.cluster === "localnet" ? "custom" : cfg.cluster}`}`;
-
 async function toStatus(cfg: Config, launch: Launch): Promise<LaunchStatus> {
   const [coinRecord] = await findCoinRecordPda({ mint: launch.mint as Address });
   return {
@@ -397,7 +394,7 @@ async function toStatus(cfg: Config, launch: Launch): Promise<LaunchStatus> {
     imageUri: launch.imageUri,
     signature: launch.signature,
     error: launch.error,
-    explorer: { transaction: launch.signature ? explorer(cfg, "tx", launch.signature) : null, mint: explorer(cfg, "address", launch.mint) },
+    explorer: { transaction: launch.signature ? explorerUrl(cfg, "tx", launch.signature) : null, mint: explorerUrl(cfg, "address", launch.mint) },
   };
 }
 

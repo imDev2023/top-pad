@@ -58,6 +58,9 @@ export const Coin = z.object({
   creator: z.object({ wallet: Address, handle: z.string().nullable() }),
   /** When trading opened: the sniper tax counts from here. */
   activatedAt: z.iso.datetime(),
+  /** The coin's fixed supply in raw units, and its decimals (spec 3.1). */
+  supply: RawAmount,
+  decimals: z.number().int().nonnegative(),
   quote: z.object({ symbol: z.string(), decimals: z.number().int().nonnegative() }),
   market: z.object({
     price: Decimal,
@@ -72,6 +75,8 @@ export const Coin = z.object({
   }),
   tax: TaxSchedule,
   explorer: z.object({ mint: z.string().url(), pool: z.string().url() }),
+  /** The API's clock as it answered, which a page counts the sniper tax by rather than its own. */
+  servedAt: z.iso.datetime(),
 });
 export type Coin = z.infer<typeof Coin>;
 
@@ -89,6 +94,7 @@ export type CandleSeconds = z.infer<typeof CandleSeconds>;
 export const Candle = z.object({
   /** The candle's start, in Unix seconds. */
   time: z.number().int(),
+  /** Where the price stood before the candle's first trade: the close before it, or the curve's start price. */
   open: Decimal,
   high: Decimal,
   low: Decimal,

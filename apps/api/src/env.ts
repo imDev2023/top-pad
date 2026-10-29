@@ -1,6 +1,8 @@
 import { address, type Address } from "@solana/kit";
 import { CLUSTERS, type HeatCluster } from "@top-pad/chain";
 import { Cluster } from "@top-pad/contract";
+import type { Indexer } from "./indexer";
+import type { LiveRoom } from "./rooms";
 
 /** What the launch service needs from R2: the signed Arweave data items wait there until uploaded (spec 10.4). */
 export type BlobStore = {
@@ -43,6 +45,10 @@ export type Bindings = {
   COMPUTE_UNIT_PRICE?: string;
   /** The largest coin image taken, in bytes: under Turbo's free 100 KiB per data item on devnet. */
   MAX_IMAGE_BYTES?: string;
+  /** The indexer, one Durable Object (spec 10.2). */
+  INDEXER?: DurableObjectNamespace<Indexer>;
+  /** The live rooms, a Durable Object per coin and one for the board (spec 10.2). */
+  LIVE_ROOMS?: DurableObjectNamespace<LiveRoom>;
 };
 
 export type XConfig = { clientId: string; clientSecret: string; authorizeUrl: string; apiUrl: string; callbackUrl: string };
@@ -138,3 +144,7 @@ export function instantLaunchSetup(cfg: Config, env: Bindings):
     blobs: env.BLOBS,
   };
 }
+
+/** A transaction's or an address's page on Solana's explorer, on this cluster. */
+export const explorerUrl = (cfg: Config, kind: "tx" | "address", id: string) =>
+  `https://explorer.solana.com/${kind}/${id}${cfg.cluster === "mainnet" ? "" : `?cluster=${cfg.cluster === "localnet" ? "custom" : cfg.cluster}`}`;

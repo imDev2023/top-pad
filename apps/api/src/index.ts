@@ -6,8 +6,10 @@ import { cors } from "hono/cors";
 import { HTTPException } from "hono/http-exception";
 import { Health, type LaunchRefusal, type Platform } from "@top-pad/contract";
 import { createDb, launches, probe, sessions, xAuthorizations, type Db } from "@top-pad/db";
+import { pruneCandles } from "@top-pad/indexer";
 import { notifyPending, runJob } from "@top-pad/jobs";
 import { finishXLink, logout, me, startXLink } from "./auth";
+import { getCoin, getCoinCandles, getCoinTrades } from "./coins";
 import { config, instantLaunchSetup, type Bindings } from "./env";
 import { sameOriginWrites, withConfig, withDb, type AppEnv } from "./http";
 import { checkKeeperFloat } from "./keeper";
@@ -73,7 +75,7 @@ app.post("*", async (c, next) => {
   const refusal: LaunchRefusal = { error: `The image is too large: a coin's image can be at most ${Math.round(maxImageBytes / 1024)} KB.`, code: "image" };
   return bodyLimit({ maxSize: maxImageBytes + 16 * 1024, onError: (c) => c.json(refusal, 413) })(c, next);
 });
-for (const path of ["/auth/*", "/me", "/launches", "/launches/*", "/vamp-shield/*"]) app.use(path, withDb);
+for (const path of ["/auth/*", "/me", "/launches", "/launches/*", "/vamp-shield/*", "/coins/*"]) app.use(path, withDb);
 app.get("/auth/x/start", startXLink);
 app.get("/auth/x/callback", finishXLink);
 app.post("/auth/logout", logout);
@@ -82,6 +84,17 @@ app.post("/vamp-shield/check", checkRoute);
 app.post("/launches", prepareLaunch);
 app.post("/launches/:id/submit", submitLaunch);
 app.get("/launches/:id", getLaunch);
+app.get("/coins/:mint", getCoin);
+app.get("/coins/:mint/trades", getCoinTrades);
+app.get("/coins/:mint/candles", getCoinCandles);
+
+/** `GET /indexer`: how the indexer stands; asking also starts it if it is not running, as the cron does. */
+app.get("/indexer", async (c) => {
+  const indexer = c.env.INDEXER;
+  if (!indexer) return c.json({ error: "The indexer is not bound to this deployment." }, 503);
+  c.header("cache-control", "no-store");
+  return c.json(await indexer.get(indexer.idFromName("indexer")).wake());
+});
 
 /** Expired sign-in state, and launches prepared so long ago that their blockhash can no longer land. */
 async function housekeeping(db: Db) {
@@ -92,12 +105,13 @@ async function housekeeping(db: Db) {
     .set({ status: "expired" })
     .where(and(eq(launches.status, "prepared"), lt(launches.createdAt, sql`now() - interval '15 minutes'`)))
     .returning({ id: launches.id });
-  return { authorizations: authorizations.length, sessions: expiredSessions.length, expiredLaunches: stale.length };
+  return { authorizations: authorizations.length, sessions: expiredSessions.length, expiredLaunches: stale.length, candles: await pruneCandles(db) };
 }
 
-/** The Cron Trigger: the keeper's float, housekeeping, then every open alert to the operator. */
+/** The Cron Trigger: the indexer kept running, the keeper's float, housekeeping, then every open alert to the operator. */
 async function scheduled(_controller: ScheduledController, env: Bindings, ctx: ExecutionContext) {
   const cfg = config(env);
+  if (env.INDEXER) ctx.waitUntil(env.INDEXER.get(env.INDEXER.idFromName("indexer")).wake().catch((e) => console.error("waking the indexer failed", e)));
   const { db, close } = createDb(env.HYPERDRIVE.connectionString);
   try {
     const keeper = cfg.heat?.keys?.keeper;
@@ -112,4 +126,27 @@ async function scheduled(_controller: ScheduledController, env: Bindings, ctx: E
   }
 }
 
-export default { fetch: app.fetch, scheduled } satisfies ExportedHandler<Bindings>;
+const ADDRESS = "[1-9A-HJ-NP-Za-km-z]{32,44}";
+const LIVE_PATH = new RegExp(`^/live/(?:board|coins/(${ADDRESS}))$`);
+
+/**
+ * `GET /live/board` and `GET /live/coins/:mint`: a WebSocket on a live room (spec 10.2), handed straight to its Durable
+ * Object, outside Hono, whose middleware would rewrite the 101 answer's headers. Browsers always send their origin on a
+ * WebSocket handshake, and only Heat's pages may join; a client with no origin reads the same public trades as the API.
+ */
+function liveRoom(request: Request, env: Bindings): Promise<Response> | null {
+  const match = LIVE_PATH.exec(new URL(request.url).pathname);
+  if (!match) return null;
+  const refuse = (status: number, error: string) => Promise.resolve(Response.json({ error }, { status }));
+  if (request.method !== "GET" || request.headers.get("upgrade")?.toLowerCase() !== "websocket") return refuse(426, "A live room speaks WebSocket.");
+  const origin = request.headers.get("origin");
+  if (origin && !config(env).webOrigins.includes(origin)) return refuse(403, "Only Heat's own pages may join a live room.");
+  const rooms = env.LIVE_ROOMS;
+  if (!rooms) return refuse(503, "Live rooms are not bound to this deployment.");
+  return rooms.get(rooms.idFromName(match[1] ? `coin:${match[1]}` : "board")).fetch(request);
+}
+
+export default {
+  fetch: (request, env, ctx) => liveRoom(request, env) ?? app.fetch(request, env, ctx),
+  scheduled,
+} satisfies ExportedHandler<Bindings>;

@@ -22,7 +22,10 @@ export const Platform = z.object({
 });
 export type Platform = z.infer<typeof Platform>;
 
-/** `GET /me`: the Creator this browser is signed in as, by the X account it linked (spec 7). 401 when none. */
+/**
+ * `GET /me`: the Creator this browser is signed in as, by the X account it linked (spec 7); `null` when it has linked none,
+ * an answer rather than an error, so a first visit logs nothing in the browser's console.
+ */
 export const Me = z.object({
   x: z.object({ handle: z.string(), name: z.string(), avatarUrl: z.string().url().nullable() }),
   /** The record's Creator wallet; null until the record's first launch makes the wallet that signs it the one. */
