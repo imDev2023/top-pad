@@ -613,6 +613,7 @@ Sources: [Stack](https://github.com/imDev2023/top-pad/issues/17), [Backend desig
   - the **keeper key**: fee payer for the lock, pushes, claims and graduation, the pot's delegate and the nonce authority, and the launch key that co-signs creation transactions and registers coins, holding a capped SOL float with a low-balance alert **(owner, 2026-10-27)**;
   - the **admission signer**, holding no funds.
 - On devnet the keeper key, the treasury and the upgrade authority were made on 2026-10-29 ([#41](https://github.com/imDev2023/top-pad/issues/41)) and live in `~/.config/top-pad/devnet` on the owner's Mac, to be backed up in the owner's password manager (an owner task, still open on 2026-10-29); the keeper's float is 0.5 SOL, with the low-balance alert at 0.25 SOL.
+  The owner put the keeper key in the account's Secrets Store the same day, as `top-pad-devnet-keeper-key`, bound to the devnet API alone.
 - The upgrade and treasury keys never touch Cloudflare: kept offline on devnet, held by Squads on mainnet.
 - The two program keypairs only ever sign the first deploy at the fixed ids (section 5.1), on devnet and later on mainnet; a leak before the mainnet deploy would let anyone deploy their own program at our ids there first.
   They live only in the gitignored `target/deploy` on the owner's Mac, backed up in the owner's password manager, never in the repo, CI or Cloudflare (owner, 2026-10-28).
@@ -741,6 +742,9 @@ faucet.solana.com gives at most 10 SOL every 8 hours when signed in with GitHub 
    None of it blocks this devnet build; a no on 6.2(d) would reopen [ADR 0002](adr/0002-fair-open-on-dbc-with-our-own-deposit-program.md).
 4. **The Jupiter message** ([Ask Jupiter how it labels a launchpad's Fair Open pot buy](https://github.com/imDev2023/top-pad/issues/32)), drafted in that ticket, for the owner to send: how Jupiter labels the keeper's pot buy, the pushes out of the pot, and a Verified depositor holding about 4.3% of supply.
 5. **The cohort**: recruiting about 30 creators and 100 traders from the owner's X following and memecoin Telegram groups.
+6. **Heat's X app** (OAuth 2.0, a confidential client): deferred by the owner on 2026-10-29, before the devnet demo of [#41](https://github.com/imDev2023/top-pad/issues/41).
+   Until it exists the devnet API links a stand-in for X (`tests/x-stand-in`, the Worker `top-pad-x-stand-in-devnet`), on whose authorize page a tester picks a handle of 16 to 30 characters, longer than X allows, so a test coin's metadata never names a real account.
+   It is needed before the cohort, whose members link X (section 11.3).
 
 ## 14. Build order
 
