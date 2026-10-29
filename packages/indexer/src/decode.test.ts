@@ -6,7 +6,8 @@ import { EVT_SWAP3_EVENT_DISCRIMINATOR } from "@top-pad/clients/dbc";
 import { decodeTransaction, type RawTransaction } from "./decode";
 
 // Real devnet transactions (2026-10-29): an Instant launch whose creator bought in the same transaction, paying the
-// 99% cliff (tests/devnet), and a launch from the launch flow with no buy.
+// 99% cliff (tests/devnet), a launch from the launch flow with no buy, and a coin's window claim and its creator's first
+// claim (tests/devnet/src/fee-claims.test.ts).
 const fixture = (name: string) => JSON.parse(readFileSync(new URL(`./fixtures/${name}.json`, import.meta.url), "utf8")) as RawTransaction;
 const { instant, fairOpen } = CLUSTERS.devnet!.configs!;
 const HEAT = new Set<string>([instant, fairOpen]);
@@ -49,11 +50,46 @@ describe("decoding a transaction", () => {
     expect(decoded.swaps).toEqual([]);
   });
 
+  it("finds a window claim: the Tax window's fees paid to the treasury, three seconds after the window ended", () => {
+    const decoded = decodeTransaction(fixture("window-claim"), HEAT);
+    expect(decoded.windowClaims).toEqual([
+      {
+        pool: "D5Wtpu6jo7a63EEWXBhxWPQQmFafbLn4wxMH5CGh7FDP",
+        mint: "BNSwjpDtyeewLsiMXdh7YpngXjPKgDgVvnanMPu8g593",
+        config: instant,
+        heat: true,
+        // The treasury's wrapped SOL account.
+        destination: "CrQJCsFgWLETU8vPcavPV6SWyQsVSFJ5RkYxckpXWXu7",
+        amount: 15_818_667n,
+        windowEndedAt: 1_793_306_730n,
+        claimedAt: 1_793_306_733n,
+      },
+    ]);
+    expect([decoded.pools, decoded.coins, decoded.swaps, decoded.feeClaims]).toEqual([[], [], [], []]);
+  });
+
+  it("finds a creator's claim, split between the creator role holder and the treasury", () => {
+    const decoded = decodeTransaction(fixture("creator-claim"), HEAT);
+    expect(decoded.feeClaims).toEqual([
+      {
+        eventIndex: 0,
+        pool: "D5Wtpu6jo7a63EEWXBhxWPQQmFafbLn4wxMH5CGh7FDP",
+        mint: "BNSwjpDtyeewLsiMXdh7YpngXjPKgDgVvnanMPu8g593",
+        config: instant,
+        creator: "4hsJPxhF2aeyuRK9s9d4HKdinmDTVMbdHp5Z3UoAbyB1",
+        creatorAmount: 400_000n,
+        treasuryAmount: 400_000n,
+      },
+    ]);
+    expect(decoded.windowClaims).toEqual([]);
+  });
+
   it("holds nothing on configs that are not Heat's, or when the transaction failed", () => {
-    expect(decodeTransaction(fixture("launch-with-creator-buy"), new Set())).toEqual({ pools: [], coins: [], swaps: [] });
+    const none = { pools: [], coins: [], swaps: [], windowClaims: [], feeClaims: [] };
+    for (const name of ["launch-with-creator-buy", "window-claim", "creator-claim"]) expect(decodeTransaction(fixture(name), new Set())).toEqual(none);
     const failed = fixture("launch-with-creator-buy");
     failed.meta!.err = { InstructionError: [4, { Custom: 6000 }] };
-    expect(decodeTransaction(failed, HEAT)).toEqual({ pools: [], coins: [], swaps: [] });
+    expect(decodeTransaction(failed, HEAT)).toEqual(none);
   });
 
   it("refuses a swap whose event is missing rather than index it half right", () => {

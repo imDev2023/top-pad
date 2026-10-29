@@ -14,7 +14,15 @@ import {
   parseEvtInitializePoolEvent,
   parseEvtSwap3Event,
 } from "@top-pad/clients/dbc";
-import { COIN_REGISTERED_EVENT_DISCRIMINATOR, LaunchMode, parseCoinRegisteredEvent } from "@top-pad/clients/fee";
+import {
+  COIN_REGISTERED_EVENT_DISCRIMINATOR,
+  FEES_CLAIMED_EVENT_DISCRIMINATOR,
+  LaunchMode,
+  parseCoinRegisteredEvent,
+  parseFeesClaimedEvent,
+  parseWindowFeesClaimedEvent,
+  WINDOW_FEES_CLAIMED_EVENT_DISCRIMINATOR,
+} from "@top-pad/clients/fee";
 
 /** An instruction as `getTransaction` answers with `encoding: "json"`: accounts are indexes into the transaction's keys. */
 export type RawInstruction = { programIdIndex: number; accounts: number[]; data: string; stackHeight?: number | null };
@@ -66,7 +74,33 @@ export type Swap = {
   timestamp: bigint;
 };
 
-export type Decoded = { pools: PoolCreated[]; coins: CoinRegistered[]; swaps: Swap[] };
+/** A pool's window claim (spec 4, 5.2): its Tax window's fees, and any normal fees that accrued before the claim ran. */
+export type WindowClaimed = {
+  pool: string;
+  mint: string;
+  config: string;
+  heat: boolean;
+  /** The quote account paid. */
+  destination: string;
+  amount: bigint;
+  /** When the window ended and when the claim ran, Unix seconds. */
+  windowEndedAt: bigint;
+  claimedAt: bigint;
+};
+
+/** A claim of Creator Earnings from one pool, split between the creator role holder and the treasury. */
+export type FeesClaimed = {
+  /** The claim's place among its transaction's claims, in execution order. */
+  eventIndex: number;
+  pool: string;
+  mint: string;
+  config: string;
+  creator: string;
+  creatorAmount: bigint;
+  treasuryAmount: bigint;
+};
+
+export type Decoded = { pools: PoolCreated[]; coins: CoinRegistered[]; swaps: Swap[]; windowClaims: WindowClaimed[]; feeClaims: FeesClaimed[] };
 
 /** Anchor's tag on an event CPI's data, before the event's own discriminator (`EVENT_IX_TAG_LE`). */
 const EVENT_IX_TAG = new Uint8Array([0xe4, 0x45, 0xa5, 0x2e, 0x51, 0xcb, 0x9a, 0x1d]);
@@ -96,12 +130,12 @@ function executionOrder(tx: RawTransaction) {
 }
 
 /**
- * The pools, coin registrations and swaps a transaction holds, on Heat's `configs` only. A failed transaction changed
- * nothing and holds none. Throws on anything it cannot account for, such as a swap without its event, so a transaction
- * is never indexed half right.
+ * The pools, coin registrations, swaps and fee claims a transaction holds, on Heat's `configs` only. A failed
+ * transaction changed nothing and holds none. Throws on anything it cannot account for, such as a swap without its
+ * event, so a transaction is never indexed half right.
  */
 export function decodeTransaction(tx: RawTransaction, configs: ReadonlySet<string>): Decoded {
-  const decoded: Decoded = { pools: [], coins: [], swaps: [] };
+  const decoded: Decoded = { pools: [], coins: [], swaps: [], windowClaims: [], feeClaims: [] };
   if (!tx.meta || tx.meta.err) return decoded;
   const keys = [...tx.transaction.message.accountKeys, ...(tx.meta.loadedAddresses?.writable ?? []), ...(tx.meta.loadedAddresses?.readonly ?? [])];
   const key = (index: number) => {
@@ -131,16 +165,42 @@ export function decodeTransaction(tx: RawTransaction, configs: ReadonlySet<strin
     if (!emitter) throw new Error(`an event of ${program} with no instruction of it before`);
 
     if (program === FEE_PROGRAM_ADDRESS) {
-      if (!startsWith(event, COIN_REGISTERED_EVENT_DISCRIMINATOR)) continue;
-      const e = parseCoinRegisteredEvent(event);
-      if (!configs.has(e.config)) continue;
-      decoded.coins.push({
-        mint: e.mint,
-        pool: e.pool,
-        config: e.config,
-        creator: e.creator,
-        launchMode: e.launchMode === LaunchMode.Instant ? "instant" : "fair_open",
-      });
+      if (startsWith(event, COIN_REGISTERED_EVENT_DISCRIMINATOR)) {
+        const e = parseCoinRegisteredEvent(event);
+        if (!configs.has(e.config)) continue;
+        decoded.coins.push({
+          mint: e.mint,
+          pool: e.pool,
+          config: e.config,
+          creator: e.creator,
+          launchMode: e.launchMode === LaunchMode.Instant ? "instant" : "fair_open",
+        });
+      } else if (startsWith(event, WINDOW_FEES_CLAIMED_EVENT_DISCRIMINATOR)) {
+        const e = parseWindowFeesClaimedEvent(event);
+        if (!configs.has(e.config)) continue;
+        decoded.windowClaims.push({
+          pool: e.pool,
+          mint: e.mint,
+          config: e.config,
+          heat: e.heat,
+          destination: e.destination,
+          amount: e.amount,
+          windowEndedAt: e.windowEndedAt,
+          claimedAt: e.claimedAt,
+        });
+      } else if (startsWith(event, FEES_CLAIMED_EVENT_DISCRIMINATOR)) {
+        const e = parseFeesClaimedEvent(event);
+        if (!configs.has(e.config)) continue;
+        decoded.feeClaims.push({
+          eventIndex: decoded.feeClaims.length,
+          pool: e.pool,
+          mint: e.mint,
+          config: e.config,
+          creator: e.creator,
+          creatorAmount: e.creatorAmount,
+          treasuryAmount: e.treasuryAmount,
+        });
+      }
     } else if (startsWith(event, EVT_INITIALIZE_POOL_EVENT_DISCRIMINATOR)) {
       const e = parseEvtInitializePoolEvent(event);
       if (!configs.has(e.config)) continue;

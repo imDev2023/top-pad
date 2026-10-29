@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { bigint, index, integer, jsonb, numeric, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { bigint, boolean, index, integer, jsonb, numeric, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
 // Postgres is the only system of record (spec 10.4). The job runner's three tables are Stoker's (commit 43e196b,
 // packages/db/src/schema.ts), with only the alert kinds this build raises.
@@ -345,3 +345,48 @@ export const indexedTransactions = pgTable("indexed_transactions", {
   blockIndex: integer("block_index"),
   indexedAt: timestamp("indexed_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * Each pool's window claim (spec 4, 5.2), from the fee program's `WindowFeesClaimed`: once per pool, the first claim of
+ * its partner fees after its Tax window, which paid them to the treasury. A claim that ran late also paid the normal
+ * fees of the seconds between `window_ended_at` and `claimed_at`.
+ */
+export const windowClaims = pgTable("window_claims", {
+  pool: text("pool").primaryKey(),
+  mint: text("mint").notNull().unique(),
+  /** Whether a `CoinRecord` lists the pool: false for a pool made around Heat's flow. */
+  heat: boolean("heat").notNull(),
+  /** The quote account paid: the treasury's, for an Instant launch and a pool around Heat's flow. */
+  destination: text("destination").notNull(),
+  /** In the quote's raw units. */
+  amount: bigint("amount", { mode: "bigint" }).notNull(),
+  windowEndedAt: timestamp("window_ended_at", { withTimezone: true }).notNull(),
+  /** When the claim ran, by the chain's clock. */
+  claimedAt: timestamp("claimed_at", { withTimezone: true }).notNull(),
+  signature: text("signature").notNull(),
+  slot: bigint("slot", { mode: "number" }).notNull(),
+});
+
+/**
+ * Every claim of Creator Earnings (spec 4), from the fee program's `FeesClaimed`: a pool's partner fees split between
+ * whoever held its DBC creator role at the claim and the treasury. Keyed by its transaction and its place among the
+ * transaction's claims, since a creator's claim covers several pools in one transaction.
+ */
+export const feeClaims = pgTable(
+  "fee_claims",
+  {
+    signature: text("signature").notNull(),
+    eventIndex: integer("event_index").notNull(),
+    slot: bigint("slot", { mode: "number" }).notNull(),
+    /** The block's time. */
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    pool: text("pool").notNull(),
+    mint: text("mint").notNull(),
+    /** The creator role holder paid. */
+    creator: text("creator").notNull(),
+    /** In the quote's raw units: the creator's half, rounded down, and the treasury's rest. */
+    creatorAmount: bigint("creator_amount", { mode: "bigint" }).notNull(),
+    treasuryAmount: bigint("treasury_amount", { mode: "bigint" }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.signature, t.eventIndex] }), index("fee_claims_creator_idx").on(t.creator), index("fee_claims_mint_idx").on(t.mint)],
+);

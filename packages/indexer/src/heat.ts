@@ -1,17 +1,25 @@
-// What the indexer writes for Heat (spec 10.2): the pools on Heat's configs, the coins the fee program registers, and
-// every trade with its candles. Each transaction is written in one database transaction that first claims its
+// What the indexer writes for Heat (spec 10.2): the pools on Heat's configs, the coins the fee program registers, every
+// trade with its candles, and the fee program's claims. Each transaction is written in one database transaction that first claims its
 // signature, so the live source, the browser's fast path and reconciliation can all hand it in and it is written once.
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { priceOfSqrtPrice, type HeatCluster } from "@top-pad/chain";
-import { coins, indexedTransactions, launches, pools, trades, type DbOrTransaction } from "@top-pad/db";
+import { coins, feeClaims, indexedTransactions, launches, pools, trades, windowClaims, type DbOrTransaction } from "@top-pad/db";
 import { foldTrade } from "./candles";
-import { decodeTransaction, type CoinRegistered, type PoolCreated, type RawTransaction } from "./decode";
+import { decodeTransaction, type CoinRegistered, type FeesClaimed, type PoolCreated, type RawTransaction, type WindowClaimed } from "./decode";
 import type { IndexResult, TransactionHandler } from "./index";
 
 export type Trade = typeof trades.$inferSelect;
 
 /** What one transaction added, for the live rooms. */
-export type Indexed = { signature: string; slot: number; pools: PoolCreated[]; coins: CoinRegistered[]; trades: Trade[] };
+export type Indexed = {
+  signature: string;
+  slot: number;
+  pools: PoolCreated[];
+  coins: CoinRegistered[];
+  trades: Trade[];
+  windowClaims: WindowClaimed[];
+  feeClaims: FeesClaimed[];
+};
 
 export type HeatHandlerOptions = {
   /** Heat on the cluster being indexed; it must have its configs. */
@@ -101,15 +109,60 @@ export function heatHandler({ heat, blockIndexOf, onIndexed }: HeatHandlerOption
         await foldTrade(t, { mint: s.mint, at, orderKey: key, price, quoteAmount: s.quoteAmount, baseAmount: s.baseAmount });
       }
       for (const pool of new Set([...decoded.pools.map((p) => p.pool), ...added.map((a) => a.pool)])) await followLatestTrade(t, pool);
+
+      for (const w of decoded.windowClaims) {
+        await t
+          .insert(windowClaims)
+          .values({
+            pool: w.pool,
+            mint: w.mint,
+            heat: w.heat,
+            destination: w.destination,
+            amount: w.amount,
+            windowEndedAt: new Date(Number(w.windowEndedAt) * 1000),
+            claimedAt: new Date(Number(w.claimedAt) * 1000),
+            signature,
+            slot: tx.slot,
+          })
+          .onConflictDoNothing();
+      }
+      for (const f of decoded.feeClaims) {
+        await t
+          .insert(feeClaims)
+          .values({
+            signature,
+            eventIndex: f.eventIndex,
+            slot: tx.slot,
+            at: blockTime,
+            pool: f.pool,
+            mint: f.mint,
+            creator: f.creator,
+            creatorAmount: f.creatorAmount,
+            treasuryAmount: f.treasuryAmount,
+          })
+          .onConflictDoNothing();
+      }
       return added;
     });
     if (!added) return {};
 
-    if (onIndexed) await onIndexed({ signature, slot: tx.slot, pools: decoded.pools, coins: decoded.coins, trades: added });
+    if (onIndexed) {
+      await onIndexed({
+        signature,
+        slot: tx.slot,
+        pools: decoded.pools,
+        coins: decoded.coins,
+        trades: added,
+        windowClaims: decoded.windowClaims,
+        feeClaims: decoded.feeClaims,
+      });
+    }
     const result: IndexResult = { transactions: 1 };
     if (decoded.pools.length) result.pools = decoded.pools.length;
     if (decoded.coins.length) result.coins = decoded.coins.length;
     if (added.length) result.trades = added.length;
+    const claims = decoded.windowClaims.length + decoded.feeClaims.length;
+    if (claims) result.claims = claims;
     return result;
   };
 }

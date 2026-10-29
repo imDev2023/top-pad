@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { CLUSTERS } from "@top-pad/chain";
-import { candles, coins, createDb, creators, indexedTransactions, launches, pools, trades, type Db } from "@top-pad/db";
+import { candles, coins, createDb, creators, feeClaims, indexedTransactions, launches, pools, trades, windowClaims, type Db } from "@top-pad/db";
 import { createTestDatabase } from "@top-pad/db/testing";
 import { CANDLE_SECONDS, foldTrade, rebuildCandles, writtenCandles, type CandleSeconds } from "./candles";
 import type { RawTransaction } from "./decode";
@@ -22,7 +22,7 @@ beforeAll(async () => {
 });
 afterAll(() => cleanup());
 beforeEach(async () => {
-  for (const table of [candles, trades, coins, launches, creators, pools, indexedTransactions]) await db.delete(table);
+  for (const table of [candles, trades, coins, launches, creators, pools, indexedTransactions, windowClaims, feeClaims]) await db.delete(table);
 });
 
 const heat = CLUSTERS.devnet!;
@@ -103,6 +103,44 @@ describe("indexing Heat's transactions", () => {
     expect(asked).toEqual([]);
     const [pool] = await db.select().from(pools);
     expect(pool!.sqrtPrice).toBe(heat.sqrtStartPrice.toString());
+  });
+
+  it("writes a coin's window claim and its creator's claims, once each, and hands them to the live rooms", async () => {
+    const { handle, published, asked } = handler();
+    const window = fixture("window-claim");
+    const split = fixture("creator-claim");
+    expect(await indexTransactions(db, handle, [window, split, window])).toEqual({ transactions: 2, claims: 2 });
+    expect(asked).toEqual([]);
+    expect(await db.select().from(windowClaims)).toEqual([
+      {
+        pool: "D5Wtpu6jo7a63EEWXBhxWPQQmFafbLn4wxMH5CGh7FDP",
+        mint: "BNSwjpDtyeewLsiMXdh7YpngXjPKgDgVvnanMPu8g593",
+        heat: true,
+        destination: "CrQJCsFgWLETU8vPcavPV6SWyQsVSFJ5RkYxckpXWXu7",
+        amount: 15_818_667n,
+        windowEndedAt: new Date(1_793_306_730_000),
+        claimedAt: new Date(1_793_306_733_000),
+        signature: window.transaction.signatures[0],
+        slot: 516_539_311,
+      },
+    ]);
+    expect(await db.select().from(feeClaims)).toEqual([
+      {
+        signature: split.transaction.signatures[0],
+        eventIndex: 0,
+        slot: 516_539_330,
+        at: new Date(1_793_306_738_000),
+        pool: "D5Wtpu6jo7a63EEWXBhxWPQQmFafbLn4wxMH5CGh7FDP",
+        mint: "BNSwjpDtyeewLsiMXdh7YpngXjPKgDgVvnanMPu8g593",
+        creator: "4hsJPxhF2aeyuRK9s9d4HKdinmDTVMbdHp5Z3UoAbyB1",
+        creatorAmount: 400_000n,
+        treasuryAmount: 400_000n,
+      },
+    ]);
+    expect(published.map((p) => [p.windowClaims.length, p.feeClaims.length])).toEqual([
+      [1, 0],
+      [0, 1],
+    ]);
   });
 
   it("lands a launch whose browser went away, and lists its coin with what the launch knew", async () => {
