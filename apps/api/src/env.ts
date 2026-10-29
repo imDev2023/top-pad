@@ -3,6 +3,7 @@ import { CLUSTERS, type HeatCluster } from "@top-pad/chain";
 import { Cluster } from "@top-pad/contract";
 import type { Indexer } from "./indexer";
 import type { LiveRoom } from "./rooms";
+import type { KeeperParams } from "./windowClaims";
 
 /** What the launch service needs from R2: the signed Arweave data items wait there until uploaded (spec 10.4). */
 export type BlobStore = {
@@ -49,6 +50,8 @@ export type Bindings = {
   INDEXER?: DurableObjectNamespace<Indexer>;
   /** The live rooms, a Durable Object per coin and one for the board (spec 10.2). */
   LIVE_ROOMS?: DurableObjectNamespace<LiveRoom>;
+  /** The keeper's Workflow for each Instant launch, keyed by its coin (spec 10.2): its window claim at 60 s. */
+  INSTANT_LAUNCHES?: Workflow<KeeperParams>;
 };
 
 export type XConfig = { clientId: string; clientSecret: string; authorizeUrl: string; apiUrl: string; callbackUrl: string };

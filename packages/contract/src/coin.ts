@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { WindowClaim } from "./earnings";
 import { Address, RawAmount } from "./launch";
 
 /** An exact decimal number, such as a price or a market cap in whole quote units. */
@@ -74,6 +75,8 @@ export const Coin = z.object({
     lastTradeKey: OrderKey.nullable(),
   }),
   tax: TaxSchedule,
+  /** The coin's window claim once it has run: where its Tax window's fees went is told openly (spec 2.2, 4). */
+  windowClaim: WindowClaim.nullable(),
   explorer: z.object({ mint: z.string().url(), pool: z.string().url() }),
   /** The API's clock as it answered, which a page counts the sniper tax by rather than its own. */
   servedAt: z.iso.datetime(),
@@ -109,10 +112,11 @@ export type Candle = z.infer<typeof Candle>;
 export const CoinCandles = z.object({ seconds: CandleSeconds, candles: z.array(Candle) });
 export type CoinCandles = z.infer<typeof CoinCandles>;
 
-/** What a live room pushes (spec 10.2): its new trades and coins, batched every 100 ms. */
+/** What a live room pushes (spec 10.2): its new trades, coins and window claims, batched every 100 ms. */
 export const LiveEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("trade"), mint: Address, trade: Trade }),
   z.object({ type: z.literal("coin"), mint: Address, name: z.string(), ticker: z.string(), heat: z.boolean() }),
+  z.object({ type: z.literal("window_claim"), mint: Address, windowClaim: WindowClaim }),
 ]);
 export type LiveEvent = z.infer<typeof LiveEvent>;
 

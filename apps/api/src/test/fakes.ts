@@ -1,16 +1,25 @@
-// Stand-ins for the services the launch service calls, served through a stubbed `fetch`: X's OAuth and users API,
-// a Solana JSON-RPC endpoint, Turbo and an Arweave gateway. The API's own code runs unchanged against them, and a test
-// reads back what each was sent. The chain itself is tested on devnet (tests/devnet).
+// Stand-ins for the services the API calls, served through a stubbed `fetch`: X's OAuth and users API, a Solana
+// JSON-RPC endpoint holding whatever accounts and transactions a test gives it, Turbo and an Arweave gateway. The API's
+// own code runs unchanged against them, and a test reads back what each was sent. The chain itself is tested on devnet
+// (tests/devnet).
 import {
   createKeyPairSignerFromPrivateKeyBytes,
   getAddressEncoder,
   getBase58Decoder,
+  getBase58Encoder,
+  getBase64Decoder,
   getBase64Encoder,
   getTransactionDecoder,
+  none,
+  type Address,
   type KeyPairSigner,
   type Transaction,
 } from "@solana/kit";
 import { parseDataItem } from "@top-pad/arweave";
+import { DBC_LAYOUT, DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS, FEE_PROGRAM_ADDRESS } from "@top-pad/chain";
+import { getVirtualPoolSize, VIRTUAL_POOL_DISCRIMINATOR } from "@top-pad/clients/dbc";
+import { getCoinRecordEncoder, LaunchMode } from "@top-pad/clients/fee";
+import type { RawTransaction } from "@top-pad/indexer";
 import type { BlobStore, Bindings } from "../env";
 
 export const ORIGINS = {
@@ -65,6 +74,10 @@ export class Fakes {
   signatureStatus: "confirmed" | "none" | "failed" = "confirmed";
   sent: Transaction[] = [];
   simulated: Transaction[] = [];
+  /** The chain's accounts, by address: what `getAccountInfo`, `getMultipleAccounts` and `getProgramAccounts` read. */
+  accounts = new Map<string, { owner: string; data: Uint8Array }>();
+  /** Landed transactions, by signature, as `getTransaction` serves them. */
+  transactions = new Map<string, RawTransaction>();
   // Turbo and the gateway
   uploads: string[] = [];
   turboFails = false;
@@ -119,13 +132,32 @@ export class Fakes {
         return ok(getBase58Decoder().decode(Object.values(tx.signatures)[0]!));
       }
       case "getSignatureStatuses": {
-        if (this.signatureStatus === "none") return ok({ context, value: [null] });
+        const asked = params[0] as string[];
+        if (this.signatureStatus === "none") return ok({ context, value: asked.map(() => null) });
         const err = this.signatureStatus === "failed" ? { InstructionError: [2, { Custom: 6005 }] } : null;
-        return ok({ context, value: [{ slot: 4_242, confirmations: null, err, confirmationStatus: "confirmed", status: err ? { Err: err } : { Ok: null } }] });
+        const status = { slot: 4_242, confirmations: null, err, confirmationStatus: "confirmed", status: err ? { Err: err } : { Ok: null } };
+        return ok({ context, value: asked.map(() => status) });
       }
+      case "getAccountInfo":
+        return ok({ context, value: this.rpcAccount(params[0] as string) });
+      case "getMultipleAccounts":
+        return ok({ context, value: (params[0] as string[]).map((address) => this.rpcAccount(address)) });
+      case "getProgramAccounts": {
+        const [program, { filters = [] }] = params as [string, { filters?: Filter[] }];
+        const found = [...this.accounts].filter(([, a]) => a.owner === program && filters.every((f) => passes(f, a.data)));
+        return ok(found.map(([pubkey]) => ({ pubkey, account: this.rpcAccount(pubkey) })));
+      }
+      case "getTransaction":
+        return ok(this.transactions.get(params[0] as string) ?? null);
       default:
         throw new Error(`unexpected RPC method ${method}`);
     }
+  }
+
+  private rpcAccount(address: string) {
+    const account = this.accounts.get(address);
+    if (!account) return null;
+    return { lamports: 2_000_000, data: [getBase64Decoder().decode(account.data), "base64"], owner: account.owner, executable: false, rentEpoch: 0, space: account.data.length };
   }
 
   private async turbo(url: URL, request: Request) {
@@ -139,6 +171,47 @@ export class Fakes {
 }
 
 export const decode = (wire: string) => getTransactionDecoder().decode(getBase64Encoder().encode(wire)) as Transaction;
+
+type Filter = { dataSize: number } | { memcmp: { offset: number; bytes: string } };
+
+/** Whether account data passes a `getProgramAccounts` filter, as an RPC node checks it. */
+function passes(filter: Filter, data: Uint8Array) {
+  if ("dataSize" in filter) return data.length === filter.dataSize;
+  const bytes = getBase58Encoder().encode(filter.memcmp.bytes);
+  return bytes.every((b, i) => data[filter.memcmp.offset + i] === b);
+}
+
+/** A DBC pool as DBC lays it out, with the fields Heat's claims read; every other field is zero. */
+export function dbcPool(p: { config: Address; creator: Address; mint: Address; baseVault: Address; quoteVault: Address; partnerQuoteFee: bigint; activationPoint: bigint }) {
+  const data = new Uint8Array(getVirtualPoolSize());
+  data.set(VIRTUAL_POOL_DISCRIMINATOR, 0);
+  const put = (offset: number, address: Address) => data.set(getAddressEncoder().encode(address), offset);
+  put(DBC_LAYOUT.poolConfigOffset, p.config);
+  put(DBC_LAYOUT.poolCreatorOffset, p.creator);
+  put(DBC_LAYOUT.poolBaseMintOffset, p.mint);
+  put(168, p.baseVault);
+  put(200, p.quoteVault);
+  const view = new DataView(data.buffer);
+  view.setBigUint64(DBC_LAYOUT.poolPartnerQuoteFeeOffset, p.partnerQuoteFee, true);
+  view.setBigUint64(DBC_LAYOUT.poolActivationPointOffset, p.activationPoint, true);
+  return { owner: DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS as string, data };
+}
+
+/** A Heat coin's record, as the fee program's `register_coin` writes it and its window claim leaves it. */
+export function coinRecord(p: { mint: Address; pool: Address; windowClaimed: boolean }) {
+  const data = getCoinRecordEncoder().encode({
+    mint: p.mint,
+    pool: p.pool,
+    launchMode: LaunchMode.Instant,
+    fairOpenLaunch: none(),
+    potFee: 0n,
+    windowClaimed: p.windowClaimed,
+    earningsRecipient: none(),
+    registeredAt: 1_793_306_000n,
+    bump: 254,
+  });
+  return { owner: FEE_PROGRAM_ADDRESS as string, data: new Uint8Array(data) };
+}
 
 /** The Worker's bindings for a test: devnet's configs, every outside service faked. */
 export function testBindings(connectionString: string, extra: Partial<Bindings> = {}): Bindings {

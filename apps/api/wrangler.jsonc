@@ -21,6 +21,8 @@
       { "name": "LIVE_ROOMS", "class_name": "LiveRoom" }
     ]
   },
+  // The keeper's Workflow for each Instant launch, keyed by its coin: the window claim at 60 s (spec 10.2).
+  "workflows": [{ "name": "top-pad-instant-launches", "binding": "INSTANT_LAUNCHES", "class_name": "InstantLaunchKeeper" }],
   // Local development (`wrangler dev`) runs against devnet, the one cluster with Heat's configs, on the docker database.
   // The keeper key and the X app's client come in as vars from outside the repo (CLAUDE.md, "The build").
   "vars": {
@@ -70,6 +72,7 @@
           { "name": "LIVE_ROOMS", "class_name": "LiveRoom" }
         ]
       },
+      "workflows": [{ "name": "top-pad-instant-launches-devnet", "binding": "INSTANT_LAUNCHES", "class_name": "InstantLaunchKeeper" }],
       // The keeper key, which is also the launch key (spec 10.3), from the account's Secrets Store and bound to this Worker
       // alone; put there by the owner on 2026-10-29, read only when a launch is signed.
       "secrets_store_secrets": [

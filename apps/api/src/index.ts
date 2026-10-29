@@ -10,6 +10,7 @@ import { pruneCandles } from "@top-pad/indexer";
 import { notifyPending, runJob } from "@top-pad/jobs";
 import { finishXLink, logout, me, startXLink } from "./auth";
 import { getCoin, getCoinCandles, getCoinTrades } from "./coins";
+import { getEarnings, prepareClaim, reportClaim } from "./earnings";
 import { indexerOf } from "./indexing";
 import { config, instantLaunchSetup, type Bindings } from "./env";
 import { sameOriginWrites, withConfig, withDb, type AppEnv } from "./http";
@@ -17,6 +18,7 @@ import { checkKeeperFloat } from "./keeper";
 import { getLaunch, prepareLaunch, submitLaunch } from "./launches";
 import { IMAGE_TYPES } from "./metadata";
 import { checkRoute } from "./vampShield";
+import { sweepWindowClaims } from "./windowClaims";
 
 export const app = new Hono<AppEnv>();
 
@@ -76,7 +78,7 @@ app.post("*", async (c, next) => {
   const refusal: LaunchRefusal = { error: `The image is too large: a coin's image can be at most ${Math.round(maxImageBytes / 1024)} KB.`, code: "image" };
   return bodyLimit({ maxSize: maxImageBytes + 16 * 1024, onError: (c) => c.json(refusal, 413) })(c, next);
 });
-for (const path of ["/auth/*", "/me", "/launches", "/launches/*", "/vamp-shield/*", "/coins/*"]) app.use(path, withDb);
+for (const path of ["/auth/*", "/me", "/launches", "/launches/*", "/vamp-shield/*", "/coins/*", "/earnings/*"]) app.use(path, withDb);
 app.get("/auth/x/start", startXLink);
 app.get("/auth/x/callback", finishXLink);
 app.post("/auth/logout", logout);
@@ -88,6 +90,9 @@ app.get("/launches/:id", getLaunch);
 app.get("/coins/:mint", getCoin);
 app.get("/coins/:mint/trades", getCoinTrades);
 app.get("/coins/:mint/candles", getCoinCandles);
+app.get("/earnings/:wallet", getEarnings);
+app.post("/earnings/claims", reportClaim);
+app.post("/earnings/:wallet/claim", prepareClaim);
 
 /** `GET /indexer`: how the indexer stands; asking also starts it if it is not running, as the cron does. */
 app.get("/indexer", async (c) => {
@@ -109,7 +114,10 @@ async function housekeeping(db: Db) {
   return { authorizations: authorizations.length, sessions: expiredSessions.length, expiredLaunches: stale.length, candles: await pruneCandles(db) };
 }
 
-/** The Cron Trigger: the indexer kept running, the keeper's float, housekeeping, then every open alert to the operator. */
+/**
+ * The Cron Trigger: the indexer kept running, the keeper's float, any window claim the keeper's Workflows missed,
+ * housekeeping, then every open alert to the operator.
+ */
 async function scheduled(_controller: ScheduledController, env: Bindings, ctx: ExecutionContext) {
   const cfg = config(env);
   const indexer = indexerOf(env);
@@ -121,6 +129,7 @@ async function scheduled(_controller: ScheduledController, env: Bindings, ctx: E
     if (keeper) {
       await runJob(db, "keeper-balance", () => checkKeeperFloat(db, createSolanaRpc(cfg.rpcUrl), keeper, cfg.keeperFloatMinLamports), { exclusive: true }).catch(() => undefined);
     }
+    await runJob(db, "window-claims", () => sweepWindowClaims(db, env), { exclusive: true }).catch(() => undefined);
     await runJob(db, "housekeeping", () => housekeeping(db), { exclusive: true }).catch(() => undefined);
     await notifyPending(db, cfg.alertWebhookUrl);
   } finally {

@@ -1,12 +1,13 @@
-// A coin's page (spec 9, screen 3), read from what the indexer wrote: the coin and its market, its trades newest first
-// (or since an order key, for a page catching up after its live connection dropped), and its candles of one length.
+// A coin's page (spec 9, screen 3), read from what the indexer wrote: the coin and its market, where its Tax window's fees
+// went, its trades newest first (or since an order key, for a page catching up after its live connection dropped), and
+// its candles of one length.
 import { and, asc, desc, eq, gt, gte, lt, lte } from "drizzle-orm";
 import type { Context } from "hono";
 import { COIN_DECIMALS, COIN_SUPPLY, FEE_DENOMINATOR, marketCapOfSqrtPrice, priceOfSqrtPrice, SNIPER_TAX } from "@top-pad/chain";
-import { Address, CandleSeconds, type Coin, type CoinCandles, type CoinTrades, type Trade } from "@top-pad/contract";
-import { candles, coins, creators, pools, trades, type Db } from "@top-pad/db";
+import { Address, CandleSeconds, type Coin, type CoinCandles, type CoinTrades, type Trade, type WindowClaim } from "@top-pad/contract";
+import { candles, coins, creators, pools, trades, windowClaims, type Db } from "@top-pad/db";
 import { holderCount } from "@top-pad/indexer";
-import { explorerUrl } from "./env";
+import { explorerUrl, type Config } from "./env";
 import type { AppEnv } from "./http";
 
 /** How long a holder count stands before a page asks for it again (spec 10.4 lets public figures be a minute stale). */
@@ -38,6 +39,16 @@ export function tradeView(row: typeof trades.$inferSelect): Trade {
   };
 }
 
+/** A window claim as the API and the live rooms show it. */
+export function windowClaimView(cfg: Config, row: typeof windowClaims.$inferSelect): WindowClaim {
+  return {
+    amount: row.amount.toString(),
+    windowEndedAt: row.windowEndedAt.toISOString(),
+    claimedAt: row.claimedAt.toISOString(),
+    explorer: explorerUrl(cfg, "tx", row.signature),
+  };
+}
+
 const notFound = (c: Context<AppEnv>) => c.json({ error: "Heat has no coin at this address." }, 404);
 
 /** The pool row of a mint on Heat's configs, or null. */
@@ -54,10 +65,11 @@ export async function getCoin(c: Context<AppEnv>) {
   const mint = c.req.param("mint")!;
   if (!heat || !Address.safeParse(mint).success) return notFound(c);
   const [row] = await db
-    .select({ pool: pools, coin: coins, handle: creators.xHandle })
+    .select({ pool: pools, coin: coins, handle: creators.xHandle, windowClaim: windowClaims })
     .from(pools)
     .leftJoin(coins, eq(coins.mint, pools.mint))
     .leftJoin(creators, eq(creators.id, coins.creatorId))
+    .leftJoin(windowClaims, eq(windowClaims.pool, pools.pool))
     .where(eq(pools.mint, mint));
   if (!row) return notFound(c);
   const { pool, coin } = row;
@@ -104,6 +116,7 @@ export async function getCoin(c: Context<AppEnv>) {
       periods: SNIPER_TAX.numberOfPeriod,
       denominator: FEE_DENOMINATOR.toString(),
     },
+    windowClaim: row.windowClaim ? windowClaimView(cfg, row.windowClaim) : null,
     explorer: { mint: explorerUrl(cfg, "address", mint), pool: explorerUrl(cfg, "address", pool.pool) },
     servedAt: new Date().toISOString(),
   };

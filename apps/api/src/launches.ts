@@ -34,6 +34,7 @@ import { coins, creators, creatorWallets, launches, metadataItems, type Db } fro
 import { currentCreatorWallet, sessionCreator } from "./auth";
 import { explorerUrl, instantLaunchSetup, webApp, type Config } from "./env";
 import { indexNow } from "./indexing";
+import { startKeeper } from "./windowClaims";
 import { refuse, type AppEnv } from "./http";
 import { loadKeeper } from "./keeper";
 import { MetadataUploadFailed, signItems, sniffImageType, storeItems, uploadItem, waitServed } from "./metadata";
@@ -210,7 +211,7 @@ export async function submitLaunch(c: Context<AppEnv>) {
   const launch = await ownLaunch(db, c.req.param("id")!, creator.id);
   if (!launch) return refuse(c, 404, { error: "There is no such launch of yours.", code: "not_found" });
   const rpc = createSolanaRpc(cfg.rpcUrl);
-  const landed = async (signature: string) => c.executionCtx.waitUntil(indexNow(c.env, [signature]));
+  const landed = onLanded(c);
   if (launch.status !== "prepared") return c.json(await settle(db, rpc, cfg, launch, landed));
   const setup = instantLaunchSetup(cfg, c.env);
   if (!setup.ok) return refuse(c, 503, { error: `Launching is not open here yet: ${setup.reason}`, code: "unavailable" });
@@ -326,8 +327,19 @@ export async function getLaunch(c: Context<AppEnv>) {
   if (!creator) return refuse(c, 401, { error: "Link your X account first.", code: "not_linked" });
   const launch = await ownLaunch(db, c.req.param("id")!, creator.id);
   if (!launch) return refuse(c, 404, { error: "There is no such launch of yours.", code: "not_found" });
-  return c.json(await settle(db, createSolanaRpc(cfg.rpcUrl), cfg, launch, async (signature) => c.executionCtx.waitUntil(indexNow(c.env, [signature]))));
+  return c.json(await settle(db, createSolanaRpc(cfg.rpcUrl), cfg, launch, onLanded(c)));
 }
+
+/**
+ * What a launch's landing starts, after the answer: the indexer's fast path for its transaction, and the keeper's
+ * Workflow for the launch, whose first step is the window claim when the coin's Tax window ends (spec 10.2).
+ */
+const onLanded = (c: Context<AppEnv>) => async (launch: Launch) => {
+  c.executionCtx.waitUntil(indexNow(c.env, [launch.signature!]));
+  if (launch.mode === "instant") {
+    c.executionCtx.waitUntil(startKeeper(c.env, launch.mint).catch((e) => console.error("starting the keeper failed; the cron's sweep will", launch.mint, e)));
+  }
+};
 
 async function ownLaunch(db: Db, id: string, creatorId: string): Promise<Launch | null> {
   if (!/^[0-9a-f-]{36}$/i.test(id)) return null;
@@ -339,9 +351,9 @@ type Rpc = ReturnType<typeof createSolanaRpc>;
 
 /**
  * Brings a sending launch up to date with the chain: landed, failed, or expired once its blockhash can no longer land.
- * A launch that lands goes to `landed` too, which hands it to the indexer's fast path.
+ * A launch that lands goes to `landed` too, which hands it to the indexer's fast path and the keeper.
  */
-async function settle(db: Db, rpc: Rpc, cfg: Config, launch: Launch, landed: (signature: string) => Promise<void>): Promise<LaunchStatus> {
+async function settle(db: Db, rpc: Rpc, cfg: Config, launch: Launch, landed: (launch: Launch) => Promise<void>): Promise<LaunchStatus> {
   if (launch.status === "sending" && launch.signature) {
     const { value: [status] } = await rpc.getSignatureStatuses([launch.signature as Signature], { searchTransactionHistory: true }).send(limited());
     if (status?.err) {
@@ -350,7 +362,7 @@ async function settle(db: Db, rpc: Rpc, cfg: Config, launch: Launch, landed: (si
       launch = { ...launch, status: "failed", error };
     } else if (status && (status.confirmationStatus === "confirmed" || status.confirmationStatus === "finalized")) {
       launch = await recordLanded(db, launch, Number(status.slot));
-      await landed(launch.signature!);
+      await landed(launch);
     } else if (!status && (await rpc.getBlockHeight({ commitment: "confirmed" }).send(limited())) > launch.lastValidBlockHeight) {
       await db.update(launches).set({ status: "expired" }).where(eq(launches.id, launch.id));
       launch = { ...launch, status: "expired" };

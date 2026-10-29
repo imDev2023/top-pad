@@ -21,8 +21,9 @@ import {
   type RawTransaction,
   type TransactionHandler,
 } from "@top-pad/indexer";
-import { tradeView } from "./coins";
+import { tradeView, windowClaimView } from "./coins";
 import { config, type Bindings } from "./env";
+import { startKeeper } from "./windowClaims";
 
 const ALARM_MS = 15_000;
 const RECONCILE_MS = 60_000;
@@ -213,8 +214,14 @@ export class Indexer extends DurableObject<Bindings> {
     this.reconciledAt = Date.now();
   }
 
-  /** Sends what a transaction added to its coins' rooms and the board's. */
-  private async publish({ pools, coins, trades }: Indexed) {
+  /**
+   * Sends what a transaction added to its coins' rooms and the board's, and starts the keeper for each Instant launch
+   * registered, which the launch's own landing may not have (a launch whose browser went away, or another deployment's).
+   */
+  private async publish({ signature, pools, coins, trades, windowClaims }: Indexed) {
+    for (const coin of coins) {
+      if (coin.launchMode === "instant") await startKeeper(this.env, coin.mint).catch((e) => console.error(`starting the keeper for ${coin.mint} failed`, e));
+    }
     const rooms = this.env.LIVE_ROOMS;
     if (!rooms) return;
     const events = new Map<string, LiveEvent[]>();
@@ -228,6 +235,17 @@ export class Indexer extends DurableObject<Bindings> {
       const event: LiveEvent = { type: "trade", mint: trade.mint, trade: tradeView(trade) };
       add(`coin:${trade.mint}`, event);
       add("board", event);
+    }
+    const cfg = config(this.env);
+    for (const claim of windowClaims) {
+      const windowClaim = windowClaimView(cfg, {
+        ...claim,
+        windowEndedAt: new Date(Number(claim.windowEndedAt) * 1000),
+        claimedAt: new Date(Number(claim.claimedAt) * 1000),
+        signature,
+        slot: 0,
+      });
+      add(`coin:${claim.mint}`, { type: "window_claim", mint: claim.mint, windowClaim });
     }
     await Promise.all(
       [...events].map(([room, batch]) =>
