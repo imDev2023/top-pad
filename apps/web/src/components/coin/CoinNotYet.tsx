@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import styles from "@/app/not-found.module.css";
-import { getCoin } from "@/lib/api";
 
 /** How long a page looks for a coin before saying there is none: a coin is indexed seconds after it lands. */
 const LOOK_MS = 30_000;
@@ -12,31 +11,25 @@ const EVERY_MS = 1_500;
 
 /**
  * A coin address Heat has no coin at yet. One launched moments ago is still being indexed, so the page keeps looking
- * and shows the coin the moment it is there; only after half a minute does it say there is none.
+ * and shows the coin the moment it is there; only after half a minute does it say there is none. It looks by rendering
+ * the page again on the server, which asks the API, so the browser never sees the API's 404 while it waits (and logs no
+ * error for it); once the coin is there, the coin's page takes this one's place.
  */
 export function CoinNotYet({ mint }: { mint: string }) {
   const router = useRouter();
   const [gaveUp, setGaveUp] = useState(false);
 
   useEffect(() => {
-    let stopped = false;
-    let next: ReturnType<typeof setTimeout>;
     const started = Date.now();
-    const look = async () => {
-      const found = await getCoin(mint).then(
-        () => true,
-        () => false,
-      );
-      if (stopped) return;
-      if (found) return router.refresh();
-      if (Date.now() - started > LOOK_MS) return setGaveUp(true);
-      next = setTimeout(look, EVERY_MS);
-    };
-    next = setTimeout(look, EVERY_MS);
-    return () => {
-      stopped = true;
-      clearTimeout(next);
-    };
+    const look = setInterval(() => {
+      if (Date.now() - started > LOOK_MS) {
+        clearInterval(look);
+        setGaveUp(true);
+      } else {
+        router.refresh();
+      }
+    }, EVERY_MS);
+    return () => clearInterval(look);
   }, [mint, router]);
 
   if (gaveUp) {
