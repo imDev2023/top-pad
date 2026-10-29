@@ -11,13 +11,16 @@ export const TOKEN_METADATA_PROGRAM_ADDRESS = "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6
 export const TOKEN_PROGRAM_ADDRESS = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" as Address;
 
 /**
- * Where `register_coin` reads a pool's config, creator and base mint, and a config's fee claimer, in DBC 0.2.2's
- * zero-copy accounts: the same numbers as `fee::dbc` in `programs/fee`, checked against the generated decoders here.
+ * Where the fee program reads a pool's config, creator, base mint, accrued partner fee and activation point, and a
+ * config's fee claimer, in DBC 0.2.2's zero-copy accounts: the same numbers as `fee::dbc` in `programs/fee`, checked
+ * against the generated decoders here.
  */
 export const DBC_LAYOUT = {
   poolConfigOffset: 72,
   poolCreatorOffset: 104,
   poolBaseMintOffset: 136,
+  poolPartnerQuoteFeeOffset: 272,
+  poolActivationPointOffset: 296,
   configFeeClaimerOffset: 40,
 } as const;
 

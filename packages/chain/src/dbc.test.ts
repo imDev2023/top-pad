@@ -20,6 +20,16 @@ describe("DBC's account layout", () => {
     expect(pool.poolState).toMatchObject({ config: some(1), creator: some(2), baseMint: some(3) });
   });
 
+  it("puts a pool's accrued partner fee and activation point where the fee program's claims read them", () => {
+    const data = new Uint8Array(getVirtualPoolSize());
+    data.set(VIRTUAL_POOL_DISCRIMINATOR, 0);
+    const view = new DataView(data.buffer);
+    view.setBigUint64(DBC_LAYOUT.poolPartnerQuoteFeeOffset, 123_456_789n, true);
+    view.setBigUint64(DBC_LAYOUT.poolActivationPointOffset, 1_800_000_000n, true);
+    const pool = getVirtualPoolDecoder().decode(data);
+    expect(pool.poolState).toMatchObject({ partnerQuoteFee: 123_456_789n, activationPoint: 1_800_000_000n, partnerBaseFee: 0n });
+  });
+
   it("puts a config's fee claimer where the fee program reads it", () => {
     const data = new Uint8Array(getPoolConfigSize());
     data.set(POOL_CONFIG_DISCRIMINATOR, 0);
