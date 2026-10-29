@@ -12,9 +12,10 @@ import {
 import { and, eq, isNull, lt, sql } from "drizzle-orm";
 import { claimablePool, windowClaimMessage, type ClaimablePool } from "@top-pad/chain";
 import { fetchVirtualPool } from "@top-pad/clients/dbc";
-import { fetchMaybeCoinRecord, findCoinRecordPda } from "@top-pad/clients/fee";
+import { fetchAllMaybeCoinRecord, fetchMaybeCoinRecord, findCoinRecordPda } from "@top-pad/clients/fee";
 import { coins, windowClaims, type Db } from "@top-pad/db";
-import type { Bindings, Config, SecretBinding } from "./env";
+import { blockPositions, decodeTransaction, fetchRawTransaction, heatHandler, reindexTransactions } from "@top-pad/indexer";
+import { config, type Bindings, type Config, type SecretBinding } from "./env";
 import { loadKeeper } from "./keeper";
 
 const RPC_TIMEOUT_MS = 15_000;
@@ -78,7 +79,12 @@ export async function sendWindowClaim(cfg: Config, keeperKey: SecretBinding, min
   const until = Date.now() + CONFIRM_WAIT_MS;
   for (;;) {
     await sleep(500);
-    const { value: [status] } = await rpc.getSignatureStatuses([signature as Signature]).send(limited());
+    // An RPC answering 429 or stalling for a moment is asked again: a try that gave up here would send the claim twice.
+    const answer = await rpc
+      .getSignatureStatuses([signature as Signature])
+      .send(limited())
+      .catch(() => null);
+    const status = answer?.value[0];
     if (status?.err) throw new Error(`the window claim ${signature} failed: ${JSON.stringify(status.err, (_, v) => (typeof v === "bigint" ? `${v}` : v))}`);
     if (status?.confirmationStatus === "confirmed" || status?.confirmationStatus === "finalized") break;
     if (Date.now() > until) throw new Error(`the window claim ${signature} did not confirm in time`);
@@ -109,18 +115,56 @@ export async function startKeeper(env: Bindings, mint: string): Promise<void> {
 
 /** How long after a coin's launch the sweep looks for its window claim, past the window and a keeper's tries. */
 const SWEEP_AFTER = sql`interval '3 minutes'`;
+/** `getMultipleAccounts` takes at most 100 addresses a call. */
+const ACCOUNTS_PER_CALL = 100;
 
 /**
- * The cron's sweep: every Instant launch whose window claim the indexer has not seen has its keeper started, or
- * started again if it failed, so a coin the other paths missed is still claimed within minutes.
+ * The cron's sweep: every Instant launch whose window claim the indexer has not recorded is settled against the chain.
+ * If its record says the claim ran, the claim's transaction is found and indexed again, since the indexer that saw it
+ * did not decode it (one still running the code before a deploy, say); otherwise its keeper is started, or started
+ * again if it failed. A coin the other paths missed is claimed, and recorded, within minutes.
  */
-export async function sweepWindowClaims(db: Db, env: Bindings): Promise<{ due: number }> {
-  if (!keepers(env)) return { due: 0 };
+export async function sweepWindowClaims(db: Db, env: Bindings): Promise<{ due: number; started: number; recorded: number }> {
+  const cfg = config(env);
   const due = await db
     .select({ mint: coins.mint })
     .from(coins)
     .leftJoin(windowClaims, eq(windowClaims.mint, coins.mint))
     .where(and(eq(coins.launchMode, "instant"), isNull(windowClaims.mint), lt(coins.createdAt, sql`now() - ${SWEEP_AFTER}`)));
-  for (const { mint } of due) await startKeeper(env, mint);
-  return { due: due.length };
+  let started = 0;
+  let recorded = 0;
+  const rpc = createSolanaRpc(cfg.rpcUrl);
+  for (let i = 0; i < due.length; i += ACCOUNTS_PER_CALL) {
+    const batch = due.slice(i, i + ACCOUNTS_PER_CALL);
+    const addresses = await Promise.all(batch.map(async ({ mint }) => (await findCoinRecordPda({ mint: mint as Address }))[0]));
+    const records = await fetchAllMaybeCoinRecord(rpc, addresses, limited());
+    for (const [j, record] of records.entries()) {
+      const mint = batch[j]!.mint;
+      if (record.exists && record.data.windowClaimed) {
+        if (await recordWindowClaim(db, cfg, mint, addresses[j]!)) recorded++;
+      } else {
+        await startKeeper(env, mint);
+        started++;
+      }
+    }
+  }
+  return { due: due.length, started, recorded };
+}
+
+/** Finds a coin's window claim among its record's transactions, newest first, and indexes it again. */
+async function recordWindowClaim(db: Db, cfg: Config, mint: string, record: Address): Promise<boolean> {
+  const heat = cfg.heat;
+  if (!heat?.configs) return false;
+  const configs = new Set<string>([heat.configs.instant, heat.configs.fairOpen]);
+  const rpc = createSolanaRpc(cfg.rpcUrl);
+  // A record's transactions are its registration and its window claim.
+  const signatures = await rpc.getSignaturesForAddress(record, { limit: 10, commitment: "confirmed" }).send(limited());
+  for (const { signature, err } of signatures) {
+    if (err) continue;
+    const raw = await fetchRawTransaction(cfg.rpcUrl, signature);
+    if (!raw || !decodeTransaction(raw, configs).windowClaims.some((claim) => claim.mint === mint)) continue;
+    await reindexTransactions(db, heatHandler({ heat, blockIndexOf: blockPositions(cfg.rpcUrl) }), [raw]);
+    return true;
+  }
+  return false;
 }

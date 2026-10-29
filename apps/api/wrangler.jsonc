@@ -23,6 +23,8 @@
   },
   // The keeper's Workflow for each Instant launch, keyed by its coin: the window claim at 60 s (spec 10.2).
   "workflows": [{ "name": "top-pad-instant-launches", "binding": "INSTANT_LAUNCHES", "class_name": "InstantLaunchKeeper" }],
+  // The version this code is, which the indexer checks against the Worker's after a deploy.
+  "version_metadata": { "binding": "CF_VERSION_METADATA" },
   // Local development (`wrangler dev`) runs against devnet, the one cluster with Heat's configs, on the docker database.
   // The keeper key and the X app's client come in as vars from outside the repo (CLAUDE.md, "The build").
   "vars": {
@@ -73,6 +75,7 @@
         ]
       },
       "workflows": [{ "name": "top-pad-instant-launches-devnet", "binding": "INSTANT_LAUNCHES", "class_name": "InstantLaunchKeeper" }],
+      "version_metadata": { "binding": "CF_VERSION_METADATA" },
       // The keeper key, which is also the launch key (spec 10.3), from the account's Secrets Store and bound to this Worker
       // alone; put there by the owner on 2026-10-29, read only when a launch is signed.
       "secrets_store_secrets": [

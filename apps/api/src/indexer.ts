@@ -39,6 +39,8 @@ const FETCH_EVERY_MS = 300;
 
 /** `GET /indexer`. */
 export type IndexerStatus = {
+  /** The version of the Worker's code the indexer runs. */
+  version: string | null;
   watching: string[];
   /** Whether the logs socket is open, and how many of its subscriptions the RPC accepted. */
   live: boolean;
@@ -77,8 +79,16 @@ export class Indexer extends DurableObject<Bindings> {
     return this.handle;
   }
 
-  /** Starts the alarm loop if it is not running, and says how the indexer stands. */
-  async wake(): Promise<IndexerStatus> {
+  /**
+   * Starts the alarm loop if it is not running, and says how the indexer stands. A deploy restarts every Durable Object,
+   * but one busy with its socket and its alarm, as this one always is, can go on running the code before it: on
+   * 2026-10-29 it decoded none of the claims sent in the minutes after the deploy that taught it claims. So given the
+   * version of the Worker that calls it, it resets itself when it runs another, and the runtime starts it again on the
+   * Worker's version.
+   */
+  async wake(version?: string): Promise<IndexerStatus> {
+    const own = this.env.CF_VERSION_METADATA?.id;
+    if (version && own && version !== own) this.ctx.abort(`the indexer runs version ${own}, and the Worker calling it ${version}`);
     if (this.watching().length && (await this.ctx.storage.getAlarm()) === null) await this.ctx.storage.setAlarm(Date.now());
     return this.status();
   }
@@ -92,6 +102,7 @@ export class Indexer extends DurableObject<Bindings> {
 
   status(): IndexerStatus {
     return {
+      version: this.env.CF_VERSION_METADATA?.id ?? null,
       watching: this.watching(),
       live: this.socket !== null,
       subscriptions: this.subscriptions,

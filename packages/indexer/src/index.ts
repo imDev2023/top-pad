@@ -51,6 +51,17 @@ export async function indexTransactions(db: Db, handle: TransactionHandler, txs:
   return result;
 }
 
+/**
+ * Indexes again transactions that were indexed before by code that did not know some of their events, such as an
+ * indexer still running the version before a deploy: each is forgotten, then indexed as new. The handler writes every
+ * row once, so whatever was written the first time stays as it was.
+ */
+export async function reindexTransactions(db: Db, handle: TransactionHandler, txs: RawTransaction[]): Promise<IndexResult> {
+  const signatures = txs.map((tx) => tx.transaction.signatures[0]!);
+  if (signatures.length) await db.delete(indexedTransactions).where(inArray(indexedTransactions.signature, signatures));
+  return indexTransactions(db, handle, txs);
+}
+
 /** One listed signature of an account, newest first as the node lists them. */
 export type ListedSignature = { signature: string; slot: number; failed: boolean };
 

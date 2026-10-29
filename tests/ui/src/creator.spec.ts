@@ -56,7 +56,9 @@ test("the window's tax reaches the treasury at 60 s, and the creator claims exac
   await swap(trader, address(mint), "buy", 10_000_000n);
   await swap(trader, address(mint), "buy", 10_000_000n);
   const tax = await partnerFees(pool);
-  expect(tax).toBeGreaterThan(10_000_000n);
+  // Far above the 200,000 lamports two buys would leave at the normal 1.25%: the deployed launch confirms later than a
+  // local one, so how much above depends on the second each buy lands in.
+  expect(tax).toBeGreaterThan(2_000_000n);
   await openCreatorPage(page);
   await expect(page.getByTestId("earnings-coin")).toContainText("First minute's claim pending");
   await expect(page.getByTestId("earnings-waiting")).toHaveText("0 SOL");

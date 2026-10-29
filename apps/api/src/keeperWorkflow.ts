@@ -19,7 +19,9 @@ export class InstantLaunchKeeper extends WorkflowEntrypoint<Bindings, KeeperPara
     const endsAt = await step.do("read when the Tax window ends", { retries: { limit: 10, delay: "2 seconds", backoff: "constant" } }, () =>
       windowEnd(cfg, mint),
     );
-    await step.sleepUntil("wait for the Tax window to end", endsAt);
+    // A coin found after its window ended (by the indexer catching up, or the cron's sweep) is claimed at once: a
+    // Workflow refuses to sleep until a time in the past.
+    if (endsAt > Date.now()) await step.sleepUntil("wait for the Tax window to end", endsAt);
     // Tried every second: the chain's clock can trail this one, and its preflight refuses a claim inside the window.
     const sent = await step.do(
       "send the window claim",

@@ -7,7 +7,7 @@ import { createTestDatabase } from "@top-pad/db/testing";
 import { CANDLE_SECONDS, foldTrade, rebuildCandles, writtenCandles, type CandleSeconds } from "./candles";
 import type { RawTransaction } from "./decode";
 import { heatHandler, orderKey, type Indexed } from "./heat";
-import { indexTransactions } from "./index";
+import { indexTransactions, reindexTransactions } from "./index";
 
 let db: Db;
 let cleanup: () => Promise<void>;
@@ -141,6 +141,24 @@ describe("indexing Heat's transactions", () => {
       [1, 0],
       [0, 1],
     ]);
+  });
+
+  it("indexes again a transaction that older code indexed without knowing its claim", async () => {
+    // What a version that did not yet decode claims left: the transaction marked indexed, and no window claim.
+    const before = async (db: Db, tx: RawTransaction) => {
+      await db.insert(indexedTransactions).values({ signature: tx.transaction.signatures[0]!, slot: tx.slot });
+      return { transactions: 1 };
+    };
+    const window = fixture("window-claim");
+    await indexTransactions(db, before, [window]);
+    expect(await indexTransactions(db, handler().handle, [window])).toEqual({});
+    expect(await db.select().from(windowClaims)).toEqual([]);
+
+    expect(await reindexTransactions(db, handler().handle, [window])).toEqual({ transactions: 1, claims: 1 });
+    expect(await db.select().from(windowClaims)).toHaveLength(1);
+    // Once more changes nothing.
+    await reindexTransactions(db, handler().handle, [window]);
+    expect(await db.select().from(windowClaims)).toHaveLength(1);
   });
 
   it("lands a launch whose browser went away, and lists its coin with what the launch knew", async () => {

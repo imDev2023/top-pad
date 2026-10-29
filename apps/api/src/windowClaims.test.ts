@@ -1,8 +1,12 @@
-import { decompileTransactionMessage, getAddressDecoder, getCompiledTransactionMessageDecoder, type Address } from "@solana/kit";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { address, decompileTransactionMessage, getAddressDecoder, getCompiledTransactionMessageDecoder, type Address } from "@solana/kit";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { CLUSTERS, FEE_PROGRAM_ADDRESS, quoteAccount } from "@top-pad/chain";
 import { CLAIM_WINDOW_FEES_DISCRIMINATOR, findCoinRecordPda } from "@top-pad/clients/fee";
-import { coins, createDb, windowClaims, type Db } from "@top-pad/db";
+import { coins, createDb, indexedTransactions, windowClaims, type Db } from "@top-pad/db";
+import type { RawTransaction } from "@top-pad/indexer";
 import { createTestDatabase } from "@top-pad/db/testing";
 import { config, type Bindings } from "./env";
 import { coinRecord, dbcPool, Fakes, testBindings, testKeypair } from "./test/fakes";
@@ -140,7 +144,44 @@ describe("the keeper's Workflow", () => {
     await add({ launchMode: "instant", minutesAgo: 1 });
     await add({ launchMode: "fair_open", minutesAgo: 10 });
     const w = workflows();
-    expect(await sweepWindowClaims(db, testBindings(url, { INSTANT_LAUNCHES: w.binding }))).toEqual({ due: 1 });
+    expect(await sweepWindowClaims(db, testBindings(url, { INSTANT_LAUNCHES: w.binding }))).toEqual({ due: 1, started: 1, recorded: 0 });
     expect(w.created).toEqual([missed]);
+    await db.delete(coins);
+    await db.delete(windowClaims);
+  });
+
+  it("records a window claim that ran but that the indexer missed, without starting the keeper again", async () => {
+    // The devnet window claim of packages/indexer's fixture, indexed by code that did not yet decode claims.
+    const window = JSON.parse(
+      readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../../packages/indexer/src/fixtures/window-claim.json"), "utf8"),
+    ) as RawTransaction;
+    const signature = window.transaction.signatures[0]!;
+    const mint = address("BNSwjpDtyeewLsiMXdh7YpngXjPKgDgVvnanMPu8g593");
+    const pool = address("D5Wtpu6jo7a63EEWXBhxWPQQmFafbLn4wxMH5CGh7FDP");
+    const record = (await findCoinRecordPda({ mint }))[0];
+    fakes.accounts.set(record, coinRecord({ mint, pool, windowClaimed: true }));
+    fakes.history.set(record, [signature, "registered"]);
+    fakes.transactions.set(signature, window);
+    await db.insert(coins).values({
+      mint,
+      pool,
+      config: devnet.configs!.instant,
+      launchMode: "instant",
+      creatorWallet: random(),
+      name: "coin",
+      ticker: "COIN",
+      metadataUri: "https://turbo-gateway.com/coin",
+      createdSignature: "registered",
+      createdSlot: 1,
+      createdAt: new Date(Date.now() - 10 * 60_000),
+    });
+    await db.insert(indexedTransactions).values({ signature, slot: window.slot });
+
+    const w = workflows();
+    expect(await sweepWindowClaims(db, testBindings(url, { INSTANT_LAUNCHES: w.binding }))).toEqual({ due: 1, started: 0, recorded: 1 });
+    expect(w.created).toEqual([]);
+    expect(await db.select().from(windowClaims)).toEqual([expect.objectContaining({ mint, pool, amount: 15_818_667n, signature })]);
+    // Recorded, the coin is no longer due.
+    expect(await sweepWindowClaims(db, testBindings(url, { INSTANT_LAUNCHES: w.binding }))).toEqual({ due: 0, started: 0, recorded: 0 });
   });
 });

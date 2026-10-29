@@ -78,6 +78,8 @@ export class Fakes {
   accounts = new Map<string, { owner: string; data: Uint8Array }>();
   /** Landed transactions, by signature, as `getTransaction` serves them. */
   transactions = new Map<string, RawTransaction>();
+  /** Each address's transactions, newest first, as `getSignaturesForAddress` lists them. */
+  history = new Map<string, string[]>();
   // Turbo and the gateway
   uploads: string[] = [];
   turboFails = false;
@@ -149,6 +151,10 @@ export class Fakes {
       }
       case "getTransaction":
         return ok(this.transactions.get(params[0] as string) ?? null);
+      case "getSignaturesForAddress":
+        return ok(
+          (this.history.get(params[0] as string) ?? []).map((signature) => ({ signature, slot: 1, err: null, memo: null, blockTime: null, confirmationStatus: "confirmed" })),
+        );
       default:
         throw new Error(`unexpected RPC method ${method}`);
     }

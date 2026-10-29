@@ -52,6 +52,8 @@ export type Bindings = {
   LIVE_ROOMS?: DurableObjectNamespace<LiveRoom>;
   /** The keeper's Workflow for each Instant launch, keyed by its coin (spec 10.2): its window claim at 60 s. */
   INSTANT_LAUNCHES?: Workflow<KeeperParams>;
+  /** Which version of the Worker this code is: the indexer checks it runs the same as the Worker that calls it. */
+  CF_VERSION_METADATA?: { id: string; tag: string; timestamp: string };
 };
 
 export type XConfig = { clientId: string; clientSecret: string; authorizeUrl: string; apiUrl: string; callbackUrl: string };

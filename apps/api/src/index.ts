@@ -94,12 +94,16 @@ app.get("/earnings/:wallet", getEarnings);
 app.post("/earnings/claims", reportClaim);
 app.post("/earnings/:wallet/claim", prepareClaim);
 
-/** `GET /indexer`: how the indexer stands; asking also starts it if it is not running, as the cron does. */
+/**
+ * `GET /indexer`: how the indexer stands; asking also starts it if it is not running, as the cron does, and moves it to
+ * this Worker's version if it still runs an older one: it resets itself, and the second ask reaches it restarted.
+ */
 app.get("/indexer", async (c) => {
   const indexer = indexerOf(c.env);
   if (!indexer) return c.json({ error: "The indexer is not bound to this deployment." }, 503);
+  const version = c.env.CF_VERSION_METADATA?.id;
   c.header("cache-control", "no-store");
-  return c.json(await indexer.wake());
+  return c.json(await indexer.wake(version).catch(() => indexerOf(c.env)!.wake(version)));
 });
 
 /** Expired sign-in state, and launches prepared so long ago that their blockhash can no longer land. */
@@ -121,7 +125,7 @@ async function housekeeping(db: Db) {
 async function scheduled(_controller: ScheduledController, env: Bindings, ctx: ExecutionContext) {
   const cfg = config(env);
   const indexer = indexerOf(env);
-  if (indexer) ctx.waitUntil(indexer.wake().catch((e) => console.error("waking the indexer failed", e)));
+  if (indexer) ctx.waitUntil(indexer.wake(env.CF_VERSION_METADATA?.id).catch((e) => console.error("waking the indexer failed", e)));
   const { db, close } = createDb(env.HYPERDRIVE.connectionString);
   try {
     const keeper = cfg.heat?.keys?.keeper;
