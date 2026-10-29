@@ -42,6 +42,15 @@ export function coinAmount(raw: bigint | string, decimals = 6) {
     : value.toLocaleString("en-US", { maximumFractionDigits: 2 });
 }
 
+/** A span of time as a sentence says it: 3 s, 4 min, 17 h, 2 days. */
+export function span(seconds: number) {
+  const s = Math.max(0, Math.round(seconds));
+  if (s < 120) return `${s}\u{a0}s`;
+  if (s < 7_200) return `${Math.round(s / 60)}\u{a0}min`;
+  if (s < 172_800) return `${Math.round(s / 3_600)}\u{a0}h`;
+  return `${Math.round(s / 86_400)}\u{a0}days`;
+}
+
 /** How long ago, shortly: now, 12s, 4m, 3h, 2d. */
 export function ago(ms: number) {
   const s = Math.max(0, Math.floor(ms / 1000));

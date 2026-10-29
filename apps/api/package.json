@@ -7,7 +7,7 @@
     "typecheck": "tsc -p .",
     "test": "vitest run",
     "types": "wrangler types --env-interface CloudflareBindings",
-    "deploy:devnet": "env -u CLOUDFLARE_API_TOKEN wrangler deploy --env devnet"
+    "deploy:devnet": "env -u CLOUDFLARE_API_TOKEN wrangler deploy --env devnet --durable-objects-code-update-mode immediate"
   },
   "dependencies": {
     "@solana/kit": "^8.5.0",

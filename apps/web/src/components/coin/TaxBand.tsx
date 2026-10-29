@@ -1,7 +1,7 @@
 "use client";
 
 import type { Coin } from "@top-pad/contract";
-import { sol } from "@/lib/format";
+import { sol, span } from "@/lib/format";
 import styles from "./Coin.module.css";
 
 /** The sniper tax `elapsed` seconds after the open, as a fraction: the config's linear fee scheduler (spec 3.2). */
@@ -40,7 +40,7 @@ export function TaxBand({ coin, now }: { coin: Coin; now: number }) {
           {coin.launchMode !== "fair_open" &&
             (claim ? (
               <>
-                Heat&apos;s treasury was paid <b className="num">{sol(claim.amount, 9)}&nbsp;SOL</b> for that minute, claimed {late}&nbsp;s after it
+                Heat&apos;s treasury was paid <b className="num">{sol(claim.amount, 9)}&nbsp;SOL</b> for that minute, claimed {span(late)} after it
                 ended (
                 <a href={claim.explorer} target="_blank" rel="noreferrer">
                   see the claim

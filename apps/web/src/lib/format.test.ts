@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ago, coinAmount, compactNumber, solAmount, tickLabels } from "./format";
+import { ago, coinAmount, compactNumber, solAmount, span, tickLabels } from "./format";
 
 const sub = (n: number) => String.fromCodePoint(0x2080 + n);
 
@@ -59,5 +59,13 @@ describe("price-axis labels", () => {
 
   it("keep whole numbers whole", () => {
     expect(tickLabels([10, 20, 30])).toEqual(["10", "20", "30"]);
+  });
+});
+
+describe("a span of time", () => {
+  it("reads in seconds, minutes, hours or days, whichever a sentence would use", () => {
+    expect([1, 3, 119, 120, 3_599, 61_104, 172_800].map(span)).toEqual(
+      ["1\u{a0}s", "3\u{a0}s", "119\u{a0}s", "2\u{a0}min", "60\u{a0}min", "17\u{a0}h", "2\u{a0}days"],
+    );
   });
 });
