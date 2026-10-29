@@ -608,6 +608,7 @@ Sources: [Stack](https://github.com/imDev2023/top-pad/issues/17), [Backend desig
 - KV holds only public caches (up to 60 s stale).
 - Durable Object storage holds only live-room state; D1 is not used.
 - One Neon project for devnet **(owner, 2026-10-27)**: Supabase's free plan allows two active projects and both are Stoker's; Convex was weighed and set aside, because the board's trending query, the funding graph, the candle rebuilds and the insert-only audit role are SQL.
+- Workers reach Postgres through Hyperdrive with its query cache off ([#39](https://github.com/imDev2023/top-pad/issues/39), 2026-10-29): Hyperdrive never invalidates a cached read when a write lands, and admission, the keeper and the job runner must read what was just written; the only caches are the explicit ones in KV.
 - CI runs lint, typecheck, unit tests and `anchor build`.
 
 ### 10.5 Providers

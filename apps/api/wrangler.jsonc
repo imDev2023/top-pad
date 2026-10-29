@@ -18,8 +18,8 @@
       "localConnectionString": "postgres://toppad:toppad@127.0.0.1:5452/toppad"
     }
   ],
-  // The devnet build (spec 10.4): `pnpm exec wrangler deploy --env devnet`. Bindings and vars are not inherited by an
-  // environment, so everything is named again.
+  // The devnet build (spec 10.4), deployed with the web Worker by `pnpm deploy:devnet` at the repo root. Bindings and
+  // vars are not inherited by an environment, so everything is named again.
   "env": {
     "devnet": {
       "name": "top-pad-api-devnet",
@@ -28,8 +28,9 @@
         "CLUSTER": "devnet",
         "WEB_ORIGIN": "https://top-pad-web-devnet.imdev2023.workers.dev"
       },
-      // The Neon devnet database (spec 10.4), its id from `wrangler hyperdrive create top-pad-devnet`.
-      "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "HYPERDRIVE_DEVNET_ID" }]
+      // `top-pad-devnet`, in front of the Neon devnet database (spec 10.4), with its query cache off: Hyperdrive never
+      // invalidates a cached read on a write, and our reads must see the last write.
+      "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "4226d6abb4c54484a3e6ab28a6b2a421" }]
     }
   }
 }

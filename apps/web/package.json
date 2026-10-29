@@ -7,7 +7,7 @@
     "build": "next build",
     "typecheck": "next typegen && tsc -p . --noEmit",
     "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
-    "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy"
+    "deploy:devnet": "NEXT_PUBLIC_API_URL=https://top-pad-api-devnet.imdev2023.workers.dev opennextjs-cloudflare build && opennextjs-cloudflare deploy --env devnet"
   },
   "dependencies": {
     "@top-pad/contract": "workspace:*",

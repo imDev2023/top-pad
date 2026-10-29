@@ -6,6 +6,8 @@ export const metadata: Metadata = {
   title: "Devnet status",
   // Devnet carries test coins only, so nothing here is for search engines.
   robots: { index: false, follow: false },
+  // No icon until Heat has a mark; an empty one stops browsers asking for /favicon.ico and logging its 404.
+  icons: { icon: "data:," },
 };
 
 export const viewport: Viewport = {

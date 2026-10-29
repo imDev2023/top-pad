@@ -19,6 +19,7 @@ A pnpm monorepo shaped like Stoker's: `apps/api` (Hono on Workers), `apps/web` (
 - `pnpm programs` builds both programs, then `pnpm test:programs` runs their LiteSVM tests; `pnpm test:devnet` reads Meteora's real accounts on devnet with the generated clients.
 - `pnpm --filter @top-pad/meteora idls` refreshes the pinned IDLs from the SDK packages, then `pnpm clients` regenerates `packages/clients/src/generated` (never edited by hand; CI fails if it is stale).
 - Locally: `DATABASE_URL=postgres://toppad:toppad@127.0.0.1:5452/toppad pnpm db:migrate`, then `pnpm exec wrangler dev --port 8801` in `apps/api` and `NEXT_PUBLIC_API_URL=http://localhost:8801 pnpm exec next dev --port 3110` in `apps/web`.
+- Devnet: `direnv exec "<this folder>" pnpm deploy:devnet` migrates the Neon devnet database (`DATABASE_URL` in the gitignored `.env`), then deploys the API and the web Worker, in that order; the devnet demo is https://top-pad-web-devnet.imdev2023.workers.dev, its API https://top-pad-api-devnet.imdev2023.workers.dev.
 
 ## Traps
 
@@ -35,8 +36,9 @@ A pnpm monorepo shaped like Stoker's: `apps/api` (Hono on Workers), `apps/web` (
   The program ids are fixed, `HeatF…` (fee) and `HeatP…` (Fair Open) ([#65](https://github.com/imDev2023/top-pad/issues/65), spec 5.1), and their keypairs exist only in this Mac's gitignored `target/deploy` and the owner's password manager (spec 10.3), so a fresh checkout builds with random ones and warns of a mismatch, which is expected: never "fix" it with `anchor keys sync`, which writes the random ids into the source.
 - Anchor 1.2.1 is pinned in `Anchor.toml` (`[toolchain]`), so avm's `anchor` runs it here while the machine's default stays 0.31.1 for other projects; `avm install` switches the default, so run `avm use 0.31.1` after installing another version.
 - Codama's output for the DBC IDL is not clean on its own; `packages/clients/scripts/generate.ts` fixes the IDL first (see its comment), so always generate through `pnpm clients`.
-- The devnet database is on Neon, not Supabase (spec 10.4).
-- The Cloudflare token in `global.env` cannot use Hyperdrive or Secrets Store; the owner's wrangler login can, so run those commands with the token unset (`env -u CLOUDFLARE_API_TOKEN pnpm exec wrangler hyperdrive ...`).
+- The devnet database is on Neon, not Supabase (spec 10.4): project `top-pad-devnet` (`odd-firefly-70405620`, London, Postgres 17, like docker and CI), behind Hyperdrive `top-pad-devnet` (`4226d6abb4c54484a3e6ab28a6b2a421`) with its query cache off (spec 10.4).
+  `npx neonctl` is signed in, but every command needs `--org-id org-wispy-snow-11801955` or it stops at an interactive prompt.
+- The Cloudflare token in `global.env` cannot use Hyperdrive or Secrets Store; the owner's wrangler login can, so run those commands with the token unset (`env -u CLOUDFLARE_API_TOKEN pnpm exec wrangler hyperdrive ...`); deploys work with the token.
 - The owner's Discord (Meteora ticket `devlaunch-6428`, Jupiter `#dev-support`) runs in Brave, reachable through the Claude in Chrome extension, not the Discord desktop app.
 
 ## Agent skills

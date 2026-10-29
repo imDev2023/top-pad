@@ -6,8 +6,8 @@
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "assets": { "directory": ".open-next/assets", "binding": "ASSETS" },
   "observability": { "enabled": true },
-  // Each environment is built against its own API: NEXT_PUBLIC_API_URL is baked in at build time, then
-  // `opennextjs-cloudflare deploy --env devnet`.
+  // Each environment is built against its own API, since NEXT_PUBLIC_API_URL is baked in at build time: this package's
+  // `deploy:devnet` script builds against the devnet API, then deploys to the devnet environment.
   "env": {
     "devnet": {
       "name": "top-pad-web-devnet",
