@@ -323,6 +323,11 @@ How fees move:
 - A late window claim moves normal fees into the window; our keeper claims at 60 s, so at most a few seconds of 1.25% fees move.
 - After Graduation the creator claims their LP fees from Meteora directly; the creator page claims curve earnings and LP fees in one transaction.
 
+As built ([#44](https://github.com/imDev2023/top-pad/issues/44), 2026-10-29):
+- DBC pays each share straight out of the pool's quote vault into its owner's associated quote account, so no fee ever rests in the fee program; the creator's half is rounded down, as DBC rounds a creator's share, and the treasury takes the odd raw unit.
+- A claim takes the most it may claim, so a creator's page pays exactly the figure it showed while fees keep accruing, and a claim sent twice pays nothing twice.
+- On devnet the keeper's window claims landed 1 s after the minute ended by the chain's clock; one sent 3 s late in `tests/devnet` moved exactly one late trade's normal fee, 500,000 lamports.
+
 ## 5. On-chain programs
 
 Sources: [Our Fair Open program](https://github.com/imDev2023/top-pad/issues/28), [ADR 0006](adr/0006-a-fee-program-and-a-fair-open-program.md), [Fair Open creation transaction on devnet](https://github.com/imDev2023/top-pad/issues/31), [Launch liquidity](https://github.com/imDev2023/top-pad/issues/30), [Stack](https://github.com/imDev2023/top-pad/issues/17).
@@ -348,24 +353,30 @@ Accounts:
 - `FeeConfig`: the treasury address, the launch key, the Fair Open program id.
 - `fee_claimer` PDA, seeded with `"fee_claimer"` alone (`4Garg7N38ShAr8z38ZKkHrgP9Lj5nRKiy3HGtNDqTpko`, [#40](https://github.com/imDev2023/top-pad/issues/40)): the configs' partner, fee claimer and leftover receiver; receives Heat's graduated LP position NFTs and holds them permanently locked.
 - `CoinRecord` PDA, one per mint (the on-chain list of Heat coins): mint, pool, launch mode, the Fair Open launch it came from if any, the pot's own fee, whether the window claim has run, and an empty earnings-recipient override.
+- `WindowClaim` PDA, one per pool made around our flow whose window claim has run, seeded with `"window_claim"` and the pool: what a `CoinRecord`'s flag remembers for a Heat coin, for a pool no record lists ([#44](https://github.com/imDev2023/top-pad/issues/44)).
 
 Instructions:
 - `register_coin`: creates a `CoinRecord`; requires the launch key's signature (Instant launch, in the creation transaction) or a CPI from the Fair Open program's `settle` (Fair Open); about 0.001 SOL of rent per coin.
 - `record_pot_fee`: CPI from `settle`; records the pot's own fee for the 50/50 split.
 - `claim_window_fees`: the first partner-fee claim after the pool's 60 s window; anyone may send it; pays the window's fees, minus the pot's own fee split 50/50, to the launch's Tax Share account or to the treasury.
+  As built ([#44](https://github.com/imDev2023/top-pad/issues/44)): for a Heat coin, by its `CoinRecord`, refused before the pool's activation point plus 60 s and once it has run; a Fair Open's is refused until the Tax Share path arrives with [#49](https://github.com/imDev2023/top-pad/issues/49), so its window fees never reach the treasury instead; `claim_unlisted_window_fees` does the same for a pool made around our flow, creating its `WindowClaim`, whose rent its sender pays.
 - `claim_fees`: anyone may send it; claims the pool's partner fees by CPI and pays half to the current DBC creator role holder (read from the pool account) and half to the treasury.
+  As built: `claim_fees(max_amount)`, refused until the pool's window claim has run; each share is a DBC `claim_trading_fee` CPI signed by the `fee_claimer` PDA, asking for none of the coin (the configs collect fees in the quote alone) and naming the fee claimer's own quote account in DBC's coin slot, where nothing is ever paid.
 - `claim_surplus`: after the curve completes, splits the partner surplus the same way.
 - `claim_lp_fees`: claims Heat's graduated LP fees to the treasury.
 - `burn_leftover`: withdraws any DBC fixed-supply leftover after migration and burns it **(owner, 2026-10-27)**.
 
 On devnet (2026-10-29, [#41](https://github.com/imDev2023/top-pad/issues/41)): deployed from a verified build (executable hash `bf006185f8d7ea20ec56e9e700ff4e6f49f6063f41e8038e3cabd91be3c8b7e6`, rebuilt from GitHub by `solana-verify verify-from-repo` and recorded on chain; OtterSec's remote check runs on mainnet only), upgrade authority `4hsevQ8dGaJeRLgXa2DhsqAshJTpByHpy9ug15oyj6Sk`, `FeeConfig` at `5dpSgkTGGSNitmdpBhaP92kReDWHoVaz7TTMpSzRnGFL` naming the treasury `F7mn4DAccxre57wjoNoQzDgmk7H6mYG2NuWwG8Yt3oTG` and the keeper `GpDvDUpEC9ynHTJBt3XaZcTvBUw1HaMnU9Wwox18xfNi`.
 `register_coin` checks the pool is a DBC pool of the mint on a config whose fee claimer is the fee program's PDA, and costs about 17k compute units; the Instant launch's creation transaction with it is 1,015 bytes and about 117k compute units.
+Upgraded on devnet with the claims on 2026-10-29 ([#44](https://github.com/imDev2023/top-pad/issues/44)), again from a verified build: executable hash `a8c66760cc62473a165997298051834e3a46f04cffdf92fc771626ff669c0bbb`, commit `467e101`, 329,544 bytes, the program account extended for about 0.44 SOL.
+Measured against DBC 0.2.2 on devnet: `claim_window_fees` 37,820 compute units and `claim_fees` 61,722 a pool, each DBC payout about 16,000 with DBC's own event.
+The claims' unit tests run in LiteSVM against `tests/dbc-stand-in`, our own stand-in for DBC's partner fee claim written from its source, never deployed; `tests/devnet/src/fee-claims.test.ts` runs them against DBC itself.
 
 Invariants:
 - It never holds a creator balance after an instruction ends.
 - Window fees reach only the launch's Tax Share or the treasury.
 - A `CoinRecord` exists only for a coin our launch key or the Fair Open program registered.
-- **Unproven**: a PDA as `fee_claimer` claiming partner fees by CPI (Bags runs a program-owned fee claimer on mainnet, so the risk is low).
+- A PDA as `fee_claimer` claiming partner fees by CPI, **unproven** until it worked on devnet on 2026-10-29 ([#44](https://github.com/imDev2023/top-pad/issues/44)).
 
 ### 5.3 The Fair Open program
 
@@ -528,6 +539,8 @@ The screens:
    As built ([#42](https://github.com/imDev2023/top-pad/issues/42)): the chart plots the market cap in SOL, the price times the fixed supply, so its axis reads like the header; a trade's fee shows yellow inside the tax's minute and red above half the trade.
 4. **Launch flow**: link X; Fair Open (preselected) or Instant launch; the coin with live Vamp Shield verdicts (clear, "looks like X", refused with an appeal link); schedule (time up to 7 days ahead, minimum raise, teaser, about 0.03 SOL refundable rent); sign; done.
 5. **Creator record**: the facts in section 7, Creator wallet history, the verified-human and verified-creator marks, Creator Earnings from both sources with one claim, and for a barred Creator the banner, evidence pack and appeal history; the accused creator's private 72-hour view with a reply box.
+   As built ([#44](https://github.com/imDev2023/top-pad/issues/44)): `/creator`, the Creator Earnings of the connected wallet, since earnings follow the creator role a wallet holds: what waits in each Heat coin whose role it holds, read from the chain to the lamport, a coin whose first minute is unclaimed saying so, and one claim of it all; the record's facts join it in [#55](https://github.com/imDev2023/top-pad/issues/55).
+   A claim names five accounts of each pool, so one transaction holds two pools; a claim of more is as many transactions, signed in one wallet request, and an address lookup table of Heat's shared accounts would hold about four a transaction once LP fees join the claim ([#51](https://github.com/imDev2023/top-pad/issues/51)).
 6. **How this is enforced**: each promise, what keeps it, and who could still change it (below).
 7. **Operator app** (separate, section 10): cases, appeals, refused launches and admissions.
 
@@ -609,6 +622,11 @@ Sources: [Stack](https://github.com/imDev2023/top-pad/issues/17), [Backend desig
   Graduation is its own Workflow, started when the indexer sees a curve complete.
   Every step is safe to repeat on chain.
   If the build measures the open landing more than 2 s late, the open alone moves to a Durable Object alarm.
+
+  As built for Instant launches ([#44](https://github.com/imDev2023/top-pad/issues/44), 2026-10-29): `InstantLaunchKeeper`, one Workflow per launch keyed by its coin's mint, since a coin registered by another deployment has no launch here; it reads when the coin's Tax window ends, sleeps until then and sends the window claim, tried every second while the chain's clock trails the Worker's.
+  It is started when a launch lands, when the indexer sees an Instant coin registered, and by the 5-minute cron's sweep, which settles every coin with no window claim recorded against the chain: one whose record says the claim ran has the claim's transaction indexed again, and any other has its keeper started, or started again if it failed.
+  On devnet, deployed, the window claims landed 1 s after the minute ended by the chain's clock.
+  The indexer, a Durable Object always busy with its socket and alarm, went on running the code before a deploy, so the API deploys with Durable Objects restarted at once, and the indexer resets itself whenever the Worker that calls it runs another version.
 - **Admission server**: verifies personhood once (World ID server-side, Civic Uniqueness, Trusta-style attestations, X; no KYC), runs the linkage pipeline, and signs each deposit's admission.
 - **Launch service**: X OAuth, Vamp Shield checks, the ticker reservation, Arweave data items, the nonce account, collecting the ladder's signatures, and co-signing Instant launches.
 - **Vision service**: PDQ (all 8 orientations) and SSCD on CPU in one Python Container behind a Durable Object, asleep when idle; signatures in Postgres (PDQ `bit(256)` with a Hamming HNSW index, SSCD `vector(512)` with a cosine HNSW index).
@@ -669,7 +687,7 @@ All on devnet, against Meteora's deployed programs, with no Meteora binaries any
 - a full Fair Open (scheduling, deposits, the open, the lock escrow with the right cliff and recipient, the pushes, the Tax Share, closed seats), plus a partial fill;
 - the 64-rung ladder signed in one prompt in Phantom, Solflare and Backpack, plus the sign-at-the-open fallback;
 - the coin's metadata served through Turbo within 10 s of upload, before the rung lands;
-- the fee program's PDA claiming partner fees by CPI, the 60 s window claim, and the 50/50 split paying whoever holds the creator role;
+- the fee program's PDA claiming partner fees by CPI, the 60 s window claim, and the 50/50 split paying whoever holds the creator role (`tests/devnet/src/fee-claims.test.ts`, passing since [#44](https://github.com/imDev2023/top-pad/issues/44));
 - graduation at 8.5 SOL by our keeper, both LP halves permanently locked, the graduated pool's fee stepping down on schedule;
 - an Instant launch run through to graduation;
 - one Fair Open and one Instant launch priced in Circle's devnet USDC, checking deposits, refunds, the Tax Share and Creator Earnings in a non-SOL quote (tests only, never offered on the site).
@@ -805,11 +823,11 @@ Not in this build; each returns only as its own effort, mostly the mainnet effor
 ## 16. Risks and what is unproven
 
 Unproven, and proved by section 11's tests:
-- Our programs on chain at all: compute, `settle`, `claim`, the `fee_claimer` PDA claim, the Jupiter Lock CPI, a partial fill past the target, and the creation transaction at about 1,014 bytes with the coin record.
+- Our programs on chain at all: compute, `settle`, `claim`, the Jupiter Lock CPI, a partial fill past the target, and the creation transaction at about 1,014 bytes with the coin record; the `fee_claimer` PDA's claims by CPI were shown on devnet on 2026-10-29 ([#44](https://github.com/imDev2023/top-pad/issues/44)).
 - Wallets signing a 64-rung ladder in one prompt.
 - A sniper's separate transaction landing in the creation slot.
 - Turbo serving an upload within 10 s: `turbo-gateway.com` served an Instant launch's upload at once, while `arweave.net` still answered 404 three minutes later (2026-10-29, [#41](https://github.com/imDev2023/top-pad/issues/41)), so metadata URIs name `turbo-gateway.com`; the Fair Open's 10 s hold is still to be measured.
-- How precisely a Workflow wakes (if the open lands more than 2 s late, it moves to a Durable Object alarm).
+- How precisely a Workflow wakes (if the open lands more than 2 s late, it moves to a Durable Object alarm): the window claim's Workflow, deployed on devnet, landed its claims 1 s after the minute ended by the chain's clock ([#44](https://github.com/imDev2023/top-pad/issues/44), 2026-10-29); the open's is still to be measured.
 - Codama's output for Meteora's IDLs, settled in [#39](https://github.com/imDev2023/top-pad/issues/39) (2026-10-27): clean for DAMM v2 and Jupiter Lock; for DBC, two generic fixes applied to the IDL before generation (two fields with the same camelCase name, and a type embedding an account's struct), so no client falls back to the SDK.
 - The curve and fee-scheduler integers being accepted by DBC, settled in [#40](https://github.com/imDev2023/top-pad/issues/40) (2026-10-29): DBC refused the first curve values (`InvalidTokenSupply`), accepted the generator's on devnet, and stored every field as sent; the graduated pool's step encoding matches DAMM v2's source.
 - Whether Neon's free plan (100 compute-hours a project a month) lasts a month of the always-on indexer and the 15 s trending query; if not, the devnet database moves to a paid plan.

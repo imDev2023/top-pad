@@ -109,6 +109,11 @@ _Avoid_: anti-sniper fee, snipe tax, launch tax
 The first minute of a coin's trading, during which the sniper tax applies and the fees traders pay go to the Fair Open's depositors as their Tax Share, or to Heat in an Instant launch.
 _Avoid_: deposit window (that is the Fair Open's window before trading starts), launch window
 
+**Window claim**:
+The first claim of a coin's fees once its Tax window has ended, which pays everything its pool has collected to the Tax Share, or to Heat in an Instant launch; one sent late also pays out the normal fees of the seconds it was late by.
+Anyone may send it, and Heat's keeper sends it the moment the window ends.
+_Avoid_: tax claim, first claim
+
 **Tax Share**:
 A Fair Open depositor's share of the sniper tax their coin collected, in proportion to how much of their deposit bought coins.
 _Avoid_: rebate (it is not their own money coming back), cashback, airdrop, holder rewards
