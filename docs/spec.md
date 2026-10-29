@@ -204,6 +204,7 @@ Meteora program ids: DBC `dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN`, DAMM v2 
 | Supply | exactly 1,000,000,000, fixed (DBC revokes the mint authority) |
 | Decimals | 6 |
 | Metadata | DBC `Immutable` token authority: `is_mutable` false, no update authority |
+| Metadata document | the image and the JSON as Arweave data items through Turbo, named by `https://turbo-gateway.com/<id>`; the creator's X profile is the JSON's `twitter` link ([#41](https://github.com/imDev2023/top-pad/issues/41)) |
 | On the curve | 80%, less a few coins: 799,999,997.74 at 85 SOL, 799,999,992.86 at 8.5 SOL |
 | To the graduated pool | 20% and those few coins: 200,000,002.26 at 85 SOL, 200,000,007.14 at 8.5 SOL; nothing left over |
 
@@ -356,6 +357,9 @@ Instructions:
 - `claim_surplus`: after the curve completes, splits the partner surplus the same way.
 - `claim_lp_fees`: claims Heat's graduated LP fees to the treasury.
 - `burn_leftover`: withdraws any DBC fixed-supply leftover after migration and burns it **(owner, 2026-10-27)**.
+
+On devnet (2026-10-29, [#41](https://github.com/imDev2023/top-pad/issues/41)): deployed from a verified build (executable hash `bf006185f8d7ea20ec56e9e700ff4e6f49f6063f41e8038e3cabd91be3c8b7e6`, rebuilt from GitHub by `solana-verify verify-from-repo` and recorded on chain; OtterSec's remote check runs on mainnet only), upgrade authority `4hsevQ8dGaJeRLgXa2DhsqAshJTpByHpy9ug15oyj6Sk`, `FeeConfig` at `5dpSgkTGGSNitmdpBhaP92kReDWHoVaz7TTMpSzRnGFL` naming the treasury `F7mn4DAccxre57wjoNoQzDgmk7H6mYG2NuWwG8Yt3oTG` and the keeper `GpDvDUpEC9ynHTJBt3XaZcTvBUw1HaMnU9Wwox18xfNi`.
+`register_coin` checks the pool is a DBC pool of the mint on a config whose fee claimer is the fee program's PDA, and costs about 17k compute units; the Instant launch's creation transaction with it is 1,015 bytes and about 117k compute units.
 
 Invariants:
 - It never holds a creator balance after an instruction ends.
@@ -608,6 +612,7 @@ Sources: [Stack](https://github.com/imDev2023/top-pad/issues/17), [Backend desig
 - Two runtime hot keys, each in Cloudflare Secrets Store and bound only to the Worker that uses it:
   - the **keeper key**: fee payer for the lock, pushes, claims and graduation, the pot's delegate and the nonce authority, and the launch key that co-signs creation transactions and registers coins, holding a capped SOL float with a low-balance alert **(owner, 2026-10-27)**;
   - the **admission signer**, holding no funds.
+- On devnet the keeper key, the treasury and the upgrade authority were made on 2026-10-29 ([#41](https://github.com/imDev2023/top-pad/issues/41)) and live in `~/.config/top-pad/devnet` on the owner's Mac, backed up in the owner's password manager; the keeper's float is 0.5 SOL, with the low-balance alert at 0.25 SOL.
 - The upgrade and treasury keys never touch Cloudflare: kept offline on devnet, held by Squads on mainnet.
 - The two program keypairs only ever sign the first deploy at the fixed ids (section 5.1), on devnet and later on mainnet; a leak before the mainnet deploy would let anyone deploy their own program at our ids there first.
   They live only in the gitignored `target/deploy` on the owner's Mac, backed up in the owner's password manager, never in the repo, CI or Cloudflare (owner, 2026-10-28).
@@ -625,6 +630,7 @@ Sources: [Stack](https://github.com/imDev2023/top-pad/issues/17), [Backend desig
 ### 10.5 Providers
 
 - **During the devnet build, free tiers only (owner, 2026-10-27)**: a devnet endpoint from the owner's Chainstack or QuickNode accounts for RPC, WebSockets and sending, with the shared Helius free key as a second (it sends 1 transaction per second and is rate-limited when agents run in parallel); devnet Fair Opens have tens of depositors, not hundreds, so pushes stay within these limits.
+  Of the owner's endpoints only the Helius key serves devnet, and Solana's public endpoints answer a Worker with 403 ("Your IP or provider is blocked", 2026-10-29), so the API runs on the Helius devnet endpoint ([#41](https://github.com/imDev2023/top-pad/issues/41)).
 - **When getting ready to launch**: a dedicated Helius project on the Developer plan ($49 a month) or higher, its key in the project's own `.env`, not the owner's shared key file: LaserStream, `getTransactionsForAddress`, 10M credits, 50 requests and 5 sends per second.
 - A second provider for sending and fallback reads: the owner's existing Chainstack or QuickNode endpoint.
 - Mainnet LaserStream needs Helius Business or Professional; that choice belongs to the mainnet effort.
@@ -787,7 +793,7 @@ Unproven, and proved by section 11's tests:
 - Our programs on chain at all: compute, `settle`, `claim`, the `fee_claimer` PDA claim, the Jupiter Lock CPI, a partial fill past the target, and the creation transaction at about 1,014 bytes with the coin record.
 - Wallets signing a 64-rung ladder in one prompt.
 - A sniper's separate transaction landing in the creation slot.
-- Turbo serving an upload within 10 s.
+- Turbo serving an upload within 10 s: `turbo-gateway.com` served an Instant launch's upload at once, while `arweave.net` still answered 404 three minutes later (2026-10-29, [#41](https://github.com/imDev2023/top-pad/issues/41)), so metadata URIs name `turbo-gateway.com`; the Fair Open's 10 s hold is still to be measured.
 - How precisely a Workflow wakes (if the open lands more than 2 s late, it moves to a Durable Object alarm).
 - Codama's output for Meteora's IDLs, settled in [#39](https://github.com/imDev2023/top-pad/issues/39) (2026-10-27): clean for DAMM v2 and Jupiter Lock; for DBC, two generic fixes applied to the IDL before generation (two fields with the same camelCase name, and a type embedding an account's struct), so no client falls back to the SDK.
 - The curve and fee-scheduler integers being accepted by DBC, settled in [#40](https://github.com/imDev2023/top-pad/issues/40) (2026-10-29): DBC refused the first curve values (`InvalidTokenSupply`), accepted the generator's on devnet, and stored every field as sent; the graduated pool's step encoding matches DAMM v2's source.
