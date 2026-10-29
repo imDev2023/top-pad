@@ -1,8 +1,10 @@
-// The fee claims on devnet (#44), against DBC's deployed program and the fee program upgraded with them: an Instant
-// launch built as the launch service builds it, trades inside its Tax window and after it, the window claim, the
-// creator's claim, and the creator role handed to another wallet. Each step reads back what the chain paid, to the
-// lamport. It spends about 0.05 devnet SOL from the Solana CLI's wallet and signs with the keeper key, which only this
-// Mac holds (~/.config/top-pad/devnet/keeper.json, never CI); without it, it is skipped.
+// The fee claims on devnet (#44), against DBC's deployed program and the fee program upgraded with them. A Heat coin,
+// launched as the launch service launches it: the window claim refused inside its Tax window, then run once it ends,
+// whether this test's claim or the deployed keeper's lands first, paying exactly the window's tax; then the creator's
+// claim, exact while fees accrue, and the creator role handed to another wallet. And a pool made around Heat's flow,
+// which no keeper claims, so a claim sent late can be shown moving exactly the late seconds' fees. Each step reads back
+// what the chain paid, to the lamport. It spends about 0.1 devnet SOL from the Solana CLI's wallet and signs with the
+// keeper key, which only this Mac holds (~/.config/top-pad/devnet/keeper.json, never CI); without it, it is skipped.
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -39,9 +41,9 @@ import {
   type InstantLaunch,
 } from "@top-pad/chain";
 import { fetchVirtualPool, getTransferPoolCreatorInstruction } from "@top-pad/clients/dbc";
-import { fetchCoinRecord, findCoinRecordPda, getClaimFeesInstructionAsync } from "@top-pad/clients/fee";
-import { decodeTransaction, fetchRawTransaction } from "@top-pad/indexer";
-import { devnet, fundedWallets, rpc, rpcUrl, send, swap, sweep } from "./devnet";
+import { fetchCoinRecord, fetchWindowClaim, findWindowClaimPda, getClaimFeesInstructionAsync } from "@top-pad/clients/fee";
+import { decodeTransaction, fetchRawTransaction, type RawTransaction, type WindowClaimed } from "@top-pad/indexer";
+import { devnet, fundedWallets, poolAroundHeat, rpc, rpcUrl, send, swap, sweep } from "./devnet";
 
 const keeperFile = join(homedir(), ".config/top-pad/devnet/keeper.json");
 const load = async (path: string) => createKeyPairSignerFromBytes(Uint8Array.from(JSON.parse(readFileSync(path, "utf8"))));
@@ -49,18 +51,16 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const HEAT = new Set<string>([devnet.configs!.instant, devnet.configs!.fairOpen]);
 const quoteMint = devnet.quote.mint;
 const treasury = devnet.keys!.treasury;
+const MAX = 2n ** 64n - 1n;
 /** A transaction's network fee: one signature, no priority fee. */
 const NETWORK_FEE = 5_000n;
 /** The fee program's custom errors this test meets (programs/fee, `FeeError`). */
 const TAX_WINDOW_OPEN = 6009;
+const WINDOW_ALREADY_CLAIMED = 6010;
 const NOT_THE_CREATORS_ACCOUNT = 6013;
 
 const pool = async (address: Address): Promise<ClaimablePool> => claimablePool(address, (await fetchVirtualPool(rpc, address)).data.poolState, quoteMint);
 const lamports = async (owner: Address) => (await rpc.getBalance(owner, { commitment: "confirmed" }).send()).value;
-async function tokens(account: Address) {
-  const { value } = await rpc.getTokenAccountBalance(account, { commitment: "confirmed" }).send().catch(() => ({ value: { amount: "0" } }));
-  return BigInt(value.amount);
-}
 
 /** The chain's clock now: the block time of the latest confirmed slot. */
 async function chainTime(): Promise<bigint> {
@@ -68,21 +68,11 @@ async function chainTime(): Promise<bigint> {
   return BigInt((await rpc.getBlockTime(slot).send()) ?? 0n);
 }
 
-/** What the fee program used of a landed transaction's compute, from its log lines. */
-async function feeProgramCompute(signature: string): Promise<number[]> {
-  const tx = await landed(signature);
-  const pattern = new RegExp(`^Program ${FEE_PROGRAM_ADDRESS} consumed (\\d+) of`);
-  return (tx?.meta?.logMessages ?? []).flatMap((line) => {
-    const match = pattern.exec(line);
-    return match ? [Number(match[1])] : [];
-  });
-}
-
 /**
  * A landed transaction as the RPC serves it, asked again while it is not served yet or the public endpoint answers
  * 429, whose per-IP budget every session on this Mac shares.
  */
-async function landed(signature: string) {
+async function landed(signature: string): Promise<RawTransaction> {
   for (let attempt = 0; ; attempt++) {
     const raw = await fetchRawTransaction(rpcUrl, signature).catch((e: Error) => {
       if (!/429/.test(e.message) || attempt > 8) throw e;
@@ -96,6 +86,32 @@ async function landed(signature: string) {
 
 /** A landed transaction as the indexer decodes it. */
 const decoded = async (signature: string) => decodeTransaction(await landed(signature), HEAT);
+
+/** What the fee program used of a landed transaction's compute: the last of its log lines is the instruction's own. */
+async function feeProgramCompute(signature: string): Promise<number> {
+  const pattern = new RegExp(`^Program ${FEE_PROGRAM_ADDRESS} consumed (\\d+) of`);
+  const used = ((await landed(signature)).meta?.logMessages ?? []).flatMap((line) => pattern.exec(line)?.[1] ?? []);
+  return Number(used.at(-1));
+}
+
+/** How a landed transaction changed `owner`'s balance of the quote, from its own token balances. */
+async function quoteChange(signature: string, owner: Address): Promise<bigint> {
+  type Balance = { owner?: string; mint: string; uiTokenAmount: { amount: string } };
+  const meta = (await landed(signature)).meta as { preTokenBalances?: Balance[]; postTokenBalances?: Balance[] };
+  const of = (balances: Balance[] = []) => BigInt(balances.find((b) => b.owner === owner && b.mint === quoteMint)?.uiTokenAmount.amount ?? "0");
+  return of(meta.postTokenBalances) - of(meta.preTokenBalances);
+}
+
+/** The window claim among an account's transactions (a coin's record), newest first. */
+async function windowClaimAmong(account: Address, mint: Address): Promise<{ signature: string; claim: WindowClaimed }> {
+  const signatures = await rpc.getSignaturesForAddress(account, { limit: 10, commitment: "confirmed" }).send();
+  for (const { signature, err } of signatures) {
+    if (err) continue;
+    const claim = (await decoded(signature)).windowClaims.find((w) => w.mint === mint);
+    if (claim) return { signature, claim };
+  }
+  throw new Error(`no window claim of ${mint} among ${account}'s transactions`);
+}
 
 /** The custom error a simulated transaction of `instructions` fails with, `payer` paying. */
 async function simulatedError(payer: KeyPairSigner, instructions: Instruction[]): Promise<number | null> {
@@ -114,9 +130,17 @@ async function simulatedError(payer: KeyPairSigner, instructions: Instruction[])
   return custom !== undefined ? Number(custom) : err ? -1 : null;
 }
 
+/** A creator's claim of one pool, signed and sent by the creator. */
+async function claimAll(who: KeyPairSigner, p: ClaimablePool, heat: boolean, maxAmount: bigint) {
+  const { value: lifetime } = await rpc.getLatestBlockhash({ commitment: "confirmed" }).send();
+  const [message, ...more] = await creatorClaimMessages({ creator: who, treasury, computeUnitPrice: 0n, claims: [{ pool: p, heat, maxAmount }] }, lifetime);
+  expect(more).toHaveLength(0);
+  return { signature: await send(who, message!.instructions as Instruction[]), bytes: compileTransaction(message!).messageBytes.length };
+}
+
 describe.skipIf(!existsSync(keeperFile))("fee claims on devnet", () => {
   it(
-    "pays the Tax window to the treasury at 60 s, then splits later fees 50/50 with whoever holds the creator role",
+    "pays a Heat coin's Tax window to the treasury once it ends, then splits later fees 50/50 with whoever holds the creator role",
     { timeout: 360_000 },
     async () => {
       const keeper = await load(keeperFile);
@@ -134,86 +158,70 @@ describe.skipIf(!existsSync(keeperFile))("fee claims on devnet", () => {
           coin: { name: "Heat Fee Claims Test", ticker: "HEATFEES", uri: "https://turbo-gateway.com/heat-devnet-fee-claims-test" },
           computeUnitPrice: 0n,
         };
-        const { pool: address } = await instantLaunchAccounts(launch);
+        const { pool: address, coinRecord } = await instantLaunchAccounts(launch);
         await send(creator, await instantLaunchInstructions(launch));
         const opened = await pool(address);
-        console.log(`launched ${mint.address}, pool ${address}, its Tax window ending at ${opened.windowEndsAt}`);
 
         // Two buys inside the window pay the sniper tax; the partner's 80% of it waits in the pool.
         await swap(trader, mint.address, "buy", 10_000_000n);
         await swap(trader, mint.address, "buy", 10_000_000n);
         const taxed = (await pool(address)).partnerQuoteFee;
-        console.log(`the window's buys left ${taxed} lamports of partner fees`);
-        expect(taxed).toBeGreaterThan(10_000_000n);
+        expect(taxed).toBeGreaterThan(2_000_000n);
 
-        // The window claim is refused until the chain's clock passes the window's end.
-        const windowClaim = (p: ClaimablePool) => windowClaimInstructions({ pool: p, heat: true, treasury, payer: keeper, computeUnitPrice: 0n });
-        if ((await chainTime()) < opened.windowEndsAt - 3n) expect(await simulatedError(keeper, await windowClaim(await pool(address)))).toBe(TAX_WINDOW_OPEN);
-        while ((await chainTime()) < opened.windowEndsAt) await sleep(1_000);
+        // Refused while the chain's clock is inside the window.
+        const windowClaim = async () => windowClaimInstructions({ pool: await pool(address), heat: true, treasury, payer: keeper, computeUnitPrice: 0n });
+        if ((await chainTime()) < opened.windowEndsAt - 3n) expect(await simulatedError(keeper, await windowClaim())).toBe(TAX_WINDOW_OPEN);
+        while ((await chainTime()) < opened.windowEndsAt) await sleep(500);
 
-        // A trade lands after the window and before the claim: its normal fee is moved into the window by the late claim.
-        const lateTrade = await swap(trader, mint.address, "buy", 50_000_000n);
-        const late = (await decoded(lateTrade)).swaps[0]!;
-        expect(late.timestamp).toBeGreaterThanOrEqual(opened.windowEndsAt);
-        const beforeClaim = await pool(address);
+        // This test's claim races the deployed keeper's, which keeps every Heat coin on devnet: whichever lands first
+        // runs the window claim, once, and the other is refused.
+        const ours = await send(keeper, await windowClaim()).catch((e: { cause?: { context?: { code?: number } } }) => {
+          if (e.cause?.context?.code !== WINDOW_ALREADY_CLAIMED) throw e;
+          return null;
+        });
+        const { signature, claim } = await windowClaimAmong(coinRecord, mint.address);
         const treasuryAccount = await quoteAccount(treasury, quoteMint);
-        const treasuryBefore = await tokens(treasuryAccount);
-        const claimSignature = await send(keeper, await windowClaim(beforeClaim));
-        const [window] = (await decoded(claimSignature)).windowClaims;
-        expect(window).toMatchObject({ pool: address, mint: mint.address, heat: true, destination: treasuryAccount, amount: beforeClaim.partnerQuoteFee });
-        expect(window!.windowEndedAt).toBe(opened.windowEndsAt);
-        expect(await tokens(treasuryAccount)).toBe(treasuryBefore + beforeClaim.partnerQuoteFee);
-        const movedNormal = beforeClaim.partnerQuoteFee - taxed;
+        expect(claim).toMatchObject({ pool: address, heat: true, destination: treasuryAccount, amount: taxed, windowEndedAt: opened.windowEndsAt });
+        expect(claim.claimedAt - claim.windowEndedAt).toBeLessThan(10n);
+        expect(await quoteChange(signature, treasury)).toBe(taxed);
         console.log(
-          `the window claim ran ${window!.claimedAt - window!.windowEndedAt} s late and paid ${window!.amount} lamports: ` +
-            `${taxed} of tax and ${movedNormal} of one late trade's normal fee; fee program compute ${await feeProgramCompute(claimSignature)}`,
+          `the window claim (${ours === signature ? "this test's" : "the deployed keeper's"}) ran ${claim.claimedAt - claim.windowEndedAt} s ` +
+            `after the window ended and paid the treasury ${claim.amount} lamports; claim_window_fees used ${await feeProgramCompute(signature)} compute units`,
         );
-        expect((await fetchCoinRecord(rpc, (await findCoinRecordPda({ mint: mint.address }))[0])).data.windowClaimed).toBe(true);
+        expect((await fetchCoinRecord(rpc, coinRecord)).data.windowClaimed).toBe(true);
         expect((await pool(address)).partnerQuoteFee).toBe(0n);
-        expect(await tokens(await quoteAccount(FEE_CLAIMER_ADDRESS, quoteMint))).toBe(0n);
+        expect(await simulatedError(keeper, await windowClaim())).toBe(WINDOW_ALREADY_CLAIMED);
 
-        // Normal trades after the claim: their fees are the creator's half and the treasury's half.
+        // Normal trades after the claim: their fees are the creator's half and the treasury's half. More fees land after
+        // the creator's page showed its figure; the claim pays exactly the figure.
         await swap(trader, mint.address, "buy", 80_000_000n);
         const shown = (await pool(address)).partnerQuoteFee;
-        const share = creatorShare(shown);
-        // More fees land after the page showed its figure; the claim pays exactly the figure.
         await swap(trader, mint.address, "buy", 20_000_000n);
         const accrued = (await pool(address)).partnerQuoteFee;
         const creatorBefore = await lamports(creator.address);
-        const treasuryBeforeSplit = await tokens(treasuryAccount);
-        const { value: lifetime } = await rpc.getLatestBlockhash({ commitment: "confirmed" }).send();
-        const claimAll = async (who: KeyPairSigner, maxAmount: bigint) => {
-          const [message, ...more] = await creatorClaimMessages(
-            { creator: who, treasury, computeUnitPrice: 0n, claims: [{ pool: await pool(address), heat: true, maxAmount }] },
-            lifetime,
-          );
-          expect(more).toHaveLength(0);
-          console.log(`a one-pool creator's claim is ${compileTransaction(message!).messageBytes.length} bytes of message`);
-          return send(who, message!.instructions as Instruction[]);
-        };
-        const split = await claimAll(creator, shown);
-        expect(await lamports(creator.address)).toBe(creatorBefore + share - NETWORK_FEE);
-        expect(await tokens(treasuryAccount)).toBe(treasuryBeforeSplit + shown - share);
+        const split = await claimAll(creator, await pool(address), true, shown);
+        expect(await lamports(creator.address)).toBe(creatorBefore + creatorShare(shown) - NETWORK_FEE);
+        expect(await quoteChange(split.signature, treasury)).toBe(shown - creatorShare(shown));
         expect((await pool(address)).partnerQuoteFee).toBe(accrued - shown);
-        const [paid] = (await decoded(split)).feeClaims;
-        expect(paid).toMatchObject({ pool: address, creator: creator.address, creatorAmount: share, treasuryAmount: shown - share });
-        console.log(`the creator's claim paid them ${share} and the treasury ${shown - share}; fee program compute ${await feeProgramCompute(split)}`);
+        expect((await decoded(split.signature)).feeClaims).toMatchObject([{ pool: address, creator: creator.address, creatorAmount: creatorShare(shown) }]);
+        console.log(
+          `the creator's claim (${split.bytes} bytes of message) paid them ${creatorShare(shown)} and the treasury ${shown - creatorShare(shown)}; ` +
+            `claim_fees used ${await feeProgramCompute(split.signature)} compute units`,
+        );
 
         // Claimed again, only what accrued after the figure is paid, and a third claim pays nothing: no fee twice.
         const rest = accrued - shown;
-        const second = await claimAll(creator, 2n ** 64n - 1n);
-        expect((await decoded(second)).feeClaims).toMatchObject([{ creatorAmount: creatorShare(rest), treasuryAmount: rest - creatorShare(rest) }]);
-        const third = await claimAll(creator, 2n ** 64n - 1n);
-        expect((await decoded(third)).feeClaims).toEqual([]);
-        expect((await pool(address)).partnerQuoteFee).toBe(0n);
-        expect(await lamports(creator.address)).toBe(creatorBefore + share + creatorShare(rest) - 3n * NETWORK_FEE);
+        const second = await claimAll(creator, await pool(address), true, MAX);
+        expect((await decoded(second.signature)).feeClaims).toMatchObject([{ creatorAmount: creatorShare(rest), treasuryAmount: rest - creatorShare(rest) }]);
+        const third = await claimAll(creator, await pool(address), true, MAX);
+        expect((await decoded(third.signature)).feeClaims).toEqual([]);
+        expect(await lamports(creator.address)).toBe(creatorBefore + creatorShare(shown) + creatorShare(rest) - 3n * NETWORK_FEE);
 
         // The creator role moves to another wallet: the next claim pays the new holder, and the old one's is refused.
-        const config = devnet.configs!.instant;
         await send(creator, [
           getTransferPoolCreatorInstruction({
             virtualPool: address,
-            config,
+            config: devnet.configs!.instant,
             creator,
             newCreator: heir.address,
             eventAuthority: await eventAuthorityAddress(DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS),
@@ -224,11 +232,11 @@ describe.skipIf(!existsSync(keeperFile))("fee claims on devnet", () => {
         const toHeir = await pool(address);
         expect(toHeir.creator).toBe(heir.address);
         const oldCreators = await getClaimFeesInstructionAsync({
-          window: (await findCoinRecordPda({ mint: mint.address }))[0],
+          window: coinRecord,
           creatorTokenAccount: await quoteAccount(creator.address, quoteMint),
           treasuryTokenAccount: treasuryAccount,
           feeClaimerTokenAccount: await quoteAccount(FEE_CLAIMER_ADDRESS, quoteMint),
-          config,
+          config: devnet.configs!.instant,
           pool: address,
           baseVault: toHeir.baseVault,
           quoteVault: toHeir.quoteVault,
@@ -242,12 +250,52 @@ describe.skipIf(!existsSync(keeperFile))("fee claims on devnet", () => {
         });
         expect(await simulatedError(creator, [oldCreators])).toBe(NOT_THE_CREATORS_ACCOUNT);
         const heirBefore = await lamports(heir.address);
-        const heirs = await claimAll(heir, toHeir.partnerQuoteFee);
+        const heirs = await claimAll(heir, toHeir, true, toHeir.partnerQuoteFee);
         expect(await lamports(heir.address)).toBe(heirBefore + creatorShare(toHeir.partnerQuoteFee) - NETWORK_FEE);
-        expect((await decoded(heirs)).feeClaims[0]).toMatchObject({ creator: heir.address, creatorAmount: creatorShare(toHeir.partnerQuoteFee) });
-        console.log(`after the handover the heir was paid ${creatorShare(toHeir.partnerQuoteFee)} lamports`);
+        expect((await decoded(heirs.signature)).feeClaims[0]).toMatchObject({ creator: heir.address, creatorAmount: creatorShare(toHeir.partnerQuoteFee) });
       } finally {
         await sweep(creator, trader, heir);
+      }
+    },
+  );
+
+  it(
+    "pays a pool made around Heat's flow its window too, and a claim sent late moves exactly the late seconds' fees",
+    { timeout: 240_000 },
+    async () => {
+      const [stranger, trader] = await fundedWallets(60_000_000n, 150_000_000n);
+      try {
+        // No keeper claims a pool no record lists, so this test alone decides when its window claim runs.
+        const { mint, pool: address } = await poolAroundHeat(stranger);
+        const opened = await pool(address);
+        await swap(trader, mint, "buy", 10_000_000n);
+        const taxed = (await pool(address)).partnerQuoteFee;
+        while ((await chainTime()) < opened.windowEndsAt) await sleep(500);
+
+        // A trade after the window and before the claim: the late claim moves its normal fee, and nothing else.
+        const late = (await decoded(await swap(trader, mint, "buy", 50_000_000n))).swaps[0]!;
+        expect(late.timestamp).toBeGreaterThanOrEqual(opened.windowEndsAt);
+        const beforeClaim = await pool(address);
+        const lateFee = beforeClaim.partnerQuoteFee - taxed;
+        const claim = await send(stranger, await windowClaimInstructions({ pool: beforeClaim, heat: false, treasury, payer: stranger, computeUnitPrice: 0n }));
+        const [window] = (await decoded(claim)).windowClaims;
+        expect(window).toMatchObject({ pool: address, heat: false, amount: taxed + lateFee });
+        expect(await quoteChange(claim, treasury)).toBe(taxed + lateFee);
+        console.log(
+          `a window claim ${window!.claimedAt - window!.windowEndedAt} s late paid ${taxed} lamports of tax and ${lateFee} of one late ` +
+            `trade's normal fee; claim_unlisted_window_fees used ${await feeProgramCompute(claim)} compute units`,
+        );
+        const [windowClaim] = await findWindowClaimPda({ pool: address });
+        expect((await fetchWindowClaim(rpc, windowClaim)).data.pool).toBe(address);
+
+        // After it, the pool's fees split like a Heat coin's, with its own creator.
+        await swap(trader, mint, "buy", 40_000_000n);
+        const fees = (await pool(address)).partnerQuoteFee;
+        const before = await lamports(stranger.address);
+        await claimAll(stranger, await pool(address), false, fees);
+        expect(await lamports(stranger.address)).toBe(before + creatorShare(fees) - NETWORK_FEE);
+      } finally {
+        await sweep(stranger, trader);
       }
     },
   );

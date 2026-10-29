@@ -1,14 +1,14 @@
 // The generated Kit clients read Meteora's real accounts on devnet (spec 5.1: integration tests run against Meteora's
 // programs as deployed on devnet; no Meteora binary is ever loaded). DBC configs and DAMM v2 pools are never closed,
 // so these two stay readable.
-import { address, createSolanaRpc } from "@solana/kit";
+import { address } from "@solana/kit";
 import { describe, expect, it } from "vitest";
 import { CP_AMM_PROGRAM_ADDRESS, fetchPool } from "@top-pad/clients/damm-v2";
 import { DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS, fetchPoolConfig } from "@top-pad/clients/dbc";
 import { LOCKER_PROGRAM_ADDRESS } from "@top-pad/clients/jupiter-lock";
-
-// Free tiers only during the devnet build (spec 10.5); the public endpoint by default.
-const rpc = createSolanaRpc(process.env.DEVNET_RPC_URL ?? "https://api.devnet.solana.com");
+// Free tiers only during the devnet build (spec 10.5): the public endpoint unless DEVNET_RPC_URL names one, asked again
+// while it answers 429.
+import { rpc } from "./devnet";
 const WSOL = "So11111111111111111111111111111111111111112";
 
 // Found on devnet on 2026-10-27 with getProgramAccounts on each program, filtered on the account's discriminator.
