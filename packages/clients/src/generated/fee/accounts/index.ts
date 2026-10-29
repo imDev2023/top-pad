@@ -8,3 +8,4 @@
 
 export * from "./coinRecord";
 export * from "./feeConfig";
+export * from "./windowClaim";

@@ -8,6 +8,422 @@
   },
   "instructions": [
     {
+      "name": "claim_fees",
+      "docs": [
+        "Creator Earnings (spec 4): anyone may send it once the pool's window claim has run. It claims up to `max_amount`",
+        "of the pool's partner fees and pays half, rounded down as DBC rounds a creator's share, to whoever holds the",
+        "pool's DBC creator role at this moment, and the rest to the treasury. A creator page passes the amount it showed,",
+        "so the claim pays exactly that while fees keep accruing; nothing left to claim pays nothing."
+      ],
+      "discriminator": [
+        82,
+        251,
+        233,
+        156,
+        12,
+        52,
+        184,
+        202
+      ],
+      "accounts": [
+        {
+          "name": "fee_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "window"
+        },
+        {
+          "name": "creator_token_account",
+          "writable": true
+        },
+        {
+          "name": "treasury_token_account",
+          "writable": true
+        },
+        {
+          "name": "fee_claimer",
+          "address": "4Garg7N38ShAr8z38ZKkHrgP9Lj5nRKiy3HGtNDqTpko"
+        },
+        {
+          "name": "fee_claimer_token_account",
+          "writable": true
+        },
+        {
+          "name": "pool_authority",
+          "address": "FhVo3mqL8PW5pH5U2CN4XE33DokiyZnUwuGpH2hmHLuM"
+        },
+        {
+          "name": "config"
+        },
+        {
+          "name": "pool",
+          "writable": true
+        },
+        {
+          "name": "base_vault",
+          "writable": true
+        },
+        {
+          "name": "quote_vault",
+          "writable": true
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "quote_mint"
+        },
+        {
+          "name": "token_base_program"
+        },
+        {
+          "name": "token_quote_program"
+        },
+        {
+          "name": "dbc_event_authority",
+          "address": "8Ks12pbrD6PXxfty1hVQiE9sc289zgU1zHkvXhrSdriF"
+        },
+        {
+          "name": "dbc_program",
+          "address": "dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "max_amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "claim_unlisted_window_fees",
+      "docs": [
+        "The window claim of a pool made around Heat's flow (spec 2.4): one on Heat's configs that no `CoinRecord` lists.",
+        "Its window's fees go to the treasury, and a `WindowClaim`, paid for by whoever sends it, remembers it ran."
+      ],
+      "discriminator": [
+        156,
+        187,
+        65,
+        65,
+        156,
+        68,
+        121,
+        105
+      ],
+      "accounts": [
+        {
+          "name": "fee_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "coin_record",
+          "docs": [
+            "The coin's record address, which must hold nothing: a coin our launch key co-signed takes `claim_window_fees`."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  105,
+                  110,
+                  95,
+                  114,
+                  101,
+                  99,
+                  111,
+                  114,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "window_claim",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  119,
+                  105,
+                  110,
+                  100,
+                  111,
+                  119,
+                  95,
+                  99,
+                  108,
+                  97,
+                  105,
+                  109
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "payer",
+          "docs": [
+            "Pays the `WindowClaim`'s rent."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "treasury_token_account",
+          "writable": true
+        },
+        {
+          "name": "fee_claimer",
+          "address": "4Garg7N38ShAr8z38ZKkHrgP9Lj5nRKiy3HGtNDqTpko"
+        },
+        {
+          "name": "fee_claimer_token_account",
+          "writable": true
+        },
+        {
+          "name": "pool_authority",
+          "address": "FhVo3mqL8PW5pH5U2CN4XE33DokiyZnUwuGpH2hmHLuM"
+        },
+        {
+          "name": "config"
+        },
+        {
+          "name": "pool",
+          "writable": true
+        },
+        {
+          "name": "base_vault",
+          "writable": true
+        },
+        {
+          "name": "quote_vault",
+          "writable": true
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "quote_mint"
+        },
+        {
+          "name": "token_base_program"
+        },
+        {
+          "name": "token_quote_program"
+        },
+        {
+          "name": "dbc_event_authority",
+          "address": "8Ks12pbrD6PXxfty1hVQiE9sc289zgU1zHkvXhrSdriF"
+        },
+        {
+          "name": "dbc_program",
+          "address": "dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "claim_window_fees",
+      "docs": [
+        "The window claim of a Heat coin (spec 4, 5.2): the first claim of its pool's partner fees once its Tax window has",
+        "ended, which anyone may send and Heat's keeper sends at 60 s. Whatever the pool holds by then counts as the",
+        "window's fees, so a claim sent late also moves the normal fees of the seconds it was late by (ADR 0003). An",
+        "Instant launch's window fees go to the treasury; a Fair Open's go to its Tax Share, which comes with the Creator",
+        "lock and Tax Share ticket, so until then its window claim is refused."
+      ],
+      "discriminator": [
+        74,
+        174,
+        73,
+        25,
+        12,
+        117,
+        234,
+        238
+      ],
+      "accounts": [
+        {
+          "name": "fee_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "coin_record",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  105,
+                  110,
+                  95,
+                  114,
+                  101,
+                  99,
+                  111,
+                  114,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "treasury_token_account",
+          "writable": true
+        },
+        {
+          "name": "fee_claimer",
+          "address": "4Garg7N38ShAr8z38ZKkHrgP9Lj5nRKiy3HGtNDqTpko"
+        },
+        {
+          "name": "fee_claimer_token_account",
+          "writable": true
+        },
+        {
+          "name": "pool_authority",
+          "address": "FhVo3mqL8PW5pH5U2CN4XE33DokiyZnUwuGpH2hmHLuM"
+        },
+        {
+          "name": "config"
+        },
+        {
+          "name": "pool",
+          "writable": true,
+          "relations": [
+            "coin_record"
+          ]
+        },
+        {
+          "name": "base_vault",
+          "writable": true
+        },
+        {
+          "name": "quote_vault",
+          "writable": true
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "quote_mint"
+        },
+        {
+          "name": "token_base_program"
+        },
+        {
+          "name": "token_quote_program"
+        },
+        {
+          "name": "dbc_event_authority",
+          "address": "8Ks12pbrD6PXxfty1hVQiE9sc289zgU1zHkvXhrSdriF"
+        },
+        {
+          "name": "dbc_program",
+          "address": "dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "initialize",
       "docs": [
         "Creates the `FeeConfig`. Only the program's upgrade authority may, so whoever controls upgrades also controls",
@@ -441,6 +857,19 @@
         76,
         155
       ]
+    },
+    {
+      "name": "WindowClaim",
+      "discriminator": [
+        249,
+        47,
+        104,
+        108,
+        10,
+        94,
+        65,
+        197
+      ]
     }
   ],
   "events": [
@@ -468,6 +897,32 @@
         141,
         55,
         178
+      ]
+    },
+    {
+      "name": "FeesClaimed",
+      "discriminator": [
+        22,
+        104,
+        110,
+        222,
+        38,
+        157,
+        14,
+        62
+      ]
+    },
+    {
+      "name": "WindowFeesClaimed",
+      "discriminator": [
+        237,
+        140,
+        43,
+        98,
+        103,
+        0,
+        173,
+        236
       ]
     }
   ],
@@ -511,6 +966,51 @@
       "code": 6007,
       "name": "NotAHeatConfig",
       "msg": "The config does not name the fee program's fee claimer"
+    },
+    {
+      "code": 6008,
+      "name": "PoolMismatch",
+      "msg": "The record or window claim is another pool's"
+    },
+    {
+      "code": 6009,
+      "name": "TaxWindowOpen",
+      "msg": "The pool's Tax window has not ended"
+    },
+    {
+      "code": 6010,
+      "name": "WindowAlreadyClaimed",
+      "msg": "The pool's window claim has already run"
+    },
+    {
+      "code": 6011,
+      "name": "WindowNotClaimed",
+      "msg": "The pool's window claim has not run yet"
+    },
+    {
+      "code": 6012,
+      "name": "TaxShareNotBuilt",
+      "msg": "A Fair Open's window fees go to its Tax Share, which this program cannot pay yet"
+    },
+    {
+      "code": 6013,
+      "name": "NotTheCreatorsAccount",
+      "msg": "The creator's half goes to the creator role holder's associated quote account"
+    },
+    {
+      "code": 6014,
+      "name": "NotTheTreasurysAccount",
+      "msg": "The treasury's share goes to the treasury's associated quote account"
+    },
+    {
+      "code": 6015,
+      "name": "NotTheFeeClaimersAccount",
+      "msg": "DBC's coin fee slot takes the fee claimer's associated quote account"
+    },
+    {
+      "code": 6016,
+      "name": "CreatorRoleHeldByFeeClaimer",
+      "msg": "The fee claimer holds the pool's creator role, so its creator's half has nowhere to go"
     }
   ],
   "types": [
@@ -698,6 +1198,47 @@
       }
     },
     {
+      "name": "FeesClaimed",
+      "docs": [
+        "A claim of Creator Earnings and Heat's Platform Fee from one pool, split 50/50."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "config",
+            "type": "pubkey"
+          },
+          {
+            "name": "creator",
+            "docs": [
+              "Who held the pool's DBC creator role at the claim, and was paid `creator_amount`."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "creator_amount",
+            "docs": [
+              "In the quote's raw units; the treasury's is the creator's, or one more when the claim was odd."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "treasury_amount",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
       "name": "LaunchMode",
       "type": {
         "kind": "enum",
@@ -710,6 +1251,93 @@
           }
         ]
       }
+    },
+    {
+      "name": "WindowClaim",
+      "docs": [
+        "One per pool made around Heat's flow whose window claim has run, at the PDA of its pool: what a `CoinRecord`'s",
+        "`window_claimed` remembers for a Heat coin, for a pool no record lists (spec 2.4)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "WindowFeesClaimed",
+      "docs": [
+        "A pool's window claim: its Tax window's fees, and any later fees that accrued before the claim ran."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "config",
+            "type": "pubkey"
+          },
+          {
+            "name": "heat",
+            "docs": [
+              "Whether our launch key co-signed the coin: false for a pool made around Heat's flow."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "destination",
+            "docs": [
+              "The quote account paid: the treasury's, for an Instant launch and for a pool made around Heat's flow."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "docs": [
+              "In the quote's raw units."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "window_ended_at",
+            "docs": [
+              "When the Tax window ended and when the claim ran, Unix timestamps: it also paid the normal fees of the seconds",
+              "between (spec 4)."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "claimed_at",
+            "type": "i64"
+          }
+        ]
+      }
+    }
+  ],
+  "constants": [
+    {
+      "name": "TAX_WINDOW_SECONDS",
+      "docs": [
+        "The Tax window (spec 3.2, 12): Heat's configs charge the sniper tax for 60 one-second periods from a pool's activation",
+        "point, so the window's fees are those of its first 60 seconds. `@top-pad/chain` checks it against the configs' tax."
+      ],
+      "type": "i64",
+      "value": "60"
     }
   ]
 }

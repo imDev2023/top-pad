@@ -11,7 +11,7 @@
     "lint": "eslint .",
     "test": "pnpm -r --filter !@top-pad/tests-devnet --if-present test",
     "test:devnet": "pnpm --filter @top-pad/tests-devnet test",
-    "programs": "ANCHOR_BUILD_SBF_ARCH=v2 anchor build && cp target/idl/fee.json packages/clients/idl/fee.json",
+    "programs": "ANCHOR_BUILD_SBF_ARCH=v2 anchor build && cp target/idl/fee.json packages/clients/idl/fee.json && cargo build-sbf --manifest-path tests/dbc-stand-in/Cargo.toml --tools-version v1.57 --arch v2",
     "test:programs": "cargo test",
     "clients": "pnpm --filter @top-pad/clients generate",
     "db:migrate": "pnpm --filter @top-pad/db migrate",

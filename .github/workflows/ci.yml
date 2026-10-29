@@ -69,6 +69,8 @@ jobs:
       - run: anchor build
       # The committed IDL is what the generated clients came from: the program's own build must not change it.
       - run: cp target/idl/fee.json packages/clients/idl/fee.json && git diff --exit-code packages/clients/idl
+      # Our stand-in for DBC's partner fee claim, which the fee program's claim tests load in DBC's place; never deployed.
+      - run: cargo build-sbf --manifest-path tests/dbc-stand-in/Cargo.toml --tools-version v1.57 --arch v2
       # After the build, since the tests embed the built programs.
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test

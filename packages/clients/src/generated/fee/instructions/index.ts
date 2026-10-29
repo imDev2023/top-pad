@@ -6,6 +6,9 @@
  * @see https://github.com/codama-idl/codama
  */
 
+export * from "./claimFees";
+export * from "./claimUnlistedWindowFees";
+export * from "./claimWindowFees";
 export * from "./initialize";
 export * from "./registerCoin";
 export * from "./updateFeeConfig";

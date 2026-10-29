@@ -38,26 +38,45 @@ import {
 import {
   getCoinRecordCodec,
   getFeeConfigCodec,
+  getWindowClaimCodec,
   type CoinRecord,
   type CoinRecordArgs,
   type FeeConfig,
   type FeeConfigArgs,
+  type WindowClaim,
+  type WindowClaimArgs,
 } from "../accounts";
 import {
+  getClaimFeesInstructionAsync,
+  getClaimUnlistedWindowFeesInstructionAsync,
+  getClaimWindowFeesInstructionAsync,
   getInitializeInstructionAsync,
   getRegisterCoinInstructionAsync,
   getUpdateFeeConfigInstructionAsync,
+  parseClaimFeesInstruction,
+  parseClaimUnlistedWindowFeesInstruction,
+  parseClaimWindowFeesInstruction,
   parseInitializeInstruction,
   parseRegisterCoinInstruction,
   parseUpdateFeeConfigInstruction,
+  type ClaimFeesAsyncInput,
+  type ClaimUnlistedWindowFeesAsyncInput,
+  type ClaimWindowFeesAsyncInput,
   type InitializeAsyncInput,
+  type ParsedClaimFeesInstruction,
+  type ParsedClaimUnlistedWindowFeesInstruction,
+  type ParsedClaimWindowFeesInstruction,
   type ParsedInitializeInstruction,
   type ParsedRegisterCoinInstruction,
   type ParsedUpdateFeeConfigInstruction,
   type RegisterCoinAsyncInput,
   type UpdateFeeConfigAsyncInput,
 } from "../instructions";
-import { findCoinRecordPda, findFeeConfigPda } from "../pdas";
+import {
+  findCoinRecordPda,
+  findFeeConfigPda,
+  findWindowClaimPda,
+} from "../pdas";
 
 export const FEE_PROGRAM_ADDRESS =
   "HeatFEzySQiaWqxR7cDza9WP2B15AxMfsgSS5p6Bdn97" as Address<"HeatFEzySQiaWqxR7cDza9WP2B15AxMfsgSS5p6Bdn97">;
@@ -65,6 +84,7 @@ export const FEE_PROGRAM_ADDRESS =
 export enum FeeAccount {
   CoinRecord,
   FeeConfig,
+  WindowClaim,
 }
 
 export function identifyFeeAccount(
@@ -93,6 +113,17 @@ export function identifyFeeAccount(
   ) {
     return FeeAccount.FeeConfig;
   }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([249, 47, 104, 108, 10, 94, 65, 197]),
+      ),
+      0,
+    )
+  ) {
+    return FeeAccount.WindowClaim;
+  }
   throw new SolanaError(
     SOLANA_ERROR__PROGRAM_CLIENTS__FAILED_TO_IDENTIFY_ACCOUNT,
     { accountData: data, programName: "fee" },
@@ -102,6 +133,8 @@ export function identifyFeeAccount(
 export enum FeeEvent {
   CoinRegistered,
   FeeConfigChanged,
+  FeesClaimed,
+  WindowFeesClaimed,
 }
 
 export function identifyFeeEvent(
@@ -130,10 +163,35 @@ export function identifyFeeEvent(
   ) {
     return FeeEvent.FeeConfigChanged;
   }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([22, 104, 110, 222, 38, 157, 14, 62]),
+      ),
+      0,
+    )
+  ) {
+    return FeeEvent.FeesClaimed;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([237, 140, 43, 98, 103, 0, 173, 236]),
+      ),
+      0,
+    )
+  ) {
+    return FeeEvent.WindowFeesClaimed;
+  }
   throw new Error("The provided event could not be identified as a fee event.");
 }
 
 export enum FeeInstruction {
+  ClaimFees,
+  ClaimUnlistedWindowFees,
+  ClaimWindowFees,
   Initialize,
   RegisterCoin,
   UpdateFeeConfig,
@@ -143,6 +201,39 @@ export function identifyFeeInstruction(
   instruction: { data: ReadonlyUint8Array } | ReadonlyUint8Array,
 ): FeeInstruction {
   const data = "data" in instruction ? instruction.data : instruction;
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([82, 251, 233, 156, 12, 52, 184, 202]),
+      ),
+      0,
+    )
+  ) {
+    return FeeInstruction.ClaimFees;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([156, 187, 65, 65, 156, 68, 121, 105]),
+      ),
+      0,
+    )
+  ) {
+    return FeeInstruction.ClaimUnlistedWindowFees;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([74, 174, 73, 25, 12, 117, 234, 238]),
+      ),
+      0,
+    )
+  ) {
+    return FeeInstruction.ClaimWindowFees;
+  }
   if (
     containsBytes(
       data,
@@ -186,6 +277,15 @@ export type ParsedFeeInstruction<
   TProgram extends string = "HeatFEzySQiaWqxR7cDza9WP2B15AxMfsgSS5p6Bdn97",
 > =
   | ({
+      instructionType: FeeInstruction.ClaimFees;
+    } & ParsedClaimFeesInstruction<TProgram>)
+  | ({
+      instructionType: FeeInstruction.ClaimUnlistedWindowFees;
+    } & ParsedClaimUnlistedWindowFeesInstruction<TProgram>)
+  | ({
+      instructionType: FeeInstruction.ClaimWindowFees;
+    } & ParsedClaimWindowFeesInstruction<TProgram>)
+  | ({
       instructionType: FeeInstruction.Initialize;
     } & ParsedInitializeInstruction<TProgram>)
   | ({
@@ -200,6 +300,27 @@ export function parseFeeInstruction<TProgram extends string>(
 ): ParsedFeeInstruction<TProgram> {
   const instructionType = identifyFeeInstruction(instruction);
   switch (instructionType) {
+    case FeeInstruction.ClaimFees: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: FeeInstruction.ClaimFees,
+        ...parseClaimFeesInstruction(instruction),
+      };
+    }
+    case FeeInstruction.ClaimUnlistedWindowFees: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: FeeInstruction.ClaimUnlistedWindowFees,
+        ...parseClaimUnlistedWindowFeesInstruction(instruction),
+      };
+    }
+    case FeeInstruction.ClaimWindowFees: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: FeeInstruction.ClaimWindowFees,
+        ...parseClaimWindowFeesInstruction(instruction),
+      };
+    }
     case FeeInstruction.Initialize: {
       assertIsInstructionWithAccounts(instruction);
       return {
@@ -243,9 +364,26 @@ export type FeePluginAccounts = {
     SelfFetchFunctions<CoinRecordArgs, CoinRecord>;
   feeConfig: ReturnType<typeof getFeeConfigCodec> &
     SelfFetchFunctions<FeeConfigArgs, FeeConfig>;
+  windowClaim: ReturnType<typeof getWindowClaimCodec> &
+    SelfFetchFunctions<WindowClaimArgs, WindowClaim>;
 };
 
 export type FeePluginInstructions = {
+  claimFees: (
+    input: ClaimFeesAsyncInput,
+    config?: { programAddress?: Address | HasAddress },
+  ) => ReturnType<typeof getClaimFeesInstructionAsync> &
+    SelfPlanAndSendFunctions;
+  claimUnlistedWindowFees: (
+    input: MakeOptional<ClaimUnlistedWindowFeesAsyncInput, "payer">,
+    config?: { programAddress?: Address | HasAddress },
+  ) => ReturnType<typeof getClaimUnlistedWindowFeesInstructionAsync> &
+    SelfPlanAndSendFunctions;
+  claimWindowFees: (
+    input: ClaimWindowFeesAsyncInput,
+    config?: { programAddress?: Address | HasAddress },
+  ) => ReturnType<typeof getClaimWindowFeesInstructionAsync> &
+    SelfPlanAndSendFunctions;
   initialize: (
     input: MakeOptional<InitializeAsyncInput, "payer">,
     config?: { programAddress?: Address | HasAddress },
@@ -266,6 +404,7 @@ export type FeePluginInstructions = {
 export type FeePluginPdas = {
   feeConfig: typeof findFeeConfigPda;
   coinRecord: typeof findCoinRecordPda;
+  windowClaim: typeof findWindowClaimPda;
 };
 
 export type FeePluginRequirements = ClientWithRpc<
@@ -286,8 +425,36 @@ export function feeProgram(
         accounts: {
           coinRecord: addSelfFetchFunctions(client, getCoinRecordCodec()),
           feeConfig: addSelfFetchFunctions(client, getFeeConfigCodec()),
+          windowClaim: addSelfFetchFunctions(client, getWindowClaimCodec()),
         },
         instructions: {
+          claimFees: (input, instructionConfig) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getClaimFeesInstructionAsync(input, {
+                programAddress:
+                  instructionConfig?.programAddress ?? config.programAddress,
+              }),
+            ),
+          claimUnlistedWindowFees: (input, instructionConfig) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getClaimUnlistedWindowFeesInstructionAsync(
+                { ...input, payer: input.payer ?? client.payer },
+                {
+                  programAddress:
+                    instructionConfig?.programAddress ?? config.programAddress,
+                },
+              ),
+            ),
+          claimWindowFees: (input, instructionConfig) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getClaimWindowFeesInstructionAsync(input, {
+                programAddress:
+                  instructionConfig?.programAddress ?? config.programAddress,
+              }),
+            ),
           initialize: (input, instructionConfig) =>
             addSelfPlanAndSendFunctions(
               client,
@@ -327,6 +494,11 @@ export function feeProgram(
             }),
           coinRecord: (seeds, pdaConfig) =>
             findCoinRecordPda(seeds, {
+              programAddress:
+                pdaConfig?.programAddress ?? config.programAddress,
+            }),
+          windowClaim: (seeds, pdaConfig) =>
+            findWindowClaimPda(seeds, {
               programAddress:
                 pdaConfig?.programAddress ?? config.programAddress,
             }),

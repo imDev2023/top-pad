@@ -8,3 +8,5 @@
 
 export * from "./coinRegistered";
 export * from "./feeConfigChanged";
+export * from "./feesClaimed";
+export * from "./windowFeesClaimed";
