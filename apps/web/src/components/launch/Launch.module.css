@@ -88,7 +88,7 @@
   border: 0;
 }
 
-/* A launch mode is a native radio, kept for the keyboard and screen readers and hidden behind its card. */
+/* A launch mode is a native radio, for the keyboard and screen readers: invisible, stretched over its whole card. */
 .mode {
   position: relative;
   display: grid;
@@ -103,8 +103,12 @@
 
 .mode input {
   position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
   opacity: 0;
-  pointer-events: none;
+  cursor: pointer;
 }
 
 .mode:hover {
