@@ -641,10 +641,10 @@ Sources: [Stack](https://github.com/imDev2023/top-pad/issues/17), [Backend desig
 
 ### 10.5 Providers
 
-- **During the devnet build, free tiers only (owner, 2026-10-27)**: a devnet endpoint from the owner's Chainstack or QuickNode accounts for RPC, WebSockets and sending, with the shared Helius free key as a second (it sends 1 transaction per second and is rate-limited when agents run in parallel); devnet Fair Opens have tens of depositors, not hundreds, so pushes stay within these limits.
-  Of the owner's endpoints only the Helius key serves devnet, and Solana's public endpoints answer a Worker with 403 ("Your IP or provider is blocked", 2026-10-29), so the API runs on the Helius devnet endpoint ([#41](https://github.com/imDev2023/top-pad/issues/41)).
+- **During the devnet build, free tiers only (owner, 2026-10-27)**: the shared Helius free key for RPC, WebSockets and sending (it sends 1 transaction per second and is rate-limited when agents run in parallel), and Solana's public devnet endpoint for Node code such as the tests; devnet Fair Opens have tens of depositors, not hundreds, so pushes stay within these limits.
+  Corrected on 2026-10-29 ([#41](https://github.com/imDev2023/top-pad/issues/41)): this first named a Chainstack or QuickNode endpoint, with Helius second, but neither of the owner's accounts has a devnet endpoint, and Solana's public endpoints answer a Worker with 403 ("Your IP or provider is blocked"), so the API runs on the Helius devnet endpoint.
 - **When getting ready to launch**: a dedicated Helius project on the Developer plan ($49 a month) or higher, its key in the project's own `.env`, not the owner's shared key file: LaserStream, `getTransactionsForAddress`, 10M credits, 50 requests and 5 sends per second.
-- A second provider for sending and fallback reads: the owner's existing Chainstack or QuickNode endpoint.
+- A second provider for sending and fallback reads, on the owner's Chainstack or QuickNode account, neither of which had a Solana endpoint on 2026-10-29.
 - Mainnet LaserStream needs Helius Business or Professional; that choice belongs to the mainnet effort.
 
 ## 11. Devnet proof plan and acceptance
