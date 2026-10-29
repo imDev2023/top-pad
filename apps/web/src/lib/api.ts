@@ -1,16 +1,20 @@
 import {
   ApiError,
+  ClaimOutcome,
   Coin,
   CoinCandles,
   CoinTrades,
+  CreatorEarnings,
   Health,
   LaunchRefusal,
   LaunchStatus,
   Me,
   Platform,
+  PreparedClaim,
   PreparedLaunch,
   VampShieldVerdict,
   type CandleSeconds,
+  type ClaimRequest,
   type LaunchForm,
 } from "@top-pad/contract";
 import type { z } from "zod";
@@ -133,3 +137,22 @@ export const getCoinCandles = (mint: string, seconds: CandleSeconds) => call(Coi
 
 /** A coin's live room: its trades as they land (spec 10.2). */
 export const coinLiveUrl = (mint: string) => `${API_URL.replace(/^http/, "ws")}/live/coins/${encodeURIComponent(mint)}`;
+
+/** The Creator Earnings waiting for a wallet, in each Heat coin whose creator role it holds. */
+export const getEarnings = (wallet: string) => call(CreatorEarnings, `/earnings/${encodeURIComponent(wallet)}`);
+
+/** A claim of the coins shown, each capped at the partner fees the page showed, for the wallet to sign and send. */
+export const prepareClaim = (wallet: string, claims: ClaimRequest["claims"]) =>
+  call(PreparedClaim, `/earnings/${encodeURIComponent(wallet)}/claim`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ claims }),
+  });
+
+/** A sent claim's transactions, settled by the API against the chain: what they paid. */
+export const reportClaim = (signatures: string[]) =>
+  call(ClaimOutcome, "/earnings/claims", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ signatures }),
+  });

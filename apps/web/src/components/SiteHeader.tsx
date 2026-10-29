@@ -19,6 +19,9 @@ export function SiteHeader({ cluster }: { cluster: Cluster }) {
           <Link href="/launch" className={styles.link}>
             Launch a coin
           </Link>
+          <Link href="/creator" className={styles.link}>
+            Creator Earnings
+          </Link>
         </nav>
         <div className={styles.actions}>
           <ThemeToggle />

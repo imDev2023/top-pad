@@ -4,9 +4,10 @@
 // Node and signs through an exposed function, so tests decide per request whether the "user" approves or declines.
 import { expect, type Locator, type Page } from "@playwright/test";
 import {
-  getAddressEncoder, getBase64Decoder, getBase64Encoder, getTransactionDecoder, getTransactionEncoder, partiallySignTransaction,
-  type KeyPairSigner, type Transaction,
+  getAddressEncoder, getBase64Decoder, getBase64EncodedWireTransaction, getBase64Encoder, getTransactionDecoder, getTransactionEncoder,
+  partiallySignTransaction, type KeyPairSigner, type Transaction,
 } from "@solana/kit";
+import { rpc } from "@top-pad/tests-devnet/devnet";
 
 export const TEST_WALLET_NAME = "Test Wallet";
 
@@ -32,7 +33,7 @@ function register({ name, icon, address, publicKey }: InitArgs) {
     address,
     publicKey: new Uint8Array(publicKey),
     chains,
-    features: ["solana:signTransaction"] as const,
+    features: ["solana:signTransaction", "solana:signAndSendTransaction"] as const,
     label: name,
   });
   let accounts: (typeof account)[] = [];
@@ -41,6 +42,7 @@ function register({ name, icon, address, publicKey }: InitArgs) {
   const toB64 = (bytes: Uint8Array) => btoa(Array.from(bytes, (b) => String.fromCharCode(b)).join(""));
   const fromB64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
   const sign = (window as unknown as { __testWalletSign: (tx: string) => Promise<string> }).__testWalletSign;
+  const signAndSend = (window as unknown as { __testWalletSignAndSend: (tx: string) => Promise<string> }).__testWalletSignAndSend;
 
   const wallet = {
     version: "1.0.0",
@@ -79,6 +81,16 @@ function register({ name, icon, address, publicKey }: InitArgs) {
         supportedTransactionVersions: ["legacy", 0],
         signTransaction: (...inputs: { transaction: Uint8Array }[]) =>
           Promise.all(inputs.map(async ({ transaction }) => ({ signedTransaction: fromB64(await sign(toB64(transaction))) }))),
+      },
+      // As a wallet does, it signs every transaction of a request at once, then sends each through its own RPC.
+      "solana:signAndSendTransaction": {
+        version: "1.0.0",
+        supportedTransactionVersions: ["legacy", 0],
+        signAndSendTransaction: async (...inputs: { transaction: Uint8Array }[]) => {
+          const signatures: { signature: Uint8Array }[] = [];
+          for (const { transaction } of inputs) signatures.push({ signature: fromB64(await signAndSend(toB64(transaction))) });
+          return signatures;
+        },
       },
     },
   };
@@ -123,6 +135,18 @@ export async function installTestWallet(page: Page, signer: KeyPairSigner): Prom
     // Fills only this wallet's signature, as a real wallet does: a transaction the server co-signed keeps its other ones.
     const signed = await partiallySignTransaction([signer.keyPair], tx);
     return getBase64Decoder().decode(encodeTx.encode(signed));
+  });
+  // The wallet's own RPC is the tests' devnet one; it answers with the signature as soon as the network takes it.
+  await page.exposeFunction("__testWalletSignAndSend", async (b64: string) => {
+    const tx = decodeTx.decode(getBase64Encoder().encode(b64));
+    wallet.requests.push(tx);
+    if (decline) {
+      decline = false;
+      throw new Error("User rejected the request.");
+    }
+    const signed = await partiallySignTransaction([signer.keyPair], tx);
+    await rpc.sendTransaction(getBase64EncodedWireTransaction(signed), { encoding: "base64", preflightCommitment: "confirmed" }).send();
+    return getBase64Decoder().decode(signed.signatures[signer.address]!);
   });
   await page.addInitScript(register, {
     name: TEST_WALLET_NAME,

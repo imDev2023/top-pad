@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { shortAddress } from "@/lib/format";
 import { useWallet } from "./WalletProvider";
@@ -62,6 +63,10 @@ export function WalletButton({ variant = "header" }: { variant?: "header" | "inl
               Connected with {wallet?.name}
               <span className="mono">{shortAddress(account.address)}</span>
             </p>
+            {/* The header's links hide on a phone; the creator's own page stays a tap away here. */}
+            <Link href="/creator" role="menuitem" className={styles.menuLink} onClick={() => setOpen(false)}>
+              Creator Earnings
+            </Link>
             <button
               type="button"
               role="menuitem"

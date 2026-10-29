@@ -94,6 +94,7 @@ export function CoinPage({ initial }: { initial: Coin }) {
       const landed = batch.events.flatMap((e) => (e.type === "trade" && e.mint === mint ? [e.trade] : []));
       merge(landed, true);
       chart.current?.add(landed);
+      for (const e of batch.events) if (e.type === "window_claim" && e.mint === mint) setCoin((c) => ({ ...c, windowClaim: e.windowClaim }));
     },
     [mint, merge],
   );

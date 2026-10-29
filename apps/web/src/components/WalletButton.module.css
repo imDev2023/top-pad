@@ -57,8 +57,23 @@
 }
 
 .menu button:hover,
-.menu button:focus-visible {
+.menu button:focus-visible,
+.menuLink:hover,
+.menuLink:focus-visible {
   background: var(--panel-2);
+}
+
+.menuLink {
+  display: flex;
+  align-items: center;
+  padding: 9px 10px;
+  border-radius: var(--radius-sm);
+  color: var(--fg);
+  font-weight: 500;
+}
+
+.menuLink:hover {
+  text-decoration: none;
 }
 
 .menuNote {

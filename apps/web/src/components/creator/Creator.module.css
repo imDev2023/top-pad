@@ -1,0 +1,294 @@
+/* The creator's page: Creator Earnings and their claim (spec 9, screen 5). */
+.page {
+  display: grid;
+  gap: 16px;
+  max-width: 880px;
+}
+
+.head {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.lead {
+  max-width: 64ch;
+  color: var(--muted);
+  font-size: 1rem;
+}
+
+.connect,
+.empty,
+.panel {
+  display: grid;
+  justify-items: start;
+  gap: 12px;
+  padding: 20px 22px;
+}
+
+.connectTitle {
+  font-size: 1.25rem;
+}
+
+.address {
+  white-space: nowrap;
+}
+
+.retry {
+  justify-self: start;
+  margin-top: 4px;
+}
+
+/* What waits, what was claimed, and the one claim */
+.summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px 24px;
+  padding: 20px 22px;
+  border-left: 4px solid var(--go);
+}
+
+/* Each label over its figure, the figures on one baseline however their sizes differ; stacked on a phone. */
+.figures {
+  display: grid;
+  grid-template-rows: auto auto;
+  grid-auto-flow: column;
+  justify-content: start;
+  align-items: baseline;
+  gap: 4px 40px;
+  margin: 0;
+}
+
+.figures div {
+  display: contents;
+}
+
+.figures dd {
+  margin: 0;
+}
+
+.waiting {
+  font-size: 1.9rem;
+  font-weight: 500;
+  line-height: 1.1;
+  color: var(--go);
+}
+
+.claimed {
+  font-size: 1.25rem;
+  line-height: 1.5;
+  color: var(--fg);
+}
+
+.action {
+  display: grid;
+  justify-items: end;
+  max-width: 320px;
+}
+
+.status {
+  grid-column: 1 / -1;
+}
+
+.steps {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.9rem;
+}
+
+.steps li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.mark {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--line-strong);
+  border-radius: 50%;
+}
+
+.done {
+  color: var(--fg);
+}
+
+.done .mark {
+  border-color: var(--go);
+  background: var(--go) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.5 5 9l4.5-5.5' fill='none' stroke='white' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 12px no-repeat;
+}
+
+.active {
+  color: var(--fg);
+  font-weight: 500;
+}
+
+.active .mark {
+  border-color: var(--go) var(--go) var(--line-strong) var(--line-strong);
+  animation: spin 0.9s linear infinite;
+}
+
+.pending {
+  color: var(--faint);
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* The coins, one row each */
+.coins {
+  padding: 6px 0;
+}
+
+.columns,
+.coin {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 200px 170px;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 22px;
+}
+
+.columns {
+  padding-top: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.coin + .coin {
+  border-top: 1px solid var(--line);
+}
+
+.identity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  color: var(--fg);
+}
+
+.identity:hover {
+  text-decoration: none;
+}
+
+.identity:hover b {
+  text-decoration: underline;
+}
+
+.image,
+.monogram {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+  background: var(--panel-2);
+}
+
+.monogram {
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-family: var(--font-display);
+  font-size: 1.2rem;
+  font-weight: 700;
+}
+
+.names {
+  display: grid;
+  min-width: 0;
+}
+
+.names b,
+.names span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.names b {
+  font-weight: 600;
+}
+
+.names span {
+  font-size: 0.82rem;
+}
+
+.cell {
+  display: grid;
+  justify-items: start;
+}
+
+.label {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  .summary {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 18px 16px;
+  }
+
+  .figures {
+    grid-template-rows: none;
+    grid-auto-flow: row;
+  }
+
+  .figures div + div dt {
+    margin-top: 10px;
+  }
+
+  .action {
+    justify-items: stretch;
+    max-width: none;
+  }
+
+  .action :global(.btn) {
+    width: 100%;
+  }
+
+  .connect,
+  .empty {
+    padding: 18px 16px;
+  }
+
+  .columns {
+    display: none;
+  }
+
+  /* On a phone each coin is a card: its name across the top, its figures in two columns below. */
+  .coin {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 10px 16px;
+    padding: 14px 16px;
+  }
+
+  .identity {
+    grid-column: 1 / -1;
+  }
+
+  .label {
+    display: block;
+    margin-bottom: 2px;
+  }
+}

@@ -1,6 +1,7 @@
 "use client";
 
 import type { Coin } from "@top-pad/contract";
+import { sol } from "@/lib/format";
 import styles from "./Coin.module.css";
 
 /** The sniper tax `elapsed` seconds after the open, as a fraction: the config's linear fee scheduler (spec 3.2). */
@@ -26,15 +27,30 @@ export function TaxBand({ coin, now }: { coin: Coin; now: number }) {
   const destination = coin.launchMode === "fair_open" ? "to the Fair Open's depositors as their Tax Share" : "to Heat";
 
   if (!running) {
+    const claim = coin.windowClaim;
+    const late = claim ? Math.round((Date.parse(claim.claimedAt) - Date.parse(claim.windowEndedAt)) / 1000) : 0;
     return (
       <section className={`${styles.taxBand} ${styles.taxDone}`} aria-label="Sniper tax">
         <div>
           <p className="eyebrow">Fee now</p>
           <p className={`num ${styles.taxRate}`}>{percent(ending)}</p>
         </div>
-        <p className="note">
-          The sniper tax ran for the coin&apos;s first minute and went {destination}, never to the creator. Every trade now pays the{" "}
-          {percent(ending)} trading fee.
+        <p className="note" data-testid="tax-outcome">
+          The sniper tax ran for the coin&apos;s first minute and went {destination}, never to the creator.{" "}
+          {coin.launchMode !== "fair_open" &&
+            (claim ? (
+              <>
+                Heat&apos;s treasury was paid <b className="num">{sol(claim.amount, 9)}&nbsp;SOL</b> for that minute, claimed {late}&nbsp;s after it
+                ended (
+                <a href={claim.explorer} target="_blank" rel="noreferrer">
+                  see the claim
+                </a>
+                ).{" "}
+              </>
+            ) : (
+              <>Heat&apos;s claim of it shows here once it lands. </>
+            ))}
+          Every trade now pays the {percent(ending)} trading fee.
         </p>
       </section>
     );
