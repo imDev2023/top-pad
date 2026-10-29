@@ -62,13 +62,14 @@ export function claimablePool(pool: Address, state: PoolState, quoteMint: Addres
 export const creatorShare = (partnerQuoteFee: bigint) => partnerQuoteFee / 2n;
 
 /**
- * The compute a claim may use. Each pays out through DBC by CPI, which emits its own event by CPI too: measured on
- * devnet against DBC 0.2.2 (`tests/devnet/src/fee-claims.test.ts`); the limits leave room for a busier pool's accounts.
+ * The compute a claim may use. Each pays out through DBC by CPI, about 16,000 units a payout with DBC's own event:
+ * measured on devnet against DBC 0.2.2 (2026-10-29, `tests/devnet/src/fee-claims.test.ts`), the window claim used 37,820
+ * and a creator's claim of one pool 61,722.
  */
-export const WINDOW_CLAIM_COMPUTE_UNITS = 120_000;
-export const FEE_CLAIM_COMPUTE_UNITS = 150_000;
-/** What a transaction's other instructions take: the associated accounts opened and the wrapped SOL closed. */
-const ACCOUNT_COMPUTE_UNITS = 60_000;
+export const WINDOW_CLAIM_COMPUTE_UNITS = 60_000;
+export const FEE_CLAIM_COMPUTE_UNITS = 90_000;
+/** What a transaction's other instructions take: up to two quote accounts opened, about 20,000 each, and one closed. */
+const ACCOUNT_COMPUTE_UNITS = 50_000;
 
 /** `owner`'s associated account for the pool's quote, where its share is paid. */
 export async function quoteAccount(owner: Address, quoteMint: Address): Promise<Address> {
