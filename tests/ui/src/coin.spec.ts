@@ -33,7 +33,8 @@ test("a coin's trades land on its page live through its first minute, each payin
 
   const { mint } = await launchCoin(page, creator, { name: "Heat Tape", ticker: newTicker() });
   await page.getByRole("link", { name: "Watch it trade" }).click();
-  await expect(page.getByRole("heading", { level: 1 })).toContainText("Heat Tape");
+  // The coin may still be being indexed: the page looks for it, then shows it.
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("Heat Tape", { timeout: 30_000 });
   await expect(page.getByText("Live", { exact: true })).toBeVisible();
 
   // The API's clock against this machine's, to trade at chosen moments after the open.
@@ -122,7 +123,8 @@ test("a pool made straight on Heat's config says it was not launched through Hea
   expect(coin).toMatchObject({ heat: false, launchMode: null, imageUri: null, name: "Around Heat", ticker: "AROUND" });
 
   await page.goto(`/coin/${mint}`);
-  await expect(page.getByRole("alert")).toContainText("Not launched through Heat");
+  // Next's route announcer is an alert too: find the page's own.
+  await expect(page.getByRole("alert").filter({ hasText: "Not launched through Heat" })).toBeVisible();
   await expect(page.getByText("Instant launch")).toHaveCount(0);
   await snap(page, "coin-3-around-heat");
   expect(errors).toEqual([]);

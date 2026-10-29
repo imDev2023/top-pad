@@ -23,6 +23,7 @@ import { createTestDatabase } from "@top-pad/db/testing";
 import { candidateKeys, FOLD_VERSION } from "@top-pad/vamp-shield";
 import { app } from "./index";
 import { decode, Fakes, MemoryBlobs, ORIGINS, testBindings, testContext, testKeypair } from "./test/fakes";
+import type { Bindings } from "./env";
 
 // The keeper key the cluster records is swapped for a test key: the real one lives only in Secrets Store (spec 10.3).
 vi.mock("@top-pad/chain", async (importOriginal) => {
@@ -53,7 +54,10 @@ afterAll(async () => {
 
 let fakes: Fakes;
 let blobs: MemoryBlobs;
+/** What the launch service handed the indexer's fast path. */
+let indexedNow: string[];
 beforeEach(() => {
+  indexedNow = [];
   fakes = new Fakes();
   blobs = new MemoryBlobs();
   vi.stubGlobal("fetch", fakes.fetch);
@@ -62,7 +66,13 @@ afterEach(() => vi.unstubAllGlobals());
 
 const { ctx, settle } = testContext();
 afterAll(() => settle());
-const bindings = () => testBindings(url, { BLOBS: blobs, KEEPER_KEY: { get: async () => JSON.stringify(Array.from(keeper().secret)) } });
+// The indexer stands in as a binding that records its fast path's calls.
+const indexer = {
+  idFromName: () => "indexer",
+  get: () => ({ indexNow: async (signatures: string[]) => void indexedNow.push(...signatures) }),
+} as unknown as Bindings["INDEXER"];
+const bindings = () =>
+  testBindings(url, { BLOBS: blobs, KEEPER_KEY: { get: async () => JSON.stringify(Array.from(keeper().secret)) }, INDEXER: indexer });
 const request = (path: string, init: RequestInit = {}) => app.request(path, init, bindings(), ctx);
 
 /** Links an X account and returns its session cookie. */
@@ -176,6 +186,8 @@ describe("an Instant launch", () => {
 
     const [coin] = await db.select().from(coins).where(eq(coins.mint, launch.mint));
     expect(coin).toMatchObject({ pool: launch.pool, launchMode: "instant", creatorWallet: wallet.address, name: "Kettle", ticker: "KETTLE", createdSlot: 4_242 });
+    // The landed launch went straight to the indexer, so its coin's page is ready when the creator opens it.
+    expect(indexedNow).toEqual([status.signature]);
     const [bound] = await db.select().from(creatorWallets).where(eq(creatorWallets.wallet, wallet.address));
     expect(bound).toMatchObject({ via: "first_launch", proof: status.signature, endedAt: null });
     const me = Me.parse(await (await request("/me", { headers: { cookie } })).json());

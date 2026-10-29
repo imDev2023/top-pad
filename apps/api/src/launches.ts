@@ -33,6 +33,7 @@ import { LaunchForm, SubmitLaunch, type LaunchStatus, type PreparedLaunch } from
 import { coins, creators, creatorWallets, launches, metadataItems, type Db } from "@top-pad/db";
 import { currentCreatorWallet, sessionCreator } from "./auth";
 import { explorerUrl, instantLaunchSetup, webApp, type Config } from "./env";
+import { indexNow } from "./indexing";
 import { refuse, type AppEnv } from "./http";
 import { loadKeeper } from "./keeper";
 import { MetadataUploadFailed, signItems, sniffImageType, storeItems, uploadItem, waitServed } from "./metadata";
@@ -209,7 +210,8 @@ export async function submitLaunch(c: Context<AppEnv>) {
   const launch = await ownLaunch(db, c.req.param("id")!, creator.id);
   if (!launch) return refuse(c, 404, { error: "There is no such launch of yours.", code: "not_found" });
   const rpc = createSolanaRpc(cfg.rpcUrl);
-  if (launch.status !== "prepared") return c.json(await settle(db, rpc, cfg, launch));
+  const landed = async (signature: string) => c.executionCtx.waitUntil(indexNow(c.env, [signature]));
+  if (launch.status !== "prepared") return c.json(await settle(db, rpc, cfg, launch, landed));
   const setup = instantLaunchSetup(cfg, c.env);
   if (!setup.ok) return refuse(c, 503, { error: `Launching is not open here yet: ${setup.reason}`, code: "unavailable" });
 
@@ -265,7 +267,7 @@ export async function submitLaunch(c: Context<AppEnv>) {
     if (e instanceof Refused) return refuse(c, e.status, { error: e.message, code: e.code });
     throw e;
   }
-  if (!claimed) return c.json(await settle(db, rpc, cfg, (await ownLaunch(db, launch.id, creator.id))!));
+  if (!claimed) return c.json(await settle(db, rpc, cfg, (await ownLaunch(db, launch.id, creator.id))!, landed));
 
   // The metadata goes up before the coin exists, so terminals reading the new coin find it.
   try {
@@ -309,10 +311,10 @@ export async function submitLaunch(c: Context<AppEnv>) {
   }
 
   const until = Date.now() + CONFIRM_WAIT_MS;
-  let status = await settle(db, rpc, cfg, (await ownLaunch(db, launch.id, creator.id))!);
+  let status = await settle(db, rpc, cfg, (await ownLaunch(db, launch.id, creator.id))!, landed);
   while (status.status === "sending" && Date.now() < until) {
     await new Promise((r) => setTimeout(r, 1_000));
-    status = await settle(db, rpc, cfg, (await ownLaunch(db, launch.id, creator.id))!);
+    status = await settle(db, rpc, cfg, (await ownLaunch(db, launch.id, creator.id))!, landed);
   }
   return c.json(status);
 }
@@ -324,7 +326,7 @@ export async function getLaunch(c: Context<AppEnv>) {
   if (!creator) return refuse(c, 401, { error: "Link your X account first.", code: "not_linked" });
   const launch = await ownLaunch(db, c.req.param("id")!, creator.id);
   if (!launch) return refuse(c, 404, { error: "There is no such launch of yours.", code: "not_found" });
-  return c.json(await settle(db, createSolanaRpc(cfg.rpcUrl), cfg, launch));
+  return c.json(await settle(db, createSolanaRpc(cfg.rpcUrl), cfg, launch, async (signature) => c.executionCtx.waitUntil(indexNow(c.env, [signature]))));
 }
 
 async function ownLaunch(db: Db, id: string, creatorId: string): Promise<Launch | null> {
@@ -335,8 +337,11 @@ async function ownLaunch(db: Db, id: string, creatorId: string): Promise<Launch 
 
 type Rpc = ReturnType<typeof createSolanaRpc>;
 
-/** Brings a sending launch up to date with the chain: landed, failed, or expired once its blockhash can no longer land. */
-async function settle(db: Db, rpc: Rpc, cfg: Config, launch: Launch): Promise<LaunchStatus> {
+/**
+ * Brings a sending launch up to date with the chain: landed, failed, or expired once its blockhash can no longer land.
+ * A launch that lands goes to `landed` too, which hands it to the indexer's fast path.
+ */
+async function settle(db: Db, rpc: Rpc, cfg: Config, launch: Launch, landed: (signature: string) => Promise<void>): Promise<LaunchStatus> {
   if (launch.status === "sending" && launch.signature) {
     const { value: [status] } = await rpc.getSignatureStatuses([launch.signature as Signature], { searchTransactionHistory: true }).send(limited());
     if (status?.err) {
@@ -345,6 +350,7 @@ async function settle(db: Db, rpc: Rpc, cfg: Config, launch: Launch): Promise<La
       launch = { ...launch, status: "failed", error };
     } else if (status && (status.confirmationStatus === "confirmed" || status.confirmationStatus === "finalized")) {
       launch = await recordLanded(db, launch, Number(status.slot));
+      await landed(launch.signature!);
     } else if (!status && (await rpc.getBlockHeight({ commitment: "confirmed" }).send(limited())) > launch.lastValidBlockHeight) {
       await db.update(launches).set({ status: "expired" }).where(eq(launches.id, launch.id));
       launch = { ...launch, status: "expired" };

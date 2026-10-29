@@ -10,6 +10,7 @@ import { pruneCandles } from "@top-pad/indexer";
 import { notifyPending, runJob } from "@top-pad/jobs";
 import { finishXLink, logout, me, startXLink } from "./auth";
 import { getCoin, getCoinCandles, getCoinTrades } from "./coins";
+import { indexerOf } from "./indexing";
 import { config, instantLaunchSetup, type Bindings } from "./env";
 import { sameOriginWrites, withConfig, withDb, type AppEnv } from "./http";
 import { checkKeeperFloat } from "./keeper";
@@ -90,10 +91,10 @@ app.get("/coins/:mint/candles", getCoinCandles);
 
 /** `GET /indexer`: how the indexer stands; asking also starts it if it is not running, as the cron does. */
 app.get("/indexer", async (c) => {
-  const indexer = c.env.INDEXER;
+  const indexer = indexerOf(c.env);
   if (!indexer) return c.json({ error: "The indexer is not bound to this deployment." }, 503);
   c.header("cache-control", "no-store");
-  return c.json(await indexer.get(indexer.idFromName("indexer")).wake());
+  return c.json(await indexer.wake());
 });
 
 /** Expired sign-in state, and launches prepared so long ago that their blockhash can no longer land. */
@@ -111,7 +112,8 @@ async function housekeeping(db: Db) {
 /** The Cron Trigger: the indexer kept running, the keeper's float, housekeeping, then every open alert to the operator. */
 async function scheduled(_controller: ScheduledController, env: Bindings, ctx: ExecutionContext) {
   const cfg = config(env);
-  if (env.INDEXER) ctx.waitUntil(env.INDEXER.get(env.INDEXER.idFromName("indexer")).wake().catch((e) => console.error("waking the indexer failed", e)));
+  const indexer = indexerOf(env);
+  if (indexer) ctx.waitUntil(indexer.wake().catch((e) => console.error("waking the indexer failed", e)));
   const { db, close } = createDb(env.HYPERDRIVE.connectionString);
   try {
     const keeper = cfg.heat?.keys?.keeper;

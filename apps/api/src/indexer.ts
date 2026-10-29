@@ -75,6 +75,13 @@ export class Indexer extends DurableObject<Bindings> {
     return this.status();
   }
 
+  /** The fast path (spec 10.2): transactions the API knows have landed, indexed now; resolves once they are. */
+  async indexNow(signatures: string[]): Promise<void> {
+    this.queue.push(...signatures);
+    this.draining ??= this.drain().finally(() => (this.draining = null));
+    await this.draining;
+  }
+
   status(): IndexerStatus {
     return {
       watching: this.watching(),
