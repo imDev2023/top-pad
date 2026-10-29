@@ -82,9 +82,15 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
 }
 
+/* A launch mode is a native radio, kept for the keyboard and screen readers and hidden behind its card. */
 .mode {
+  position: relative;
   display: grid;
   align-content: start;
   gap: 8px;
@@ -92,17 +98,27 @@
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--panel-2);
-  text-align: left;
   cursor: pointer;
+}
+
+.mode input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .mode:hover {
   border-color: var(--line-strong);
 }
 
-.mode[aria-checked="true"] {
+.mode:has(input:checked) {
   border-color: var(--go);
   box-shadow: inset 0 0 0 1px var(--go);
+}
+
+.mode:has(input:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
 }
 
 /* The coin */
@@ -197,10 +213,36 @@
   font-weight: 700;
 }
 
+.sealed {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 48px;
+  height: 48px;
+  border: 1px dashed var(--faint);
+  border-radius: var(--radius);
+  background: repeating-linear-gradient(45deg, transparent 0 6px, var(--panel) 6px 12px);
+  color: var(--faint);
+  font-family: var(--font-mono);
+}
+
+.sealedCard {
+  align-items: start;
+}
+
+.teaser {
+  font-style: italic;
+  font-weight: 500;
+}
+
 .coinText {
   display: grid;
   gap: 4px;
   min-width: 0;
+}
+
+.coinText :global(.row) {
+  gap: 6px;
 }
 
 .coinTicker {

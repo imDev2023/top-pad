@@ -35,3 +35,22 @@ export function CoinCard({
     </div>
   );
 }
+
+/** A Fair Open on the launch calendar before its open: sealed, so only the creator and the terms show (spec 9). */
+export function SealedCard({ handle }: { handle: string | null }) {
+  return (
+    <div className={`${styles.coinCard} ${styles.sealedCard}`}>
+      <span className={styles.sealed} aria-hidden="true">
+        ?
+      </span>
+      <div className={styles.coinText}>
+        <b className={styles.teaser}>Your one-line teaser</b>
+        <span className="note">The name, ticker and image stay sealed until the open.</span>
+        <span className="row">
+          <span className="chip chip-neutral">10-minute window</span>
+          {handle && <span className="chip chip-info">@{handle}</span>}
+        </span>
+      </div>
+    </div>
+  );
+}

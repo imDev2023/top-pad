@@ -12,7 +12,7 @@ import { shortAddress } from "@/lib/format";
 import type { FittedImage } from "@/lib/image";
 import { WalletButton } from "../WalletButton";
 import { useWallet } from "../WalletProvider";
-import { CoinCard } from "./CoinCard";
+import { CoinCard, SealedCard } from "./CoinCard";
 import { ImagePicker } from "./ImagePicker";
 import { SignLaunch } from "./SignLaunch";
 import styles from "./Launch.module.css";
@@ -210,26 +210,49 @@ export function LaunchFlow({ linkOutcome: arrived }: { linkOutcome: LinkOutcome 
               <h2 id="step-heading" ref={heading} tabIndex={-1}>
                 How should your coin start trading?
               </h2>
-              <div className={styles.modes} role="radiogroup" aria-label="Launch mode">
-                <button type="button" role="radio" aria-checked={mode === "fairOpen"} className={styles.mode} onClick={() => setMode("fairOpen")}>
+              <fieldset className={styles.modes}>
+                <legend className="visually-hidden">Launch mode</legend>
+                <label className={styles.mode}>
+                  <input
+                    type="radio"
+                    name="launch-mode"
+                    value="fairOpen"
+                    checked={mode === "fairOpen"}
+                    onChange={() => setMode("fairOpen")}
+                    aria-labelledby="mode-fair-open mode-fair-open-default mode-fair-open-coming"
+                    aria-describedby="mode-fair-open-note"
+                  />
                   <span className="row">
-                    <b>Fair Open</b>
-                    <span className="chip chip-go">default</span>
-                    <span className="chip chip-neutral">coming soon</span>
+                    <b id="mode-fair-open">Fair Open</b>
+                    <span className="chip chip-go" id="mode-fair-open-default">
+                      default
+                    </span>
+                    <span className="chip chip-neutral" id="mode-fair-open-coming">
+                      coming soon
+                    </span>
                   </span>
-                  <span className="note">
+                  <span className="note" id="mode-fair-open-note">
                     A 10-minute deposit window, then everyone in the pot buys at one price. You can deposit like anyone else, up
                     to your tier&apos;s cap, and your share is locked: nothing for 7 days, all free by day 30.
                   </span>
-                </button>
-                <button type="button" role="radio" aria-checked={mode === "instant"} className={styles.mode} onClick={() => setMode("instant")}>
-                  <b>Instant launch</b>
-                  <span className="note">
+                </label>
+                <label className={styles.mode}>
+                  <input
+                    type="radio"
+                    name="launch-mode"
+                    value="instant"
+                    checked={mode === "instant"}
+                    onChange={() => setMode("instant")}
+                    aria-labelledby="mode-instant"
+                    aria-describedby="mode-instant-note"
+                  />
+                  <b id="mode-instant">Instant launch</b>
+                  <span className="note" id="mode-instant-note">
                     Trading starts the moment the coin exists. There is no creator buy: any buy in the first second, yours
                     included, pays the 99% sniper tax, and the first minute&apos;s tax goes to Heat.
                   </span>
-                </button>
-              </div>
+                </label>
+              </fieldset>
               {mode === "fairOpen" && (
                 <p className="note">Fair Open arrives in a coming release of this devnet build. Choose Instant launch to launch now.</p>
               )}
@@ -410,7 +433,11 @@ export function LaunchFlow({ linkOutcome: arrived }: { linkOutcome: LinkOutcome 
       <aside className={`panel ${styles.aside}`} aria-labelledby="preview-heading">
         <h3 id="preview-heading">What traders will see</h3>
         <span className="eyebrow">{mode === "instant" ? "Coin card at launch" : "Launch calendar entry"}</span>
-        <CoinCard ticker={ticker} name={nameRule.ok ? nameRule.name : name.trim()} imageUrl={imageUrl} handle={me?.x.handle ?? null} mode={mode} />
+        {mode === "instant" ? (
+          <CoinCard ticker={ticker} name={nameRule.ok ? nameRule.name : name.trim()} imageUrl={imageUrl} handle={me?.x.handle ?? null} mode={mode} />
+        ) : (
+          <SealedCard handle={me?.x.handle ?? null} />
+        )}
         <p className="note">
           {mode === "instant"
             ? "Instant launch: visible and trading the moment it is created. No Creator lock, because there is no creator buy, and the card says the first minute's tax went to Heat."

@@ -85,11 +85,11 @@ test("a creator launches an Instant launch from the site", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "How should your coin start trading?" })).toBeVisible();
   await expect(page.getByText(`@${handle}`)).toBeVisible();
   // Fair Open is preselected and not yet open: nothing goes forward until Instant launch is chosen.
-  await expect(page.getByRole("radio", { name: /Fair Open/ })).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByRole("radio", { name: /Fair Open/ })).toBeChecked();
   await expect(page.getByRole("button", { name: "Continue" })).toBeDisabled();
   await snap(page, "2-launch-mode");
 
-  await page.getByRole("radio", { name: /Instant launch/ }).click();
+  await page.getByRole("radio", { name: /Instant launch/ }).check();
   await page.getByRole("button", { name: "Continue" }).click();
   await expect(page.getByRole("heading", { name: "Your coin" })).toBeVisible();
 
