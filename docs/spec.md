@@ -525,6 +525,7 @@ The screens:
 1. **Discover**: the board in section 8's order, each coin row with its flags.
 2. **Fair Open page**: the countdown, the pot filling (with the 25% Unverified line), the minimum raise, the depositor's tier and cap with "Verify once", deposit and withdraw, the refundable rent, "if the window closed now" (each person's share, your fill, your refund), and what happens at the open.
 3. **Coin page**: name, ticker, mint, price, market cap, holders; the flags strip and Fairness card; the tax band during the first minute; the chart (TradingView Lightweight Charts v5, 1 s, 15 s and coarser candles); the graduation bar to 85 SOL; quick buy showing the fee before signing; trades with the fee each paid, the labelled keeper's pot buy pinned; banners for a confirmed bundle, a Meteora-paused pool, or "Not launched through Heat".
+   As built ([#42](https://github.com/imDev2023/top-pad/issues/42)): the chart plots the market cap in SOL, the price times the fixed supply, so its axis reads like the header; a trade's fee shows yellow inside the tax's minute and red above half the trade.
 4. **Launch flow**: link X; Fair Open (preselected) or Instant launch; the coin with live Vamp Shield verdicts (clear, "looks like X", refused with an appeal link); schedule (time up to 7 days ahead, minimum raise, teaser, about 0.03 SOL refundable rent); sign; done.
 5. **Creator record**: the facts in section 7, Creator wallet history, the verified-human and verified-creator marks, Creator Earnings from both sources with one claim, and for a barred Creator the banner, evidence pack and appeal history; the accused creator's private 72-hour view with a reply box.
 6. **How this is enforced**: each promise, what keeps it, and who could still change it (below).
@@ -583,8 +584,18 @@ Sources: [Stack](https://github.com/imDev2023/top-pad/issues/17), [Backend desig
   Switching sources changes only the entry point, never the decoding or the tables.
   The browser's fast path reports a confirmed trade so it shows at once.
   No webhooks: they carry no in-block position, can lose an event after 3 failed retries, and take minutes to watch a new address.
+
+  As built on devnet ([#42](https://github.com/imDev2023/top-pad/issues/42), 2026-10-29): the indexer is one Durable Object in the API Worker.
+  - Its logs socket watches what mentions Heat's two configs and the fee program rather than the DBC program, through which every devnet launchpad's pools would come; DAMM v2 joins with the graduated pools ([#51](https://github.com/imDev2023/top-pad/issues/51)).
+  - DBC and the fee program emit events by self-CPI, so each reported transaction is fetched and decoded; a swap's `EvtSwap3` gives the trade, its payer the trader.
+  - An alarm every 15 s keeps it awake and reopens a dropped socket; reconciliation runs every minute, asking the chain first so a quiet Heat leaves the database asleep.
+  - A launch that lands goes to the indexer at once, its fast path, and a coin's page waits for a coin launched moments ago rather than say there is none.
+  - Trades reached the deployed coin page about 5.5 s after they were sent: about 1.5 s to confirm, then Helius's free tier serving each transaction 2 to 3 s after its block, then the database and the room; locally, 1.5 s.
+  - Stopped and restarted under `wrangler dev` while trades landed, reconciliation indexed exactly the swaps the chain holds (`tests/devnet`).
 - **Live rooms**: one Durable Object per coin and one for the board, holding hibernatable WebSockets; the indexer publishes each decoded trade to its room; rooms batch every 100 ms; a reconnecting browser resyncs from its last slot through the API.
 - **Trades and candles**: the `trades` table is kept forever; the indexer writes 1 s candles on every trade, and 15 s, 1 m, 5 m, 15 m, 1 h, 4 h and 1 d roll up from them; 1 s candles are kept 7 days, 15 s candles 30 days, coarser ones forever; any candle can be rebuilt from trades.
+  As built ([#42](https://github.com/imDev2023/top-pad/issues/42)): each trade is folded into its candle at every length as it is indexed, keeping the open and the close by the trades' order rather than their arrival, the same fold a rebuild makes; `check-candles` found devnet's 186 candles equal to their rebuild.
+  A candle holds the price after each trade, and the API opens it where the price stood before its first trade (the close before it, or the curve's start), since only trades move a curve's price.
 - **Trending**: the board's Durable Object runs one Postgres query on a 15 s alarm and pushes the result to every viewer.
 - **Keeper**: one Cloudflare Workflow per launch, keyed by the launch id:
   1. 15 s before the open, upload the metadata and image through Turbo;
@@ -802,6 +813,7 @@ Unproven, and proved by section 11's tests:
 - Codama's output for Meteora's IDLs, settled in [#39](https://github.com/imDev2023/top-pad/issues/39) (2026-10-27): clean for DAMM v2 and Jupiter Lock; for DBC, two generic fixes applied to the IDL before generation (two fields with the same camelCase name, and a type embedding an account's struct), so no client falls back to the SDK.
 - The curve and fee-scheduler integers being accepted by DBC, settled in [#40](https://github.com/imDev2023/top-pad/issues/40) (2026-10-29): DBC refused the first curve values (`InvalidTokenSupply`), accepted the generator's on devnet, and stored every field as sent; the graduated pool's step encoding matches DAMM v2's source.
 - Whether Neon's free plan (100 compute-hours a project a month) lasts a month of the always-on indexer and the 15 s trending query; if not, the devnet database moves to a paid plan.
+  The indexer opens the database only for something new on chain, so an idle Heat lets it sleep ([#42](https://github.com/imDev2023/top-pad/issues/42)); on 2026-10-29 the project had used 0.33 of its 100 compute-hours, and the 5-minute cron's job rows may still keep it awake.
 - The LaserStream Container source, untested until the paid Helius plan is bought; the devnet build tests the WebSocket source instead.
 
 Risks that devnet cannot settle:
