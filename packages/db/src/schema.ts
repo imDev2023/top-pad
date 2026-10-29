@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { bigint, index, integer, jsonb, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { bigint, index, integer, jsonb, numeric, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
 // Postgres is the only system of record (spec 10.4). The job runner's three tables are Stoker's (commit 43e196b,
 // packages/db/src/schema.ts), with only the alert kinds this build raises.
@@ -210,7 +210,11 @@ export const metadataItems = pgTable(
   (t) => [primaryKey({ columns: [t.launchId, t.item] })],
 );
 
-/** Heat coins (spec 8): every coin our launch key co-signed, as the fee program's `CoinRecord` lists it. */
+/**
+ * Heat coins (spec 8): every coin our launch key co-signed, as the fee program's `CoinRecord` lists it. The launch
+ * service adds a coin when its launch lands, and the indexer when it sees the coin registered on chain, whichever comes
+ * first; a coin registered without a launch in this database (another deployment's) has no image here.
+ */
 export const coins = pgTable(
   "coins",
   {
@@ -225,10 +229,119 @@ export const coins = pgTable(
     name: text("name").notNull(),
     ticker: text("ticker").notNull(),
     metadataUri: text("metadata_uri").notNull(),
-    imageUri: text("image_uri").notNull(),
+    imageUri: text("image_uri"),
     createdSignature: text("created_signature").notNull().unique(),
     createdSlot: bigint("created_slot", { mode: "number" }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
   },
   (t) => [index("coins_creator_idx").on(t.creatorId), index("coins_created_idx").on(t.createdAt)],
 );
+
+/**
+ * Every DBC pool on Heat's configs (spec 2.4), recorded by the indexer as it is created, whether or not our launch key
+ * co-signed it (`coins` lists the ones it did). Its price and quote reserve follow its latest trade, so a coin page
+ * reads one row.
+ */
+export const pools = pgTable(
+  "pools",
+  {
+    pool: text("pool").primaryKey(),
+    mint: text("mint").notNull().unique(),
+    config: text("config").notNull(),
+    /** The pool's DBC creator role when it was created. */
+    creator: text("creator").notNull(),
+    name: text("name").notNull(),
+    ticker: text("ticker").notNull(),
+    uri: text("uri").notNull(),
+    /** When trading opened, from which the sniper tax counts (spec 3.2): the pool's activation point. */
+    activatedAt: timestamp("activated_at", { withTimezone: true }).notNull(),
+    createdSignature: text("created_signature").notNull(),
+    createdSlot: bigint("created_slot", { mode: "number" }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    /** The square-root price (Q64.64) after the latest trade, or curve A's start before the first. */
+    sqrtPrice: numeric("sqrt_price", { precision: 40, scale: 0 }).notNull(),
+    /** The quote the curve holds after the latest trade, in raw units: what Graduation is measured against. */
+    quoteReserve: bigint("quote_reserve", { mode: "bigint" }).notNull(),
+    /** The latest trade's order key (see `trades`), so a trade indexed late never rolls the state back. */
+    lastTradeKey: numeric("last_trade_key", { precision: 30, scale: 0 }),
+    /** Wallets holding the coin outside the pool, when last counted; null until first counted. */
+    holders: integer("holders"),
+    holdersCountedAt: timestamp("holders_counted_at", { withTimezone: true }),
+  },
+  (t) => [index("pools_created_idx").on(t.createdAt)],
+);
+
+/**
+ * Every swap on a Heat config's pool (spec 10.2), kept forever, keyed by its transaction and its place among the
+ * transaction's swaps. Amounts are raw units, and the quote side is before the fee: what a buy paid in, or what a sell's
+ * coins fetched before the fee came off.
+ */
+export const trades = pgTable(
+  "trades",
+  {
+    signature: text("signature").notNull(),
+    /** The swap's place among its transaction's swaps, in execution order. */
+    eventIndex: integer("event_index").notNull(),
+    slot: bigint("slot", { mode: "number" }).notNull(),
+    /** The transaction's place in its block (`getBlock`), which orders a slot's trades. */
+    blockIndex: integer("block_index").notNull(),
+    /** The trades' total order in one number: slot * 10^10 + block index * 10^4 + event index. */
+    orderKey: numeric("order_key", { precision: 30, scale: 0 }).notNull(),
+    /** The chain's clock when the swap ran, which the sniper tax counts by. */
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    pool: text("pool").notNull(),
+    mint: text("mint").notNull(),
+    /** The wallet that swapped: the swap's payer. */
+    trader: text("trader").notNull(),
+    side: text("side", { enum: ["buy", "sell"] }).notNull(),
+    quoteAmount: bigint("quote_amount", { mode: "bigint" }).notNull(),
+    /** The coins the trader received (a buy) or sold (a sell). */
+    baseAmount: bigint("base_amount", { mode: "bigint" }).notNull(),
+    /** The swap's whole fee, in the quote: trading, protocol and referral, the sniper tax included. */
+    fee: bigint("fee", { mode: "bigint" }).notNull(),
+    /** The square-root price after the swap, and the price it stands for in whole quote units per coin. */
+    sqrtPrice: numeric("sqrt_price", { precision: 40, scale: 0 }).notNull(),
+    price: numeric("price", { precision: 38, scale: 18 }).notNull(),
+    quoteReserve: bigint("quote_reserve", { mode: "bigint" }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.signature, t.eventIndex] }),
+    index("trades_mint_order_idx").on(t.mint, t.orderKey),
+    index("trades_trader_idx").on(t.trader),
+  ],
+);
+
+/**
+ * Candles (spec 10.2): each trade is folded into its candle at every length as it is indexed, the way a rebuild from
+ * `trades` folds them, so any candle can be rebuilt. 1 s candles are kept 7 days and 15 s ones 30 days, the rest forever.
+ */
+export const candles = pgTable(
+  "candles",
+  {
+    mint: text("mint").notNull(),
+    /** The candle's length in seconds: 1, 15, 60, 300, 900, 3,600, 14,400 or 86,400. */
+    seconds: integer("seconds").notNull(),
+    startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
+    open: numeric("open", { precision: 38, scale: 18 }).notNull(),
+    high: numeric("high", { precision: 38, scale: 18 }).notNull(),
+    low: numeric("low", { precision: 38, scale: 18 }).notNull(),
+    close: numeric("close", { precision: 38, scale: 18 }).notNull(),
+    /** The order keys of the trades that set the open and the close, so a trade indexed late still lands in place. */
+    openKey: numeric("open_key", { precision: 30, scale: 0 }).notNull(),
+    closeKey: numeric("close_key", { precision: 30, scale: 0 }).notNull(),
+    /** Quote traded before fees, and coins traded, in raw units. */
+    volumeQuote: numeric("volume_quote", { precision: 30, scale: 0 }).notNull(),
+    volumeBase: numeric("volume_base", { precision: 30, scale: 0 }).notNull(),
+    trades: integer("trades").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.mint, t.seconds, t.startsAt] })],
+);
+
+/** Every transaction the indexer has processed, with or without trades, so the live source and reconciliation skip it. */
+export const indexedTransactions = pgTable("indexed_transactions", {
+  signature: text("signature").primaryKey(),
+  slot: bigint("slot", { mode: "number" }).notNull(),
+  /** The transaction's place in its block, looked up only for a transaction with trades. */
+  blockIndex: integer("block_index"),
+  indexedAt: timestamp("indexed_at", { withTimezone: true }).notNull().defaultNow(),
+});

@@ -15,6 +15,13 @@
       "when": 1793246208395,
       "tag": "0001_launch_service",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793255298205,
+      "tag": "0002_indexer",
+      "breakpoints": true
     }
   ]
 }

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { createDb, indexerCursors, type Db } from "@top-pad/db";
+import { createDb, indexedTransactions, indexerCursors, type Db } from "@top-pad/db";
 import { createTestDatabase } from "@top-pad/db/testing";
 import { IndexBatchError, indexTransactions, reconcileAccount, type HistorySource, type RawTransaction, type TransactionHandler } from "./index";
 
@@ -15,10 +15,13 @@ beforeAll(async () => {
   };
 });
 afterAll(() => cleanup());
-beforeEach(() => db.delete(indexerCursors));
+beforeEach(async () => {
+  await db.delete(indexerCursors);
+  await db.delete(indexedTransactions);
+});
 
 const ACCOUNT = "dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN";
-const tx = (signature: string, slot: number): RawTransaction => ({ slot, blockTime: null, transaction: { signatures: [signature], message: {} }, meta: { err: null } });
+const tx = (signature: string, slot: number): RawTransaction => ({ slot, blockTime: null, transaction: { signatures: [signature], message: { accountKeys: [], instructions: [] } }, meta: { err: null } });
 
 /** A chain of `n` transactions on one account, oldest first, served newest first as a node lists them. */
 function chain(n: number, missing = new Set<string>()) {
@@ -66,6 +69,18 @@ describe("reconciliation", () => {
 
     await reconcileAccount(db, chain(5).source, handle, ACCOUNT);
     expect(seen).toEqual(["sig0", "sig1", "sig2", "sig3", "sig4"]);
+  });
+
+  it("passes over what the live source already indexed without fetching it, and still moves past it", async () => {
+    const { source } = chain(5);
+    const fetched: string[] = [];
+    const counting: HistorySource = { ...source, fetchTransaction: async (s) => (fetched.push(s), source.fetchTransaction(s)) };
+    await db.insert(indexedTransactions).values([{ signature: "sig1", slot: 101 }, { signature: "sig3", slot: 103 }]);
+    const { seen, handle } = recorder();
+    expect(await reconcileAccount(db, counting, handle, ACCOUNT)).toMatchObject({ seen: 5, complete: true });
+    expect(fetched).toEqual(["sig0", "sig2", "sig4"]);
+    expect(seen).toEqual(["sig0", "sig2", "sig4"]);
+    expect((await db.select().from(indexerCursors))[0]?.signature).toBe("sig4");
   });
 
   it("stops after `limit` transactions for a caller that comes back", async () => {

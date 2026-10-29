@@ -5,7 +5,11 @@
 // `params/liquidity_distribution.rs`, `migration_handler/concentrated_liquidity.rs`, `state/config.rs`), so a config
 // DBC would refuse, or one that would graduate anywhere but its curve's last point, never leaves this module. A config
 // cannot be changed once created (spec 3.2).
+import { COIN_DECIMALS, COIN_SUPPLY, FEE_DENOMINATOR, SNIPER_TAX, sniperTaxNumerator } from "@top-pad/chain";
 import type { ConfigParametersArgs } from "@top-pad/clients/dbc";
+
+// The coin and the sniper tax live in @top-pad/chain, where the API and the indexer read them too.
+export { COIN_DECIMALS, COIN_SUPPLY, FEE_DENOMINATOR, SNIPER_TAX, sniperTaxNumerator };
 
 export type LaunchMode = "fairOpen" | "instant";
 
@@ -13,24 +17,6 @@ export type LaunchMode = "fairOpen" | "instant";
 export const MIN_SQRT_PRICE = 4_295_048_016n;
 export const MAX_SQRT_PRICE = 79_226_673_521_066_979_257_578_248_091n;
 const Q128 = 1n << 128n;
-
-/** The coin (spec 3.1): exactly 1,000,000,000 coins of 6 decimals, a fixed supply, in raw units. */
-export const COIN_DECIMALS = 6;
-export const COIN_SUPPLY = 1_000_000_000n * 10n ** BigInt(COIN_DECIMALS);
-
-/**
- * The sniper tax (spec 3.2): DBC's linear fee scheduler in timestamp mode, from a 98.999996% cliff down
- * 16,291,666 per one-second period for 60 periods, ending at exactly 1.25% (fee numerators over 1,000,000,000).
- */
-export const SNIPER_TAX = {
-  cliffFeeNumerator: 989_999_960n,
-  numberOfPeriod: 60,
-  periodFrequency: 1n,
-  reductionFactor: 16_291_666n,
-} as const;
-
-/** DBC's fee denominator: a fee numerator of 12,500,000 is 1.25%. */
-export const FEE_DENOMINATOR = 1_000_000_000n;
 
 /**
  * The graduated pool's fee (spec 3.4): DAMM v2's linear market-cap scheduler from 1.25% at Graduation down 0.01% a
@@ -173,12 +159,6 @@ function baseForSwap({ sqrtStartPrice, points }: Curve, upTo: bigint): bigint {
 function migrationBaseAmount(quote: bigint, sqrtPrice: bigint): bigint {
   const liquidity = (quote * Q128) / (sqrtPrice - MIN_SQRT_PRICE);
   return ceilDiv(liquidity * (MAX_SQRT_PRICE - sqrtPrice), sqrtPrice * MAX_SQRT_PRICE);
-}
-
-/** The sniper tax's fee numerator `seconds` after the open (DBC's linear fee scheduler). */
-export function sniperTaxNumerator(seconds: number): bigint {
-  const periods = BigInt(Math.min(Math.floor(seconds / Number(SNIPER_TAX.periodFrequency)), SNIPER_TAX.numberOfPeriod));
-  return SNIPER_TAX.cliffFeeNumerator - SNIPER_TAX.reductionFactor * periods;
 }
 
 /**

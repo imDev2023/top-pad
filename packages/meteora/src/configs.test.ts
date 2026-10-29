@@ -1,5 +1,6 @@
 import { createRequire } from "node:module";
 import { describe, expect, it } from "vitest";
+import { CLUSTERS } from "@top-pad/chain";
 import {
   checkCurve,
   COIN_SUPPLY,
@@ -49,6 +50,10 @@ describe("curve A", () => {
 
       it("equals spec 3.3's integers exactly", () => {
         expect(curve).toEqual(EXPECTED[name]);
+      });
+
+      it("starts where @top-pad/chain prices a coin before its first trade, at the same target", () => {
+        expect(CLUSTERS[name]).toMatchObject({ graduationTarget: target, sqrtStartPrice: curve.sqrtStartPrice });
       });
 
       it("graduates exactly at its last point, using the whole supply with nothing left over", () => {

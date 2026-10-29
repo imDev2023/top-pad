@@ -2,16 +2,13 @@
 // place of web3.js, a handler in place of Stoker's LaunchLab decoding (this build's decoders come with "The indexer and
 // the live coin page"), a narrow source in front of the RPC (spec 10.2), and the cursor kept in `indexer_cursors`.
 import { address, createSolanaRpc, type Signature } from "@solana/kit";
-import { eq, sql } from "drizzle-orm";
-import { indexerCursors, type Db } from "@top-pad/db";
+import { eq, inArray, sql } from "drizzle-orm";
+import { indexedTransactions, indexerCursors, type Db } from "@top-pad/db";
+import type { RawTransaction } from "./decode";
 
-/** A confirmed transaction in the JSON shape `getTransaction` answers with `encoding: "json"`, whatever its source. */
-export type RawTransaction = {
-  slot: number;
-  blockTime: number | null;
-  transaction: { signatures: string[]; message: unknown };
-  meta: { err: unknown; logMessages?: string[] | null } | null;
-};
+export * from "./candles";
+export * from "./decode";
+export * from "./heat";
 
 /** What a batch wrote, counted by kind (trades, launches and so on, as each handler names them). */
 export type IndexResult = Record<string, number>;
@@ -70,9 +67,10 @@ const FETCH_BATCH = 8;
 
 /**
  * Reconciliation (spec 10.2): indexes each confirmed transaction of one account newer than its cursor, oldest first, and
- * moves the cursor to the newest it got to. A listed transaction that can't be fetched yet (an RPC node behind the one
- * that listed it, say) stops it there, so the cursor never moves past a transaction that was not indexed. `limit` stops
- * it after that many transactions, for a caller that comes back; `complete` says whether it reached the newest one.
+ * moves the cursor to the newest it got to. One the live source already indexed is passed over without being fetched.
+ * A listed transaction that can't be fetched yet (an RPC node behind the one that listed it, say) stops it there, so
+ * the cursor never moves past a transaction that was not indexed. `limit` stops it after that many transactions, for a
+ * caller that comes back; `complete` says whether it reached the newest one.
  */
 export async function reconcileAccount(
   db: Db, source: HistorySource, handle: TransactionHandler, account: string, limit = Infinity,
@@ -94,8 +92,21 @@ export async function reconcileAccount(
   const indexed: IndexResult = {};
   for (let i = 0; i < found.length && seen === i; i += FETCH_BATCH) {
     const batch = found.slice(i, i + FETCH_BATCH);
-    const raws = await Promise.all(batch.map((s) => source.fetchTransaction(s.signature)));
+    const known = new Set(
+      (
+        await db
+          .select({ signature: indexedTransactions.signature })
+          .from(indexedTransactions)
+          .where(inArray(indexedTransactions.signature, batch.map((s) => s.signature)))
+      ).map((r) => r.signature),
+    );
+    const raws = await Promise.all(batch.map((s) => (known.has(s.signature) ? null : source.fetchTransaction(s.signature))));
     for (const [j, listedSig] of batch.entries()) {
+      if (known.has(listedSig.signature)) {
+        newest = listedSig;
+        seen++;
+        continue;
+      }
       const raw = raws[j];
       if (!raw) {
         console.warn(`reconciliation of ${account} stopped at ${listedSig.signature}, which could not be fetched yet`);

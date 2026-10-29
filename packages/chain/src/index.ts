@@ -23,6 +23,11 @@ export type HeatCluster = {
   quote: { mint: Address; decimals: number };
   /** The Graduation Target, in the quote's raw units (spec 3.2). */
   graduationTarget: bigint;
+  /**
+   * Curve A's starting square-root price for that target (spec 3.3), where every pool on the configs opens: what a coin
+   * is priced at before its first trade. `@top-pad/meteora`'s tests check it against the generator.
+   */
+  sqrtStartPrice: bigint;
   /** Heat's two DBC configs, once created by `pnpm --filter @top-pad/meteora configs <cluster> --send`. */
   configs: { fairOpen: Address; instant: Address } | null;
   /**
@@ -42,6 +47,7 @@ export const CLUSTERS: Record<Cluster, HeatCluster | null> = {
   devnet: {
     quote: { mint: WSOL_MINT, decimals: 9 },
     graduationTarget: 8_500_000_000n,
+    sqrtStartPrice: 35_525_023_424_642_174n,
     // Created on 2026-10-29 (#40).
     configs: {
       fairOpen: address("rPqMj6mwJp9qnZBMeawF8s2iC74EkhpbUSvhWd9XTnC"),
@@ -56,10 +62,12 @@ export const CLUSTERS: Record<Cluster, HeatCluster | null> = {
   mainnet: {
     quote: { mint: WSOL_MINT, decimals: 9 },
     graduationTarget: 85_000_000_000n,
+    sqrtStartPrice: 112_339_987_482_345_485n,
     configs: null,
     keys: null,
   },
 };
 
+export * from "./coin";
 export * from "./dbc";
 export * from "./launch";
