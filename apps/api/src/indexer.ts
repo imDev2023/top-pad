@@ -30,6 +30,11 @@ const RECONCILE_MS = 60_000;
 const RECONCILE_LIMIT = 200;
 /** How long a reported transaction may take to be served by `getTransaction` before reconciliation is left to it. */
 const FETCH_WAIT_MS = 8_000;
+/**
+ * How often to ask for it meanwhile: Helius serves a confirmed transaction about 1.5 to 2 s after its block (devnet,
+ * 2026-10-29), so a steady short wait finds it as soon as it is there, where a doubling one found it up to a second late.
+ */
+const FETCH_EVERY_MS = 300;
 
 /** `GET /indexer`. */
 export type IndexerStatus = {
@@ -170,13 +175,13 @@ export class Indexer extends DurableObject<Bindings> {
     }
   }
 
-  /** A reported transaction, asked for until the RPC serves it: a node can report one a moment before it serves it. */
+  /** A reported transaction, asked for until the RPC serves it: a node reports one before it serves it. */
   private async served(signature: string): Promise<RawTransaction | null> {
     const until = Date.now() + FETCH_WAIT_MS;
-    for (let attempt = 0; ; attempt++) {
+    for (;;) {
       const raw = await fetchRawTransaction(config(this.env).rpcUrl, signature).catch(() => null);
       if (raw || Date.now() >= until) return raw;
-      await sleep(Math.min(250 * 2 ** attempt, 2_000));
+      await sleep(FETCH_EVERY_MS);
     }
   }
 
