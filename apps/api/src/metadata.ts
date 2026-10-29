@@ -56,10 +56,9 @@ export type SignedItems = {
   metadataUri: string;
 };
 
-/** Signs a launch's two items with the keeper key and keeps their bytes in R2 until the launch is submitted. */
+/** Signs a launch's two items with the keeper key; `storeItems` keeps them once the launch is prepared. */
 export async function signItems(
   keeperSecret: Uint8Array,
-  blobs: BlobStore,
   launchId: string,
   coin: Coin,
   image: { bytes: Uint8Array; type: ImageType },
@@ -74,14 +73,19 @@ export async function signItems(
   const imageUri = arweaveUrl(urls.gateway, imageItem.id);
   const document = new TextEncoder().encode(JSON.stringify(metadataDocument(coin, { url: imageUri, type: image.type }, urls.site)));
   const metadataItem = await signDataItem(keeperSecret, { data: document, tags: tags("application/json"), anchor: await anchor(coin.mint, "metadata") });
-  const items = {
+  return {
     image: { ...imageItem, contentType: image.type, storageKey: storageKey(launchId, "image") },
     metadata: { ...metadataItem, contentType: "application/json" as const, storageKey: storageKey(launchId, "metadata") },
+    imageUri,
+    metadataUri: arweaveUrl(urls.gateway, metadataItem.id),
   };
+}
+
+/** Keeps a prepared launch's signed items in R2 until it is submitted: nothing is stored for a launch refused first. */
+export async function storeItems(blobs: BlobStore, items: SignedItems) {
   for (const item of [items.image, items.metadata]) {
     await blobs.put(item.storageKey, item.bytes, { httpMetadata: { contentType: "application/octet-stream" } });
   }
-  return { ...items, imageUri, metadataUri: arweaveUrl(urls.gateway, metadataItem.id) };
 }
 
 export class MetadataUploadFailed extends Error {}

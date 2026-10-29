@@ -253,9 +253,14 @@ describe("an Instant launch", () => {
     expect(await refusal(await prepare(cookie, { wallet, image: new File(["not an image"], "x.png") }))).toMatchObject({ status: 422, code: "image" });
     const huge = new Uint8Array(200_000);
     huge.set(PNG);
+    // Refused before the form is read, by its size.
     const big = await refusal(await prepare(cookie, { wallet, image: new File([huge], "big.png") }));
-    expect(big).toMatchObject({ status: 422, code: "image" });
+    expect(big).toMatchObject({ status: 413, code: "image" });
     expect(big.error).toMatch(/96 KB/);
+    // Just over the image limit, but not the form's: refused by the image check.
+    const over = new Uint8Array(98_304 + 100);
+    over.set(PNG);
+    expect(await refusal(await prepare(cookie, { wallet, image: new File([over], "over.png") }))).toMatchObject({ status: 422, code: "image" });
   });
 
   it("is refused before signing when the wallet cannot cover the rent", async () => {
@@ -264,6 +269,8 @@ describe("an Instant launch", () => {
     const refused = await refusal(await prepare(cookie, { wallet: (await testKeypair()).signer.address }));
     expect(refused).toMatchObject({ status: 422, code: "simulation_failed" });
     expect(refused.error).toMatch(/cannot cover the launch/);
+    // Nothing is kept for a launch refused before signing.
+    expect(blobs.objects.size).toBe(0);
   });
 
   it("needs a linked X account, and a request from the web app", async () => {

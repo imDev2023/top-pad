@@ -1,9 +1,10 @@
 import { createSolanaRpc, isSolanaError } from "@solana/kit";
 import { and, eq, lt, sql } from "drizzle-orm";
 import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
 import { HTTPException } from "hono/http-exception";
-import { Health, type Platform } from "@top-pad/contract";
+import { Health, type LaunchRefusal, type Platform } from "@top-pad/contract";
 import { createDb, launches, probe, sessions, xAuthorizations, type Db } from "@top-pad/db";
 import { notifyPending, runJob } from "@top-pad/jobs";
 import { finishXLink, logout, me, startXLink } from "./auth";
@@ -65,6 +66,13 @@ app.get("/platform", (c) => {
   return c.json(platform);
 });
 
+// Bodies are read whole, so their size is capped before anything reads them; only a launch's form carries an image.
+app.post("*", async (c, next) => {
+  const { maxImageBytes } = c.var.cfg;
+  if (c.req.path !== "/launches") return bodyLimit({ maxSize: 16 * 1024, onError: (c) => c.json({ error: "The request is too large." }, 413) })(c, next);
+  const refusal: LaunchRefusal = { error: `The image is too large: a coin's image can be at most ${Math.round(maxImageBytes / 1024)} KB.`, code: "image" };
+  return bodyLimit({ maxSize: maxImageBytes + 16 * 1024, onError: (c) => c.json(refusal, 413) })(c, next);
+});
 for (const path of ["/auth/*", "/me", "/launches", "/launches/*", "/vamp-shield/*"]) app.use(path, withDb);
 app.get("/auth/x/start", startXLink);
 app.get("/auth/x/callback", finishXLink);

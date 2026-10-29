@@ -35,7 +35,7 @@ import { currentCreatorWallet, sessionCreator } from "./auth";
 import { instantLaunchSetup, webApp, type Config } from "./env";
 import { refuse, type AppEnv } from "./http";
 import { loadKeeper } from "./keeper";
-import { MetadataUploadFailed, signItems, sniffImageType, uploadItem, waitServed } from "./metadata";
+import { MetadataUploadFailed, signItems, sniffImageType, storeItems, uploadItem, waitServed } from "./metadata";
 import { checkText, firstRefusal } from "./vampShield";
 
 /** How many launches a creator may have waiting to be signed at once, against a flood of prepared transactions. */
@@ -112,7 +112,7 @@ export async function prepareLaunch(c: Context<AppEnv>) {
   const mint = await generateKeyPairSigner();
   const id = crypto.randomUUID();
   const coin = { name: verdict.name, ticker: verdict.ticker, mint: mint.address, xHandle: creator.xHandle };
-  const items = await signItems(keeper.secret, setup.blobs, id, coin, { bytes, type: imageType }, { gateway: cfg.arweaveGateway, site: webApp(cfg) });
+  const items = await signItems(keeper.secret, id, coin, { bytes, type: imageType }, { gateway: cfg.arweaveGateway, site: webApp(cfg) });
 
   const rpc = createSolanaRpc(cfg.rpcUrl);
   const { value: lifetime } = await rpc.getLatestBlockhash({ commitment: "confirmed" }).send(limited());
@@ -148,6 +148,7 @@ export async function prepareLaunch(c: Context<AppEnv>) {
   const after = simulation.accounts?.[0]?.lamports ?? before;
   const cost = before - BigInt(after);
 
+  await storeItems(setup.blobs, items);
   const signatureMap = transaction.signatures as Record<string, SignatureBytes | null>;
   const mintSignature = signatureMap[mint.address];
   if (!mintSignature) throw new Error("the mint key did not sign the creation transaction");

@@ -324,6 +324,12 @@ export function LaunchFlow({ linkOutcome: arrived }: { linkOutcome: LinkOutcome 
                 <b>No creator buy</b>
                 <span className="note">If you buy in the first second, you pay the 99% sniper tax like anyone else.</span>
               </div>
+              {platform && platform.cluster !== "mainnet" && (
+                <p className="note">
+                  Your wallet signs on Solana {platform.cluster}: set it to {platform.cluster} first, so it can show what the
+                  launch costs (in Phantom: Settings, Developer Settings, Testnet Mode).
+                </p>
+              )}
               {!account ? (
                 <div className="stack">
                   <p className="note">
