@@ -50,7 +50,8 @@ A pnpm monorepo shaped like Stoker's: `apps/api` (Hono on Workers), `apps/web` (
 - Anchor 1.2.1 is pinned in `Anchor.toml` (`[toolchain]`), so avm's `anchor` runs it here while the machine's default stays 0.31.1 for other projects; `avm install` switches the default, so run `avm use 0.31.1` after installing another version.
 - Codama's output for the DBC IDL is not clean on its own; `packages/clients/scripts/generate.ts` fixes the IDL first (see its comment), so always generate through `pnpm clients`.
 - The devnet database is Neon project `odd-firefly-70405620` (London, Postgres 17 like docker and CI), behind the Hyperdrive named in `apps/api/wrangler.jsonc`, whose query cache is off (spec 10.4); `npx neonctl` needs `--org-id org-wispy-snow-11801955` on every command or it stops at an interactive prompt.
-- The Cloudflare token in `global.env` cannot use Hyperdrive or Secrets Store; the owner's wrangler login can, so run those commands with the token unset (`env -u CLOUDFLARE_API_TOKEN pnpm exec wrangler hyperdrive ...`); deploys work with the token.
+- The Cloudflare token in `global.env` cannot use Hyperdrive or Secrets Store; the owner's wrangler login can, so run those commands with the token unset (`env -u CLOUDFLARE_API_TOKEN pnpm exec wrangler hyperdrive ...`).
+  Deploys work with the token, except the API's: binding its Secrets Store secret fails with code 10021, so `@top-pad/api`'s `deploy:devnet` unsets the token itself.
 - The owner's Discord (Meteora ticket `devlaunch-6428`, Jupiter `#dev-support`) runs in Brave, reachable through the Claude in Chrome extension, not the Discord desktop app.
 
 ## Agent skills

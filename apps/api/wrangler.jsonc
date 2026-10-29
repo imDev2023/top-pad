@@ -51,7 +51,12 @@
       // `top-pad-devnet`, in front of the Neon devnet database (spec 10.4), with its query cache off: Hyperdrive never
       // invalidates a cached read on a write, and our reads must see the last write.
       "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "4226d6abb4c54484a3e6ab28a6b2a421" }],
-      "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "top-pad-blobs-devnet" }]
+      "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "top-pad-blobs-devnet" }],
+      // The keeper key, which is also the launch key (spec 10.3), from the account's Secrets Store and bound to this Worker
+      // alone; put there by the owner on 2026-10-29, read only when a launch is signed.
+      "secrets_store_secrets": [
+        { "binding": "KEEPER_KEY", "store_id": "bbb2e2aa36724838a433d7495bbe9baf", "secret_name": "top-pad-devnet-keeper-key" }
+      ]
     }
   }
 }
