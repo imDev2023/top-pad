@@ -612,7 +612,7 @@ Sources: [Stack](https://github.com/imDev2023/top-pad/issues/17), [Backend desig
 - Two runtime hot keys, each in Cloudflare Secrets Store and bound only to the Worker that uses it:
   - the **keeper key**: fee payer for the lock, pushes, claims and graduation, the pot's delegate and the nonce authority, and the launch key that co-signs creation transactions and registers coins, holding a capped SOL float with a low-balance alert **(owner, 2026-10-27)**;
   - the **admission signer**, holding no funds.
-- On devnet the keeper key, the treasury and the upgrade authority were made on 2026-10-29 ([#41](https://github.com/imDev2023/top-pad/issues/41)) and live in `~/.config/top-pad/devnet` on the owner's Mac, backed up in the owner's password manager; the keeper's float is 0.5 SOL, with the low-balance alert at 0.25 SOL.
+- On devnet the keeper key, the treasury and the upgrade authority were made on 2026-10-29 ([#41](https://github.com/imDev2023/top-pad/issues/41)) and live in `~/.config/top-pad/devnet` on the owner's Mac, to be backed up in the owner's password manager (an owner task, still open on 2026-10-29); the keeper's float is 0.5 SOL, with the low-balance alert at 0.25 SOL.
 - The upgrade and treasury keys never touch Cloudflare: kept offline on devnet, held by Squads on mainnet.
 - The two program keypairs only ever sign the first deploy at the fixed ids (section 5.1), on devnet and later on mainnet; a leak before the mainnet deploy would let anyone deploy their own program at our ids there first.
   They live only in the gitignored `target/deploy` on the owner's Mac, backed up in the owner's password manager, never in the repo, CI or Cloudflare (owner, 2026-10-28).

@@ -81,7 +81,8 @@ fn only_the_upgrade_authority_initializes_the_fee_config() {
         (settings.treasury, settings.launch_key, settings.fair_open_program)
     );
 
-    // There is one FeeConfig; a second initialize cannot replace it.
+    // There is one FeeConfig; a second initialize cannot replace it. A new blockhash makes the retry a new
+    // transaction: LiteSVM refuses an exact repeat as already processed, with no logs to say so.
     t.svm.expire_blockhash();
     let err = t.initialize_as(&upgrade_authority, t.settings()).unwrap_err();
     assert!(err.meta.logs.iter().any(|l| l.contains("already in use")), "{:?}", err.meta.logs);
