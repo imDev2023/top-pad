@@ -3,11 +3,15 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "typecheck": "tsc -p ."
+    "typecheck": "tsc -p .",
+    "e2e": "playwright test"
   },
   "devDependencies": {
     "@playwright/test": "^1.64.1",
+    "@solana-program/system": "^0.16.0",
     "@solana/kit": "^8.5.0",
+    "@top-pad/chain": "workspace:*",
+    "@top-pad/clients": "workspace:*",
     "@types/node": "^24.19.2"
   }
 }
