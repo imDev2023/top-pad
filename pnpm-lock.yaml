@@ -93,6 +93,22 @@ importers:
         specifier: ^5.0.5
         version: 5.0.5(@types/node@24.19.2)(vite@8.3.5(@types/node@24.19.2)(esbuild@0.28.2)(terser@5.36.0)(tsx@4.23.15)(yaml@2.9.1))
 
+  packages/chain:
+    dependencies:
+      '@solana/kit':
+        specifier: ^8.5.0
+        version: 8.5.0(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6)
+      '@top-pad/contract':
+        specifier: workspace:*
+        version: link:../contract
+    devDependencies:
+      '@types/node':
+        specifier: ^24.19.2
+        version: 24.19.2
+      vitest:
+        specifier: ^5.0.5
+        version: 5.0.5(@types/node@24.19.2)(vite@8.3.5(@types/node@24.19.2)(esbuild@0.28.2)(terser@5.36.0)(tsx@4.23.15)(yaml@2.9.1))
+
   packages/clients:
     dependencies:
       '@solana/kit':
@@ -183,22 +199,43 @@ importers:
       '@meteora-ag/met-lock-sdk':
         specifier: 1.0.1
         version: 1.0.1(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6)
+      '@solana/kit':
+        specifier: ^8.5.0
+        version: 8.5.0(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6)
       '@solana/web3.js':
         specifier: ^1.99.0
         version: 1.99.0(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@6.0.6)
+      '@top-pad/chain':
+        specifier: workspace:*
+        version: link:../chain
+      '@top-pad/clients':
+        specifier: workspace:*
+        version: link:../clients
     devDependencies:
       '@types/node':
         specifier: ^24.19.2
         version: 24.19.2
+      bn.js:
+        specifier: ^5.2.2
+        version: 5.2.5
+      vitest:
+        specifier: ^5.0.5
+        version: 5.0.5(@types/node@24.19.2)(vite@8.3.5(@types/node@24.19.2)(esbuild@0.28.2)(terser@5.36.0)(tsx@4.23.15)(yaml@2.9.1))
 
   tests/devnet:
     devDependencies:
       '@solana/kit':
         specifier: ^8.5.0
         version: 8.5.0(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6)
+      '@top-pad/chain':
+        specifier: workspace:*
+        version: link:../../packages/chain
       '@top-pad/clients':
         specifier: workspace:*
         version: link:../../packages/clients
+      '@top-pad/meteora':
+        specifier: workspace:*
+        version: link:../../packages/meteora
       '@types/node':
         specifier: ^24.19.2
         version: 24.19.2

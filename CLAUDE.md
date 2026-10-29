@@ -14,10 +14,11 @@ For anything about Jupiter or Meteora, read the owner's canonical knowledge base
 
 ## The build
 
-A pnpm monorepo shaped like Stoker's: `apps/api` (Hono on Workers), `apps/web` (Next.js 16 on Workers through OpenNext, a pure client of the API), `packages/*` (`contract` the zod API contract, `db` Drizzle and its migrations, `clients` the Codama-generated Kit clients, `meteora` the only home of web3.js v1, `arweave`, `jobs` and `indexer` copied from Stoker commit `43e196b`), `programs/*` (the Anchor workspace) and `tests/*`.
+A pnpm monorepo shaped like Stoker's: `apps/api` (Hono on Workers), `apps/web` (Next.js 16 on Workers through OpenNext, a pure client of the API), `packages/*` (`contract` the zod API contract, `db` Drizzle and its migrations, `clients` the Codama-generated Kit clients, `chain` Heat's own addresses per cluster (program ids, the fee claimer PDA, the DBC configs), `meteora` the only home of web3.js v1 and the config generator, `arweave`, `jobs` and `indexer` copied from Stoker commit `43e196b`), `programs/*` (the Anchor workspace) and `tests/*`.
 
 - `docker compose up -d` starts the local Postgres (port 5452); `pnpm lint`, `pnpm typecheck` and `TEST_DATABASE_URL=postgres://toppad:toppad@127.0.0.1:5452/toppad pnpm test` are what CI runs, each test file on its own throwaway database.
-- `pnpm programs` builds both programs, then `pnpm test:programs` runs their LiteSVM tests; `pnpm test:devnet` reads Meteora's real accounts on devnet with the generated clients.
+- `pnpm programs` builds both programs, then `pnpm test:programs` runs their LiteSVM tests; `pnpm test:devnet` reads Meteora's real accounts on devnet with the generated clients, and Heat's two DBC configs field by field.
+- `pnpm --filter @top-pad/meteora configs devnet` simulates Heat's two DBC configs, and `--send` creates them; devnet's exist (spec 3.2), and a config can never be changed, only replaced by new ones recorded in `@top-pad/chain`.
 - `pnpm --filter @top-pad/meteora idls` refreshes the pinned IDLs from the SDK packages, then `pnpm clients` regenerates `packages/clients/src/generated` (never edited by hand; CI fails if it is stale).
 - Locally: `DATABASE_URL=postgres://toppad:toppad@127.0.0.1:5452/toppad pnpm db:migrate`, then `pnpm exec wrangler dev --port 8801` in `apps/api` and `NEXT_PUBLIC_API_URL=http://localhost:8801 pnpm exec next dev --port 3110` in `apps/web`.
 - Devnet: `direnv exec "<this folder>" pnpm deploy:devnet` migrates the Neon devnet database (`DATABASE_URL` in the gitignored `.env`), then deploys the API and the web Worker, in that order; the devnet demo is https://top-pad-web-devnet.imdev2023.workers.dev, its API https://top-pad-api-devnet.imdev2023.workers.dev.

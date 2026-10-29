@@ -204,12 +204,16 @@ Meteora program ids: DBC `dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN`, DAMM v2 
 | Supply | exactly 1,000,000,000, fixed (DBC revokes the mint authority) |
 | Decimals | 6 |
 | Metadata | DBC `Immutable` token authority: `is_mutable` false, no update authority |
-| On the curve | 800,000,000 (80%) |
-| To the graduated pool | 200,000,000 (20%), nothing left over beyond rounding |
+| On the curve | 80%, less a few coins: 799,999,997.74 at 85 SOL, 799,999,992.86 at 8.5 SOL |
+| To the graduated pool | 20% and those few coins: 200,000,002.26 at 85 SOL, 200,000,007.14 at 8.5 SOL; nothing left over |
+
+DAMM v2's graduated position spans DBC's whole price range rather than zero to infinity, so pairing the Graduation Target at the graduation price takes slightly more than 20% of the supply; the curve sells that much less (section 3.3, [#40](https://github.com/imDev2023/top-pad/issues/40)).
 
 ### 3.2 The two configs
 
 Fair Open and Instant launch sit on separate configs that differ only in the first-swap discount.
+They are created with DBC's `create_config2` (0.2.2 deprecates `create_config`) by `pnpm --filter @top-pad/meteora configs <cluster>`, which simulates both first and sends only with `--send`, from the generator in `packages/meteora/src/configs.ts`; their addresses live in `@top-pad/chain`, where the apps and the keeper read them, and a test in `tests/devnet` reads every field back.
+On devnet (2026-10-29, [#40](https://github.com/imDev2023/top-pad/issues/40)): Fair Open `rPqMj6mwJp9qnZBMeawF8s2iC74EkhpbUSvhWd9XTnC`, Instant `CMSi1oRQsZJbogjxajFCuGYze3NW9oieuKNrxGPjg8Mi`.
 
 | Setting | Fair Open config | Instant config |
 | - | - | - |
@@ -254,22 +258,29 @@ The same curve serves Instant launches.
 | At 85 SOL | Curve A |
 | - | - |
 | Market cap at the start | 37.09 SOL |
-| A full 17 SOL pot buys | 366,698,905 coins (36.67% of supply), at 4.636e-8 SOL each |
+| A full 17 SOL pot buys | 366,698,903 coins (36.67% of supply), at 4.636e-8 SOL each |
 | Market cap at the open after a full pot | 57.95 SOL |
 | Graduation price | 4.25e-7 SOL per coin (425 SOL market cap, 7.3x above the open) |
 | A Verified depositor at the 2 SOL cap in a full pot holds | about 4.3% of supply |
 
-Exact config values **(owner, 2026-10-27)**, computed from the decided shape with DBC's conventions (sqrt prices in Q64.64 of lamports per raw coin unit, liquidity such that quote = liquidity x delta sqrt price >> 128); total quote comes to exactly the target and total base to 800,000,000 coins less one raw unit:
+Exact config values, from `curveA` in `packages/meteora/src/configs.ts`, which `create_config2` accepted on devnet ([#40](https://github.com/imDev2023/top-pad/issues/40), 2026-10-29); sqrt prices are Q64.64 of quote raw units per raw coin unit:
 
 | Value | Mainnet (85 SOL) | Devnet (8.5 SOL) |
 | - | - | - |
-| `sqrt_start_price` | 112339987264937698 | 35525023207151271 |
-| `curve[0].sqrt_price` | 140424984081172123 | 44406279008939089 |
-| `curve[0].liquidity` | 205974751412899298487096901153009 | 65134935495174677848696046692349 |
+| `sqrt_start_price` | 112339987482345485 | 35525023424642174 |
+| `curve[0].sqrt_price` | 140424984352931857 | 44406279280802718 |
+| `curve[0].liquidity` | 205974751014283308772739093917811 | 65134935096406298698081261517461 |
 | `curve[1].sqrt_price` (graduation) | 380289371323205464 | 120258058333485015 |
-| `curve[1].liquidity` | 96467846755739443120361515208159 | 30505811672022150935646294787906 |
+| `curve[1].liquidity` | 96467846865034852561432211657574 | 30505811781359344453335435709689 |
 
-The build regenerates these with the DBC SDK's `buildCurveWithCustomSqrtPrices` and checks that `create_config` accepts them: the last curve point must sit exactly at the migration price, which caps DBC's 25% swap buffer at the curve, and total supply must cover swap plus migration amounts after rounding.
+How they are derived, so the shape holds and DBC accepts them:
+- The graduation price is the floor of a 5x-target market cap's sqrt price.
+- Each segment's liquidity is the largest whose quote, rounded up as DBC rounds it, is exactly its share (a fifth of the target for the pot's segment), so the quotes add up to the target and the coin graduates exactly at the last point, which caps DBC's 25% swap buffer at the curve.
+- The start price is solved against the supply left once the graduated pool has its exact base, rounded up, so the curve and the graduated pool use the fixed supply with nothing left over.
+- The generator mirrors DBC's `create_config` arithmetic (release 0.2.2) in exact integers, and its tests check that mirror against the SDK's own; the devnet read-back checks it against what DBC stored.
+
+The values first recorded here **(owner, 2026-10-27)** solved the shape in real numbers, and DBC refuses them (`InvalidTokenSupply`, simulated on devnet on 2026-10-29): rounding each segment's quote up put Graduation just below the last point, and DAMM v2's graduated position, spanning DBC's whole price range, needs a few coins more than 20%, so they asked for about 1,000,000,007 coins at 8.5 SOL.
+The SDK's `buildCurveWithCustomSqrtPrices` cannot make an exact config either: it works in 20-digit decimals from float weights, returns the target as an output (8,499,999,914 lamports for these prices) and needs a leftover.
 
 ### 3.4 The graduated pool
 
@@ -283,7 +294,7 @@ The build regenerates these with the DBC SDK's `buildCurveWithCustomSqrtPrices` 
 
 The fee follows the current price, not the peak, so a coin falling back toward its graduation price climbs back toward 1.25% (2x: 1.21%, 10x: 1.01%, 50x: 0.58%).
 Until the schedule expires, Meteora's operators cannot change the pool's base fee, only its dynamic fee.
-The exact encoding of the step parameter is checked against DAMM v2's `fee_market_cap_scheduler.rs` in the build.
+Its encoding, checked against DAMM v2's `fee_market_cap_scheduler.rs` ([#40](https://github.com/imDev2023/top-pad/issues/40)): linear market-cap mode (3), `pool_fee_bps` 125, `number_of_period` 100, `sqrt_price_step_bps` 900, `reduction_factor` 100,000 and `scheduler_expiration_duration` 315,360,000; DAMM v2 counts passed steps as (sqrt price - graduation sqrt price) x 10,000 / graduation sqrt price / 900, so the 100th lands at exactly 10x the sqrt price.
 
 ## 4. Fees
 
@@ -334,7 +345,7 @@ The partner on every Heat config, forever; it should rarely change.
 
 Accounts:
 - `FeeConfig`: the treasury address, the launch key, the Fair Open program id.
-- `fee_claimer` PDA: the configs' partner and fee claimer; receives Heat's graduated LP position NFTs and holds them permanently locked.
+- `fee_claimer` PDA, seeded with `"fee_claimer"` alone (`4Garg7N38ShAr8z38ZKkHrgP9Lj5nRKiy3HGtNDqTpko`, [#40](https://github.com/imDev2023/top-pad/issues/40)): the configs' partner, fee claimer and leftover receiver; receives Heat's graduated LP position NFTs and holds them permanently locked.
 - `CoinRecord` PDA, one per mint (the on-chain list of Heat coins): mint, pool, launch mode, the Fair Open launch it came from if any, the pot's own fee, whether the window claim has run, and an empty earnings-recipient override.
 
 Instructions:
@@ -671,7 +682,7 @@ faucet.solana.com gives at most 10 SOL every 8 hours when signed in with GitHub 
 | Parameter | Value | Source |
 | - | - | - |
 | Coin supply, decimals | 1,000,000,000 fixed, 6 | [#33](https://github.com/imDev2023/top-pad/issues/33) |
-| Curve / graduated pool supply | 80% / 20% | [#33](https://github.com/imDev2023/top-pad/issues/33) |
+| Curve / graduated pool supply | 80% / 20%, the curve a few coins short so the graduated pool's exact base fits (section 3.1) | [#33](https://github.com/imDev2023/top-pad/issues/33), [#40](https://github.com/imDev2023/top-pad/issues/40) |
 | Graduation Target | 85 SOL mainnet, 8.5 SOL devnet | [#33](https://github.com/imDev2023/top-pad/issues/33) |
 | Market cap at the start / at Graduation | 37.09 SOL / 425 SOL | [#33](https://github.com/imDev2023/top-pad/issues/33) |
 | Curve fee after the tax window | 1.25% (Meteora 0.25%, creator 0.50%, Heat 0.50%) | [#13](https://github.com/imDev2023/top-pad/issues/13) |
@@ -778,8 +789,8 @@ Unproven, and proved by section 11's tests:
 - A sniper's separate transaction landing in the creation slot.
 - Turbo serving an upload within 10 s.
 - How precisely a Workflow wakes (if the open lands more than 2 s late, it moves to a Durable Object alarm).
-- The exact curve and fee-scheduler integers being accepted by `create_config`, and the graduated pool's market-cap step encoding.
 - Codama's output for Meteora's IDLs, settled in [#39](https://github.com/imDev2023/top-pad/issues/39) (2026-10-27): clean for DAMM v2 and Jupiter Lock; for DBC, two generic fixes applied to the IDL before generation (two fields with the same camelCase name, and a type embedding an account's struct), so no client falls back to the SDK.
+- The curve and fee-scheduler integers being accepted by DBC, settled in [#40](https://github.com/imDev2023/top-pad/issues/40) (2026-10-29): DBC refused the first curve values (`InvalidTokenSupply`), accepted the generator's on devnet, and stored every field as sent; the graduated pool's step encoding matches DAMM v2's source.
 - Whether Neon's free plan (100 compute-hours a project a month) lasts a month of the always-on indexer and the 15 s trending query; if not, the devnet database moves to a paid plan.
 - The LaserStream Container source, untested until the paid Helius plan is bought; the devnet build tests the WebSocket source instead.
 

@@ -28,6 +28,13 @@ fn deploys_at_its_declared_id_and_refuses_an_unknown_instruction() {
 }
 
 #[test]
+fn derives_the_fee_claimer_every_config_names() {
+    // Heat's DBC configs name this address as partner, fee claimer and leftover receiver, and cannot be changed.
+    let (fee_claimer, _) = Pubkey::find_program_address(&[fee::FEE_CLAIMER_SEED], &fee::id());
+    assert_eq!(fee_claimer.to_string(), "4Garg7N38ShAr8z38ZKkHrgP9Lj5nRKiy3HGtNDqTpko");
+}
+
+#[test]
 fn is_built_for_an_sbpf_version_devnet_and_mainnet_run() {
     // ELF e_flags carry the SBPF version. v2 is the newest active on devnet and mainnet; a bare `anchor build` makes v3.
     let version = u32::from_le_bytes(PROGRAM[48..52].try_into().unwrap());

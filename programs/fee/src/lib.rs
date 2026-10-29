@@ -5,6 +5,10 @@ use anchor_lang::prelude::*;
 
 declare_id!("HeatFEzySQiaWqxR7cDza9WP2B15AxMfsgSS5p6Bdn97");
 
+/// The seed of the `fee_claimer` PDA: the partner, fee claimer and leftover receiver every Heat config names, so it can
+/// never change (`4Garg7N38ShAr8z38ZKkHrgP9Lj5nRKiy3HGtNDqTpko`, `@top-pad/chain`).
+pub const FEE_CLAIMER_SEED: &[u8] = b"fee_claimer";
+
 #[cfg(not(feature = "no-entrypoint"))]
 solana_security_txt::security_txt! {
     name: "Heat fee program",

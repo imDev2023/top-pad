@@ -5,15 +5,22 @@
   "exports": { ".": "./src/index.ts" },
   "scripts": {
     "typecheck": "tsc -p .",
-    "idls": "tsx scripts/export-idls.ts"
+    "test": "vitest run",
+    "idls": "tsx scripts/export-idls.ts",
+    "configs": "tsx scripts/create-configs.ts"
   },
   "dependencies": {
     "@meteora-ag/cp-amm-sdk": "1.5.1",
     "@meteora-ag/dynamic-bonding-curve-sdk": "2.0.0",
     "@meteora-ag/met-lock-sdk": "1.0.1",
-    "@solana/web3.js": "^1.99.0"
+    "@solana/kit": "^8.5.0",
+    "@solana/web3.js": "^1.99.0",
+    "@top-pad/chain": "workspace:*",
+    "@top-pad/clients": "workspace:*"
   },
   "devDependencies": {
-    "@types/node": "^24.19.2"
+    "@types/node": "^24.19.2",
+    "bn.js": "^5.2.2",
+    "vitest": "^5.0.5"
   }
 }
