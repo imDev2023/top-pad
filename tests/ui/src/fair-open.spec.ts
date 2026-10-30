@@ -99,13 +99,22 @@ test("a Fair Open takes deposits and withdrawals from its page, then fails and r
     // The window closes, and the launch never opens: at once when the pot misses its minimum raise, otherwise 15
     // minutes after its open. Anyone may then mark it failed; the depositor does, from the page.
     const { data } = await fetchLaunch(rpc, launch.launch);
+    if (LATE) {
+      // With no minimum raise to miss, the open falls due as the window closes, and the deposits are locked until it
+      // runs or is late; nothing runs it before #46.
+      await untilChainTime(data.opensAt);
+      await expect(page.getByTestId("fair-open-phase")).toContainText("The open is due", { timeout: 60_000 });
+      await expect(page.getByText("Your deposit is locked until the open.")).toBeVisible();
+      await expect(page.getByRole("radio", { name: "Deposit" })).toHaveCount(0);
+      await snap(page, "fair-open-6-due");
+    }
     await untilChainTime(data.opensAt + (LATE ? 900n : 0n));
     await expect(page.getByTestId("fair-open-phase")).toContainText("This Fair Open cannot open", { timeout: 60_000 });
-    await snap(page, "fair-open-6-failing");
+    await snap(page, "fair-open-7-failing");
     await page.getByRole("button", { name: "Mark it failed and take back my SOL" }).click();
     await expect(page.getByTestId("fair-open-done")).toContainText("Marked failed, and your deposit and both rents are back", { timeout: 90_000 });
     await expect(page.getByTestId("fair-open-phase")).toContainText("This Fair Open failed");
-    await snap(page, "fair-open-7-failed");
+    await snap(page, "fair-open-8-failed");
     expect((await view(launch.launch)).failure).toBe(LATE ? "late" : "min_raise_missed");
 
     // Everything the depositor put in came back: only the network fees are gone (four deposits and withdrawals, the
