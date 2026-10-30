@@ -26,6 +26,7 @@ import {
   type TransactionSigner,
 } from "@solana/kit";
 import { getTransferSolInstruction } from "@solana-program/system";
+import { fetchSysvarClock } from "@solana/sysvars";
 import { CLUSTERS, dbcPoolAddress, FEE_PROGRAM_ADDRESS, instantLaunchInstructions, swapInstructions } from "@top-pad/chain";
 import { fetchRawTransaction, type RawTransaction } from "@top-pad/indexer";
 
@@ -145,10 +146,12 @@ export async function poolAroundHeat(creator: KeyPairSigner): Promise<{ mint: Ad
   return { mint: mint.address, pool: await dbcPoolAddress(launch.config, mint.address, launch.quoteMint) };
 }
 
-/** The chain's clock now: the block time of the latest confirmed slot. */
+/**
+ * The chain's clock now, as programs read it: the Clock sysvar at the latest confirmed slot. Not that slot's block time,
+ * which the public endpoint at times cannot serve yet ("Block not available for slot").
+ */
 export async function chainTime(): Promise<bigint> {
-  const slot = await rpc.getSlot({ commitment: "confirmed" }).send();
-  return BigInt((await rpc.getBlockTime(slot).send()) ?? 0n);
+  return (await fetchSysvarClock(rpc, { commitment: "confirmed" })).unixTimestamp;
 }
 
 /**
