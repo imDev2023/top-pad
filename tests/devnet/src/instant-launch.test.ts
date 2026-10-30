@@ -1,8 +1,8 @@
 // An Instant launch on devnet, built exactly as the launch service builds it, with the creator buying in the same
 // transaction: the pool lands on Heat's Instant config, the fee program records the coin, and the creator's own
 // creation-slot buy pays the sniper tax's 99% cliff, since an Instant launch has no creator buy (spec 2.2 step 3). It
-// spends real devnet SOL from the Solana CLI's wallet (about 0.03 SOL a run) and signs with the keeper key, which only
-// this Mac holds (~/.config/top-pad/devnet/keeper.json, never CI); without them it is skipped.
+// spends real devnet SOL from Heat's devnet bank (about 0.03 SOL a run) and signs with the keeper key, which, like the
+// bank, only this Mac holds (~/.config/top-pad/devnet, never CI); without them it is skipped.
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -49,7 +49,7 @@ const rpcUrl = process.env.DEVNET_RPC_URL || "https://api.devnet.solana.com";
 const rpc = createSolanaRpc(rpcUrl);
 const devnet = CLUSTERS.devnet!;
 const keeperFile = join(homedir(), ".config/top-pad/devnet/keeper.json");
-const walletFile = process.env.SOLANA_KEYPAIR || join(homedir(), ".config/solana/id.json");
+const walletFile = process.env.BANK_KEYPAIR || join(homedir(), ".config/top-pad/devnet/bank.json");
 const load = async (path: string) => createKeyPairSignerFromBytes(Uint8Array.from(JSON.parse(readFileSync(path, "utf8"))));
 const SYSVAR_INSTRUCTIONS = "Sysvar1nstructions1111111111111111111111111" as Address;
 /** Anchor's tag for an event emitted through a self-CPI. */

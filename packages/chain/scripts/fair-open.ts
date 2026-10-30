@@ -1,8 +1,8 @@
 // `pnpm --filter @top-pad/chain fair-open devnet [--in <seconds>] [--min-raise <SOL>] [--send]`: schedules a Fair Open by
 // script, as this build does until the creator's scheduling flow exists (spec 14, slice 4): its window opens `--in`
 // seconds from now (60 by default; down to -599, a window already running) and runs 10 minutes, with an optional minimum
-// raise. Its coin is a made-up test coin sealed behind its hash. The Solana CLI's keypair is the creator, signing and
-// paying the rent (SOLANA_KEYPAIR to pick another); our keeper co-signs and holds the nonce (KEEPER_KEYPAIR, or
+// raise. Its coin is a made-up test coin sealed behind its hash. Heat's bank is the creator, signing and paying the rent
+// (BANK_KEYPAIR, or ~/.config/top-pad/<cluster>/bank.json); our keeper co-signs and holds the nonce (KEEPER_KEYPAIR, or
 // ~/.config/top-pad/<cluster>/keeper.json). It simulates first and sends only with --send; the RPC is DEVNET_RPC_URL, or
 // the public endpoint.
 import { readFileSync } from "node:fs";
@@ -41,7 +41,7 @@ const opensIn = BigInt(flag("--in") ?? "60");
 const minRaise = BigInt(Math.round(Number(flag("--min-raise") ?? "0") * 1e9));
 
 const loadSigner = async (path: string) => createKeyPairSignerFromBytes(Uint8Array.from(JSON.parse(readFileSync(path, "utf8"))));
-const creator = await loadSigner(process.env.SOLANA_KEYPAIR || join(homedir(), ".config/solana/id.json"));
+const creator = await loadSigner(process.env.BANK_KEYPAIR || join(homedir(), ".config/top-pad", cluster!, "bank.json"));
 const keeper = await loadSigner(process.env.KEEPER_KEYPAIR || join(homedir(), ".config/top-pad", cluster!, "keeper.json"));
 const rpcUrl = process.env.DEVNET_RPC_URL || "https://api.devnet.solana.com";
 const rpc = createSolanaRpc(rpcUrl);

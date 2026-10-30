@@ -3,8 +3,8 @@
 // whether this test's claim or the deployed keeper's lands first, paying exactly the window's tax; then the creator's
 // claim, exact while fees accrue, and the creator role handed to another wallet. And a pool made around Heat's flow,
 // which no keeper claims, so a claim sent late can be shown moving exactly the late seconds' fees. Each step reads back
-// what the chain paid, to the lamport. It spends about 0.1 devnet SOL from the Solana CLI's wallet and signs with the
-// keeper key, which only this Mac holds (~/.config/top-pad/devnet/keeper.json, never CI); without it, it is skipped.
+// what the chain paid, to the lamport. It spends about 0.1 devnet SOL from Heat's devnet bank and signs with the keeper
+// key, which, like the bank, only this Mac holds (~/.config/top-pad/devnet, never CI); without them it is skipped.
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -36,7 +36,7 @@ import {
 import { fetchVirtualPool, getTransferPoolCreatorInstruction } from "@top-pad/clients/dbc";
 import { fetchCoinRecord, fetchWindowClaim, findWindowClaimPda, getClaimFeesInstructionAsync } from "@top-pad/clients/fee";
 import { decodeTransaction, type WindowClaimed } from "@top-pad/indexer";
-import { chainTime, devnet, fundedWallets, landed, poolAroundHeat, programCompute, rpc, send, simulatedError, swap, sweep } from "./devnet";
+import { bankFile, chainTime, devnet, fundedWallets, landed, poolAroundHeat, programCompute, rpc, send, simulatedError, swap, sweep } from "./devnet";
 
 const keeperFile = join(homedir(), ".config/top-pad/devnet/keeper.json");
 const load = async (path: string) => createKeyPairSignerFromBytes(Uint8Array.from(JSON.parse(readFileSync(path, "utf8"))));
@@ -88,7 +88,7 @@ async function claimAll(who: KeyPairSigner, p: ClaimablePool, heat: boolean, max
   return { signature: await send(who, message!.instructions as Instruction[]), bytes: compileTransaction(message!).messageBytes.length };
 }
 
-describe.skipIf(!existsSync(keeperFile))("fee claims on devnet", () => {
+describe.skipIf(!existsSync(keeperFile) || !existsSync(bankFile))("fee claims on devnet", () => {
   it(
     "pays a Heat coin's Tax window to the treasury once it ends, then splits later fees 50/50 with whoever holds the creator role",
     { timeout: 360_000 },

@@ -1,4 +1,4 @@
-// Devnet for the tests that trade on it (here and tests/ui): wallets funded from the Solana CLI's wallet, swaps on a Heat
+// Devnet for the tests that trade on it (here and tests/ui): wallets funded from Heat's devnet bank, swaps on a Heat
 // coin's pool, and a pool created straight on Heat's Instant config, around the launch flow. Every call spends real
 // devnet SOL.
 import { readFileSync } from "node:fs";
@@ -90,10 +90,14 @@ export async function send(payer: TransactionSigner, instructions: Instruction[]
   }
 }
 
-/** The Solana CLI's wallet on this Mac, which the owner keeps in devnet SOL (CLAUDE.md). */
-export const bank = () => createKeyPairSignerFromBytes(Uint8Array.from(JSON.parse(readFileSync(join(homedir(), ".config/solana/id.json"), "utf8"))));
+/**
+ * Heat's devnet bank (~/.config/top-pad/devnet/bank.json), which the owner keeps in devnet SOL and which pays for every
+ * test, never the Solana CLI's own wallet (CLAUDE.md).
+ */
+export const bankFile = join(homedir(), ".config/top-pad/devnet/bank.json");
+export const bank = () => createKeyPairSignerFromBytes(Uint8Array.from(JSON.parse(readFileSync(bankFile, "utf8"))));
 
-/** New wallets funded in one transaction from the CLI's wallet, one per amount of lamports, in order. */
+/** New wallets funded in one transaction from the bank, one per amount of lamports, in order. */
 export async function fundedWallets<T extends bigint[]>(...lamports: T): Promise<{ [K in keyof T]: KeyPairSigner }> {
   const from = await bank();
   const wallets = await Promise.all(lamports.map(() => generateKeyPairSigner()));
@@ -101,7 +105,7 @@ export async function fundedWallets<T extends bigint[]>(...lamports: T): Promise
   return wallets as { [K in keyof T]: KeyPairSigner };
 }
 
-/** Sends what is left in throwaway wallets back to the CLI's wallet, so a run keeps only what it spent. */
+/** Sends what is left in throwaway wallets back to the bank, so a run keeps only what it spent. */
 export async function sweep(...wallets: KeyPairSigner[]) {
   const to = await bank();
   for (const wallet of wallets) {

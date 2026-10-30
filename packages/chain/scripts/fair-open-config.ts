@@ -2,9 +2,9 @@
 // 5.3): the admission signer and the keeper recorded for the cluster in `CLUSTERS`, the fee program, and Heat's Fair
 // Open config. The first run calls `initialize`, a later one `update_program_config` when the settings differ, which is
 // how a leaked admission key is rotated. Both need the upgrade authority's signature, a key kept offline (spec 10.3):
-// UPGRADE_AUTHORITY, or ~/.config/top-pad/<cluster>/upgrade-authority.json. The Solana CLI's keypair pays the rent
-// (SOLANA_KEYPAIR to pick another). It simulates first and sends only with --send; the RPC is DEVNET_RPC_URL, or the
-// public endpoint.
+// UPGRADE_AUTHORITY, or ~/.config/top-pad/<cluster>/upgrade-authority.json. Heat's bank pays the rent (BANK_KEYPAIR, or
+// ~/.config/top-pad/<cluster>/bank.json). It simulates first and sends only with --send; the RPC is DEVNET_RPC_URL, or
+// the public endpoint.
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -47,7 +47,7 @@ if (!heat.keys || !heat.configs) {
 
 const loadSigner = async (path: string) => createKeyPairSignerFromBytes(Uint8Array.from(JSON.parse(readFileSync(path, "utf8"))));
 const upgradeAuthority = await loadSigner(process.env.UPGRADE_AUTHORITY || join(homedir(), ".config/top-pad", cluster, "upgrade-authority.json"));
-const payer = await loadSigner(process.env.SOLANA_KEYPAIR || join(homedir(), ".config/solana/id.json"));
+const payer = await loadSigner(process.env.BANK_KEYPAIR || join(homedir(), ".config/top-pad", cluster, "bank.json"));
 const rpcUrl = process.env.DEVNET_RPC_URL || "https://api.devnet.solana.com";
 const rpc = createSolanaRpc(rpcUrl);
 

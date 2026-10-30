@@ -4,8 +4,8 @@
 // a seated person, a deposit over its cap or off the step, and one without a valid, unexpired admission; it fails a
 // launch at once when its pot misses the minimum raise, and 15 minutes after a missed open whatever the pot holds; and
 // each depositor takes back their deposit and both rents to the lamport. It spends about 0.05 devnet SOL in fees from
-// the Solana CLI's wallet (the deposits and rents come back) and signs with the keeper and admission keys, which only
-// this Mac holds (~/.config/top-pad/devnet); without them it is skipped.
+// Heat's devnet bank (the deposits and rents come back) and signs with the keeper and admission keys, which, like the
+// bank, only this Mac holds (~/.config/top-pad/devnet); without them it is skipped.
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -27,7 +27,7 @@ import { decodeTransaction } from "@top-pad/indexer";
 import { bank, chainTime, devnet, fundedWallets, landed, programCompute, rpc, send, sendRefused, simulatedError, sweep } from "./devnet";
 import { admitted, deposit, markFailed, newPerson, recoverDeposits, refund, scheduleFairOpen, seatOf, withdraw, type ScheduledFairOpen } from "./fairOpen";
 
-const keys = ["keeper.json", "admission.json"].every((name) => existsSync(join(homedir(), ".config/top-pad/devnet", name)));
+const keys = ["keeper.json", "admission.json", "bank.json"].every((name) => existsSync(join(homedir(), ".config/top-pad/devnet", name)));
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const SOL = 1_000_000_000n;
 const STEP = 10_000_000n;

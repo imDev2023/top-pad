@@ -1,8 +1,8 @@
 // `pnpm --filter @top-pad/meteora configs devnet [--send]`: Heat's two DBC configs on a cluster (spec 3.2). It builds
 // both `create_config2` transactions and simulates them against the cluster's deployed DBC program; with --send, and
 // only once both simulations pass, it creates them. A config cannot be changed once created, so a cluster whose configs
-// are already recorded in `@top-pad/chain` is refused. The payer is the Solana CLI's keypair (`SOLANA_KEYPAIR` to pick
-// another); the RPC is `DEVNET_RPC_URL`, or the public endpoint (spec 10.5).
+// are already recorded in `@top-pad/chain` is refused. The payer is Heat's bank (`BANK_KEYPAIR`, or
+// ~/.config/top-pad/<cluster>/bank.json); the RPC is `DEVNET_RPC_URL`, or the public endpoint (spec 10.5).
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -42,7 +42,7 @@ if (heat.configs) {
 
 const rpcUrl = process.env.DEVNET_RPC_URL || "https://api.devnet.solana.com";
 const rpc = createSolanaRpc(rpcUrl);
-const keypairPath = process.env.SOLANA_KEYPAIR || join(homedir(), ".config/solana/id.json");
+const keypairPath = process.env.BANK_KEYPAIR || join(homedir(), ".config/top-pad", cluster, "bank.json");
 const payer = await createKeyPairSignerFromBytes(Uint8Array.from(JSON.parse(readFileSync(keypairPath, "utf8"))));
 const [eventAuthority] = await getProgramDerivedAddress({
   programAddress: DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS,

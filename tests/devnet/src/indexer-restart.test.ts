@@ -1,10 +1,10 @@
 // Stopping and restarting the indexer loses no trade (#42): the API runs under `wrangler dev` on a throwaway database,
 // a pool on Heat's config trades once while the indexer runs, then three times while its process is killed; once it
 // runs again, reconciliation must hold exactly the trades the chain has for the pool, read back from the chain itself.
-// It spends a little devnet SOL from the Solana CLI's wallet, and the Worker needs HELIUS_API_KEY for its RPC (spec
-// 10.5): run it as `direnv exec . pnpm test:devnet`. Without the key, or TEST_DATABASE_URL, it is skipped.
+// It spends a little devnet SOL from Heat's devnet bank, and the Worker needs HELIUS_API_KEY for its RPC (spec 10.5):
+// run it as `direnv exec . pnpm test:devnet`. Without the bank, the key or TEST_DATABASE_URL, it is skipped.
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtempSync, openSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, openSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,7 +14,7 @@ import { CLUSTERS } from "@top-pad/chain";
 import { CoinTrades } from "@top-pad/contract";
 import { createTestDatabase } from "@top-pad/db/testing";
 import { decodeTransaction, fetchRawTransaction } from "@top-pad/indexer";
-import { fundedWallets, poolAroundHeat, rpc, rpcUrl, swap, sweep } from "./devnet";
+import { bankFile, fundedWallets, poolAroundHeat, rpc, rpcUrl, swap, sweep } from "./devnet";
 
 const helius = process.env.HELIUS_API_KEY;
 const PORT = 8802;
@@ -33,7 +33,7 @@ async function until<T>(what: string, check: () => Promise<T | null | undefined 
   }
 }
 
-describe.skipIf(!helius || !process.env.TEST_DATABASE_URL)("the indexer stopped and started again", () => {
+describe.skipIf(!helius || !process.env.TEST_DATABASE_URL || !existsSync(bankFile))("the indexer stopped and started again", () => {
   let api: ChildProcess | null = null;
   let database: Awaited<ReturnType<typeof createTestDatabase>>;
   const state = mkdtempSync(join(tmpdir(), "heat-indexer-"));
