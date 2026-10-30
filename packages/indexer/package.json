@@ -8,7 +8,8 @@
   "scripts": {
     "typecheck": "tsc -p . && tsc -p scripts",
     "test": "vitest run",
-    "check-candles": "tsx scripts/check-candles.ts"
+    "check-candles": "tsx scripts/check-candles.ts",
+    "reindex": "tsx scripts/reindex.ts"
   },
   "dependencies": {
     "@solana/kit": "^8.5.0",

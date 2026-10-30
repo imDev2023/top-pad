@@ -60,6 +60,8 @@ A pnpm monorepo shaped like Stoker's: `apps/api` (Hono on Workers), `apps/web` (
 - The Cloudflare token in `global.env` cannot use Hyperdrive or Secrets Store; the owner's wrangler login can, so run those commands with the token unset (`env -u CLOUDFLARE_API_TOKEN pnpm exec wrangler hyperdrive ...`).
   Deploys work with the token, except the API's: binding its Secrets Store secret fails with code 10021, so `@top-pad/api`'s `deploy:devnet` unsets the token itself.
 - A Durable Object busy with a socket and an alarm, as the indexer always is, can go on running the code before a deploy for minutes (2026-10-29: it decoded none of the window claims sent after the deploy that taught it claims). The API deploys with `--durable-objects-code-update-mode immediate`, and the indexer resets itself when the Worker calling it runs another version: after a deploy, `GET /indexer` should name the deploy's version.
+- The indexer passes over every transaction it has indexed before, so a deploy that teaches it events in transactions it had already indexed through another watched account must index that account's history again, or those events are never recorded: `DATABASE_URL=... RPC_URL=... pnpm --filter @top-pad/indexer reindex <cluster> <account>`.
+  On 2026-10-30 every `create_launch` had been indexed through Heat's Fair Open config, so #45's first deploy met each launch's failure with no launch to fail, and its reconciliation stopped there until the Fair Open program was indexed again.
 - The owner's Discord (Meteora ticket `devlaunch-6428`, Jupiter `#dev-support`) runs in Brave, reachable through the Claude in Chrome extension, not the Discord desktop app.
 
 ## Agent skills
