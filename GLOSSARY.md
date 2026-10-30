@@ -28,6 +28,18 @@ _Avoid_: launch (that is the whole process), TGE, go-live
 How much one person may put into a Fair Open, set by how strongly they have shown they are one person: Verified, Scored or Unverified.
 _Avoid_: whitelist level, allocation tier
 
+**Seat**:
+One person's place in a Fair Open, held by the one wallet that took it: their deposit and the rent they put up, all of which comes back to them if the Fair Open fails.
+_Avoid_: slot, ticket, position (that is a liquidity provider's)
+
+**Admission**:
+Heat's signed word that a wallet may deposit in a Fair Open, as which person and up to what cap; the Fair Open program takes no deposit without one, and the chain sees the person only as a pseudonym.
+_Avoid_: whitelist, allowlist, permit
+
+**Level**:
+When a Fair Open's deposits ask for more than its pot can spend, the most each person's deposit buys with: everyone gets the level, or all they asked if that is less, and the rest is refunded.
+_Avoid_: allocation (that is the whole result), cap (that is the Depositor tier's)
+
 **Instant launch**:
 The launch mode in which a coin is open to public trading from the moment it is created, with no deposit window.
 _Avoid_: pump launch, standard launch, curve launch

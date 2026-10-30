@@ -99,6 +99,7 @@ Fair Open is preselected.
 About 0.03 SOL, all of it rent: the DBC pool accounts (about 0.02 SOL), the launch account (about 1,100 bytes, 0.0062 SOL) and the nonce account (0.00106 SOL).
 The launch and nonce rent come back when the launch closes, and all of it comes back if the Fair Open fails.
 It is not a Heat fee; it puts a small, refundable price on filling the launch calendar.
+As built ([#45](https://github.com/imDev2023/top-pad/issues/45), devnet rent on 2026-10-30): scheduling takes the launch account (1,233 bytes, 0.0069 SOL), its vault (0.00085 SOL) and the nonce (0.00106 SOL); `close_launch` returns the first two once a failed launch's every seat is back, and the nonce's comes back through the keeper, its authority, with the open's Workflow ([#46](https://github.com/imDev2023/top-pad/issues/46)); the pool's rent is the open's.
 
 **8. The calendar entry.**
 A sealed entry: a "?" tile, the time, the creator and their record summary, the terms (pot up to 17 SOL, minimum raise, 10 minutes) and the teaser.
@@ -116,6 +117,7 @@ A sealed entry: a "?" tile, the time, the creator and their record summary, the 
 - One person holds one seat per Fair Open, through one wallet.
 - A depositor can withdraw everything until the window closes.
 - Each depositor puts up about 0.0027 SOL of refundable rent beyond the deposit: 0.00123 SOL for the seat and 0.00149 SOL for the coin account the push creates (returned if they already have one).
+  As built ([#45](https://github.com/imDev2023/top-pad/issues/45)): the seat is 178 bytes, keeping room for what the open and the pushes will record, so the rent is about 0.003 SOL, 0.00155 for the seat and 0.00149 for the coin account, at devnet's rent on 2026-10-30.
 - The creator may deposit like anyone else, under their own tier and cap (at least Scored, since they linked X); their share of the coins is locked (step 13).
 
 **10. The open.**
@@ -138,6 +140,9 @@ The keeper holds the broadcast up to 10 s if the metadata URI is not yet served.
 - The pot spends the rung, which is at most 5% below what the depositors' fills add up to; each depositor's fill is scaled to the rung pro rata, and the unspent part is refunded.
 - Worked example: a 15 SOL pot with 30 people asking 0.1 SOL and 50 asking 0.5 to 2 SOL gives a level of 0.24 SOL; the 30 get 0.1 each, the 50 get 0.24 each.
 - Rounding **(owner, 2026-10-27)**: the level is floored to the lamport; each depositor's SOL spent rounds up and their coins round down; lamport dust is added to the launch's Tax Share, so it stays with depositors; coin dust is burnt.
+- As built ([#45](https://github.com/imDev2023/top-pad/issues/45)): one level for every seat while the Unverified fills stay within a quarter (three times theirs at most everyone else's, to the lamport); past it, everyone else shares up to three quarters of the cap and the Unverified seats a third of what that fills, within what the cap has left.
+  The rungs fall from the cap as each rung's 19/20, rounded down, 64 of them, and a seat's spend is its fill times the rung over the pot's spend, rounded up.
+  `@top-pad/chain` holds the reference calculation the Fair Open page shows; the program's own (`programs/fair_open/src/allocation.rs`) gives the same numbers to the lamport on 404 pots that both test suites read (`packages/chain/src/fixtures/allocations.json`).
 
 **12. Pushes.**
 Right after the open anyone can run the push, and our keeper does it at once, in parallel batches of 10 transactions.
@@ -166,6 +171,7 @@ The creator may later buy on the curve from their own wallet, unlocked; those ho
 - From then on, or once a pot misses its minimum raise or falls below the lowest rung, anyone can mark the launch failed: no coin is created.
 - Each depositor then withdraws their deposit and both rents on chain alone, with no server running.
 - There is no wallet or person quorum.
+- As built ([#45](https://github.com/imDev2023/top-pad/issues/45)): "misses its minimum raise" and "falls below the lowest rung" compare what the pot would spend, by the allocation of step 11, with each; a refund may be sent by anyone, since it pays only the seat's wallet, so a keeper can return every seat too; on devnet a deposit, a withdrawal, a refund and the failure itself each came back to the lamport less their network fees (`tests/devnet/src/fair-open.test.ts`).
 
 ### 2.2 An Instant launch's life
 
@@ -412,6 +418,21 @@ Invariants:
 - The creator's coins leave the pot only into the Jupiter Lock escrow.
 - **Unproven**: the program on chain at all (the prototype's never ran: the wallet had 0.027 SOL), its compute, `settle`, `claim`, the partial fill past the target, and the Jupiter Lock CPI.
 
+As built on devnet ([#45](https://github.com/imDev2023/top-pad/issues/45), 2026-10-30), the window and the failure path:
+- Deployed from a verified build: executable hash `eed50f6f97903e24791299a47d43c2f106d31cf9092df49650fabbbf42df1265`, commit `585e447`, 409,664 bytes (2.08 SOL of rent), rebuilt from GitHub by `solana-verify verify-from-repo` and recorded on chain.
+  `ProgramConfig` at `97pAq3qoWhJb7SRwjdfmxFypysuVR6bBq752wz5XuEiF` names the admission signer `2LH1VzF3rbCKdfSZDBXkbbwXbZZsbYkP8qkVRP9rgzuJ`, the keeper, the fee program and Heat's Fair Open config, set by `pnpm --filter @top-pad/chain fair-open-config devnet`.
+- `create_launch` needs the keeper's signature as well as the Creator wallet's, so every launch is one Heat scheduled, as every Heat coin is one our launch key co-signed; it runs on the config the `ProgramConfig` names, takes the pot's cap as 20% of that config's Graduation Target and its quote from it, and refuses any quote but SOL until a non-SOL quote's deposits are built (11.2).
+  The launch is the PDA of its durable nonce, whose authority must be the keeper; a window starts at most 7 days ahead, or may already be running as long as it has not closed.
+  The coin's identity hash is the SHA-256 of DBC's pool parameters (name, ticker as `symbol`, URI) as the creation transaction serializes them, so `settle` can hash that instruction's own bytes.
+- `deposit` takes its admission from the Ed25519 precompile instruction right before it, every offset inside that instruction's own data: the message is `heat fair open admission v1`, then the launch, the wallet, the person's pseudonym, the tier, the cap and the expiry (140 bytes).
+  The program bounds each admission's cap by its tier's (Unverified 10 steps, Scored 50, Verified 200), so a stolen admission key admits nobody above them.
+  A seat may add to its deposit under its latest admission, and moves to that admission's tier; a deposit's two signatures cost 10,000 lamports, as designed.
+- `withdraw` takes back part or all of a deposit in the window, and all of it closes the seat and returns both rents.
+- `mark_failed` and `withdraw_failed` as in 2.1 step 15, and `close_launch`, which returns the launch's and the vault's rent to the creator once every seat is back.
+- The program checks after every deposit, withdrawal and refund that the vault holds what it owes, and a LiteSVM test checks it after each of hundreds of random instructions against the seats themselves.
+- The launch and seat accounts keep reserved bytes (128 and 48) for what the open, the pushes and the Tax Share will record, so a seat left in a failed launch still reads after those upgrades.
+- Compute in LiteSVM: `create_launch` 35,406 units, a deposit taking a seat 41,686 and a top-up 34,368, a withdrawal about 28,400, `mark_failed` 74,047 (it runs the allocation over every step), `withdraw_failed` 27,919; on devnet (2026-10-30), `create_launch` 38,404, a deposit taking a seat 38,708 and a top-up 34,390, a withdrawal 28,401, `mark_failed` 74,341 to 74,904, `withdraw_failed` 27,919 to 27,941 and `close_launch` 12,843; a deposit's transaction paid 10,000 lamports, and a launch's 15,000, signed by the creator, the keeper and the new nonce.
+
 ## 6. Anti-abuse
 
 ### 6.1 The sniper tax
@@ -447,6 +468,10 @@ Every refusal is our launch key declining to co-sign; nothing on chain refuses a
 - A wallet refused or merged at admission sees the reason at once and can still buy after the open.
 - An upheld appeal clears the wallet for future Fair Opens only.
 - World ID cannot be verified on chain on Solana, so it is checked by our server.
+- As built ([#45](https://github.com/imDev2023/top-pad/issues/45)), minimal until the Depositor tiers ticket ([#48](https://github.com/imDev2023/top-pad/issues/48)): a wallet with an X account, the session's own or that of the record whose Creator wallet it is, is Scored, and any other Unverified.
+  A person is a cluster id, the X account or else the wallet, and the chain sees only its pseudonym, HMAC-SHA-256 of the launch and the cluster id under a key derived from the admission key.
+  The `admissions` table fixes a wallet's pseudonym at its first admission in a launch, and a person's wallet: an X account linked later joins the wallet's person, a tier never falls inside a window, and a person whose other wallet holds no seat any more may move to this one.
+  The creator's own X account is refused through any wallet but the Creator wallet; an admission lasts 120 seconds.
 
 ### 6.4 Bundle Radar labels
 
@@ -535,6 +560,8 @@ Design decisions:
 The screens:
 1. **Discover**: the board in section 8's order, each coin row with its flags.
 2. **Fair Open page**: the countdown, the pot filling (with the 25% Unverified line), the minimum raise, the depositor's tier and cap with "Verify once", deposit and withdraw, the refundable rent, "if the window closed now" (each person's share, your fill, your refund), and what happens at the open.
+   As built ([#45](https://github.com/imDev2023/top-pad/issues/45)): `/fair-open/<launch>`, the pot read from the launch account and reloaded on each of its live room's events; Unverified deposits fill the bar from the left up to a dashed line, a quarter of what the pot would spend; deposits and withdrawals in 0.01 SOL steps, built by the API, a deposit with its admission, and signed and sent by the wallet; "Link X" raises an Unverified wallet to Scored in place; after the window, anyone marks a launch that cannot open failed from it, a depositor taking everything back in the same transaction.
+   Until the open is built ([#46](https://github.com/imDev2023/top-pad/issues/46)) the page says every devnet Fair Open fails 15 minutes after its open.
 3. **Coin page**: name, ticker, mint, price, market cap, holders; the flags strip and Fairness card; the tax band during the first minute; the chart (TradingView Lightweight Charts v5, 1 s, 15 s and coarser candles); the graduation bar to 85 SOL; quick buy showing the fee before signing; trades with the fee each paid, the labelled keeper's pot buy pinned; banners for a confirmed bundle, a Meteora-paused pool, or "Not launched through Heat".
    As built ([#42](https://github.com/imDev2023/top-pad/issues/42)): the chart plots the market cap in SOL, the price times the fixed supply, so its axis reads like the header; a trade's fee shows yellow inside the tax's minute and red above half the trade.
 4. **Launch flow**: link X; Fair Open (preselected) or Instant launch; the coin with live Vamp Shield verdicts (clear, "looks like X", refused with an appeal link); schedule (time up to 7 days ahead, minimum raise, teaser, about 0.03 SOL refundable rent); sign; done.
@@ -605,6 +632,7 @@ Sources: [Stack](https://github.com/imDev2023/top-pad/issues/17), [Backend desig
   - A launch that lands goes to the indexer at once, its fast path, and a coin's page waits for a coin launched moments ago rather than say there is none.
   - Trades reached the deployed coin page about 5.5 s after they were sent: about 1.5 s to confirm, then Helius's free tier serving each transaction 2 to 3 s after its block, then the database and the room; locally, 1.5 s.
   - Stopped and restarted under `wrangler dev` while trades landed, reconciliation indexed exactly the swaps the chain holds (`tests/devnet`).
+  - It watches the Fair Open program too ([#45](https://github.com/imDev2023/top-pad/issues/45)): each launch into `fair_opens`, each deposit, withdrawal and refund into `fair_open_seat_events`, and each change to the launch's live room, on which its page reads the launch account again; a failure seen before its launch is left to reconciliation, which goes oldest first.
 - **Live rooms**: one Durable Object per coin and one for the board, holding hibernatable WebSockets; the indexer publishes each decoded trade to its room; rooms batch every 100 ms; a reconnecting browser resyncs from its last slot through the API.
 - **Trades and candles**: the `trades` table is kept forever; the indexer writes 1 s candles on every trade, and 15 s, 1 m, 5 m, 15 m, 1 h, 4 h and 1 d roll up from them; 1 s candles are kept 7 days, 15 s candles 30 days, coarser ones forever; any candle can be rebuilt from trades.
   As built ([#42](https://github.com/imDev2023/top-pad/issues/42)): each trade is folded into its candle at every length as it is indexed, keeping the open and the close by the trades' order rather than their arrival, the same fold a rebuild makes; `check-candles` found devnet's 186 candles equal to their rebuild.
@@ -628,6 +656,7 @@ Sources: [Stack](https://github.com/imDev2023/top-pad/issues/17), [Backend desig
   On devnet, deployed, the window claims landed 1 s after the minute ended by the chain's clock.
   The indexer, a Durable Object always busy with its socket and alarm, went on running the code before a deploy, so the API deploys with Durable Objects restarted at once, and the indexer resets itself whenever the Worker that calls it runs another version.
 - **Admission server**: verifies personhood once (World ID server-side, Civic Uniqueness, Trusta-style attestations, X; no KYC), runs the linkage pipeline, and signs each deposit's admission.
+  As built ([#45](https://github.com/imDev2023/top-pad/issues/45)): part of the API, which builds each deposit with its admission for the wallet to sign (`POST /fair-opens/<launch>/deposit`), by section 6.3's minimal rules.
 - **Launch service**: X OAuth, Vamp Shield checks, the ticker reservation, Arweave data items, the nonce account, collecting the ladder's signatures, and co-signing Instant launches.
 - **Vision service**: PDQ (all 8 orientations) and SSCD on CPU in one Python Container behind a Durable Object, asleep when idle; signatures in Postgres (PDQ `bit(256)` with a Hamming HNSW index, SSCD `vector(512)` with a cosine HNSW index).
   The protected set refreshes from Jupiter's trending endpoints every minute, its verified and organic lists hourly, CoinGecko's top 1,000 daily, and our own coins as they cross the protection bar.
@@ -643,6 +672,7 @@ Sources: [Stack](https://github.com/imDev2023/top-pad/issues/17), [Backend desig
   - the **admission signer**, holding no funds.
 - On devnet the keeper key, the treasury and the upgrade authority were made on 2026-10-29 ([#41](https://github.com/imDev2023/top-pad/issues/41)) and live in `~/.config/top-pad/devnet` on the owner's Mac, to be backed up in the owner's password manager (an owner task, still open on 2026-10-29); the keeper's float is 0.5 SOL, with the low-balance alert at 0.25 SOL.
   The owner put the keeper key in the account's Secrets Store the same day, as `top-pad-devnet-keeper-key`, bound to the devnet API alone.
+- The devnet admission signer, `2LH1VzF3rbCKdfSZDBXkbbwXbZZsbYkP8qkVRP9rgzuJ`, was made on 2026-10-30 ([#45](https://github.com/imDev2023/top-pad/issues/45)) and lives with the others in `~/.config/top-pad/devnet`, and in the Secrets Store as `top-pad-devnet-admission-key`, bound to the devnet API alone; its seed also keys the persons' pseudonyms (6.3).
 - The upgrade and treasury keys never touch Cloudflare: kept offline on devnet, held by Squads on mainnet.
 - The two program keypairs only ever sign the first deploy at the fixed ids (section 5.1), on devnet and later on mainnet; a leak before the mainnet deploy would let anyone deploy their own program at our ids there first.
   They live only in the gitignored `target/deploy` on the owner's Mac, backed up in the owner's password manager, never in the repo, CI or Cloudflare (owner, 2026-10-28).
@@ -683,7 +713,7 @@ The cohort (11.3) informs the default-mode decision but does not gate the build;
 ### 11.2 Mandatory integration tests
 
 All on devnet, against Meteora's deployed programs, with no Meteora binaries anywhere:
-- both programs deployed from verified builds, each instruction's compute measured;
+- both programs deployed from verified builds, each instruction's compute measured (the Fair Open program's window and failure since [#45](https://github.com/imDev2023/top-pad/issues/45));
 - a full Fair Open (scheduling, deposits, the open, the lock escrow with the right cliff and recipient, the pushes, the Tax Share, closed seats), plus a partial fill;
 - the 64-rung ladder signed in one prompt in Phantom, Solflare and Backpack, plus the sign-at-the-open fallback;
 - the coin's metadata served through Turbo within 10 s of upload, before the rung lands;
@@ -823,7 +853,7 @@ Not in this build; each returns only as its own effort, mostly the mainnet effor
 ## 16. Risks and what is unproven
 
 Unproven, and proved by section 11's tests:
-- Our programs on chain at all: compute, `settle`, `claim`, the Jupiter Lock CPI, a partial fill past the target, and the creation transaction at about 1,014 bytes with the coin record; the `fee_claimer` PDA's claims by CPI were shown on devnet on 2026-10-29 ([#44](https://github.com/imDev2023/top-pad/issues/44)).
+- Our programs on chain at all: compute, `settle`, `claim`, the Jupiter Lock CPI, a partial fill past the target, and the creation transaction at about 1,014 bytes with the coin record; the `fee_claimer` PDA's claims by CPI were shown on devnet on 2026-10-29 ([#44](https://github.com/imDev2023/top-pad/issues/44)), and the Fair Open program's deposits, admissions, withdrawals and failure path on 2026-10-30 ([#45](https://github.com/imDev2023/top-pad/issues/45)).
 - Wallets signing a 64-rung ladder in one prompt.
 - A sniper's separate transaction landing in the creation slot.
 - Turbo serving an upload within 10 s: `turbo-gateway.com` served an Instant launch's upload at once, while `arweave.net` still answered 404 three minutes later (2026-10-29, [#41](https://github.com/imDev2023/top-pad/issues/41)), so metadata URIs name `turbo-gateway.com`; the Fair Open's 10 s hold is still to be measured.
