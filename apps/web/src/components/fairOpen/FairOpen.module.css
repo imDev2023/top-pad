@@ -311,9 +311,15 @@
 }
 
 .held {
+  font-size: 1rem;
+  color: var(--muted);
+}
+
+.held :global(.num) {
   font-size: 1.5rem;
   font-weight: 500;
   line-height: 1.2;
+  color: var(--fg);
 }
 
 .form {

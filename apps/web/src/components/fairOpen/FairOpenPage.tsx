@@ -102,6 +102,8 @@ export function FairOpenPage({ initial }: { initial: FairOpen }) {
   const head = headline(view, at);
   const minRaise = BigInt(view.minRaise);
   const reached = BigInt(view.allocation.spend) >= minRaise;
+  const windowOpen = view.phase === "scheduled" || view.phase === "window";
+  const ended = view.phase === "failing" || view.phase === "failed" || view.phase === "closed";
   const people = view.pot.seats;
 
   return (
@@ -138,7 +140,7 @@ export function FairOpenPage({ initial }: { initial: FairOpen }) {
       <div className={styles.layout}>
         <aside className={styles.side}>
           <DepositPanel view={view} onChanged={load} />
-          <IfClosedNow view={view} />
+          {!ended && <IfClosedNow view={view} />}
         </aside>
 
         <div className={styles.main}>
@@ -174,7 +176,11 @@ export function FairOpenPage({ initial }: { initial: FairOpen }) {
                     <span className={styles.unit}> SOL{reached ? " \u{2713}" : ""}</span>
                   </span>
                   <span className="note">
-                    {reached ? "Reached. " : "Not reached yet. "}If the pot misses it, no coin is created and everyone is refunded.
+                    {reached
+                      ? "Reached. If the pot misses it, no coin is created and everyone is refunded."
+                      : windowOpen
+                        ? "Not reached yet. If the pot misses it, no coin is created and everyone is refunded."
+                        : "Missed: no coin is created, and everyone is refunded."}
                   </span>
                 </>
               )}
@@ -183,54 +189,89 @@ export function FairOpenPage({ initial }: { initial: FairOpen }) {
 
           <PotMeter view={view} />
 
-          <section className={`panel ${styles.steps}`} aria-labelledby="open-steps">
-            <h2 id="open-steps" className={styles.sectionTitle}>
-              What happens at the open
-            </h2>
-            <ol className={styles.list}>
-              <li>
-                <b>The window closes at {clock(view.opensAt, at)}.</b> <span className="muted">Until then you can take back any or all of your deposit.</span>
-              </li>
-              <li>
-                <b>One transaction creates the coin, its pool and the pot&apos;s buy.</b>{" "}
-                <span className="muted">The pot buys first and pays the normal 1.25% fee. Anyone else buying in that second pays the 99% sniper tax.</span>
-              </li>
-              <li>
-                <b>Everyone in the pot pays the same price.</b>{" "}
-                <span className="muted">
-                  If more is deposited than the pot can buy, everyone gets an equal share; if you asked for less than the share, you get all of yours. The
-                  rest is refunded.
-                </span>
-              </li>
-              <li>
-                <b>Coins and refunds arrive in your wallet within seconds.</b> <span className="muted">Sent by Heat&apos;s labelled keeper. Nothing to claim, no vesting.</span>
-              </li>
-              <li>
-                <b>A minute later, you get your Tax Share.</b>{" "}
-                <span className="muted">Fees snipers pay in the first minute go to the pot&apos;s depositors, in proportion to what each deposit bought.</span>
-              </li>
-            </ol>
-            <p className="note">
-              If the coin has not been created by <span className="mono">{clock(view.lateAt, at)}</span>, anyone can mark this launch failed, and you take your
-              deposit and both rents back on chain yourself, with no Heat server needed.
-            </p>
-            <div className="verdict verdict-info">
-              <b>Devnet build</b>
-              <span className="note">
-                The open itself comes in Heat&apos;s next build. Until it does, every Fair Open here fails 15 minutes after its open, and every depositor takes
-                their SOL back.
-              </span>
-            </div>
-          </section>
+          {ended ? <AfterFailure view={view} /> : <OpenSteps view={view} at={at} />}
         </div>
       </div>
     </div>
   );
 }
 
+/** What happens at the open (spec 2.1 steps 10 to 14), and when the launch fails if it never comes. */
+function OpenSteps({ view, at }: { view: FairOpen; at: number }) {
+  return (
+    <section className={`panel ${styles.steps}`} aria-labelledby="open-steps">
+      <h2 id="open-steps" className={styles.sectionTitle}>
+        What happens at the open
+      </h2>
+      <ol className={styles.list}>
+        <li>
+          <b>The window closes at {clock(view.opensAt, at)}.</b> <span className="muted">Until then you can take back any or all of your deposit.</span>
+        </li>
+        <li>
+          <b>One transaction creates the coin, its pool and the pot&apos;s buy.</b>{" "}
+          <span className="muted">The pot buys first and pays the normal 1.25% fee. Anyone else buying in that second pays the 99% sniper tax.</span>
+        </li>
+        <li>
+          <b>Everyone in the pot pays the same price.</b>{" "}
+          <span className="muted">
+            If more is deposited than the pot can buy, everyone gets an equal share; if you asked for less than the share, you get all of yours. The
+            rest is refunded.
+          </span>
+        </li>
+        <li>
+          <b>Coins and refunds arrive in your wallet within seconds.</b> <span className="muted">Sent by Heat&apos;s labelled keeper. Nothing to claim, no vesting.</span>
+        </li>
+        <li>
+          <b>A minute later, you get your Tax Share.</b>{" "}
+          <span className="muted">Fees snipers pay in the first minute go to the pot&apos;s depositors, in proportion to what each deposit bought.</span>
+        </li>
+      </ol>
+      <p className="note">
+        If the coin has not been created by <span className="mono">{clock(view.lateAt, at)}</span>, anyone can mark this launch failed, and you take your
+        deposit and both rents back on chain yourself, with no Heat server needed.
+      </p>
+      <div className="verdict verdict-info">
+        <b>Devnet build</b>
+        <span className="note">
+          The open itself comes in Heat&apos;s next build. Until it does, every Fair Open here fails 15 minutes after its open, and every depositor takes
+          their SOL back.
+        </span>
+      </div>
+    </section>
+  );
+}
+
+/** Once a launch cannot open: no coin, and every deposit and rent back, from the page or on chain alone. */
+function AfterFailure({ view }: { view: FairOpen }) {
+  const settled = view.phase === "closed" || view.pot.seats === 0;
+  return (
+    <section className={`panel ${styles.steps}`} aria-labelledby="after-failure">
+      <h2 id="after-failure" className={styles.sectionTitle}>
+        What happens now
+      </h2>
+      <ol className={styles.list}>
+        <li>
+          <b>No coin is created.</b> <span className="muted">The sealed coin is never revealed, and nothing is bought.</span>
+        </li>
+        <li>
+          <b>Every depositor takes back their deposit and both rents.</b>{" "}
+          <span className="muted">
+            {settled
+              ? "Every seat has been returned."
+              : `${view.pot.seats} ${view.pot.seats === 1 ? "seat is" : "seats are"} still to be returned, from this page or on chain alone, with no Heat server needed: anyone can send a seat's refund, and it pays only that seat's wallet.`}
+          </span>
+        </li>
+        <li>
+          <b>Then the creator&apos;s rent comes back too.</b> <span className="muted">Once every seat is back, the launch closes and returns its rent.</span>
+        </li>
+      </ol>
+    </section>
+  );
+}
+
 /** "If the window closed now" (spec 2.1 step 11): each person's share, and the visitor's fill and refund. */
 function IfClosedNow({ view }: { view: FairOpen }) {
-  const { others, unverified } = view.allocation;
+  const { others, unverified, spend, rung } = view.allocation;
   const twoLevels = unverified.level !== others.level && unverified.limited;
   const seat = view.you?.seat ?? null;
   const rent = BigInt(view.rent.seat) + BigInt(view.rent.coinAccount);
@@ -238,7 +279,7 @@ function IfClosedNow({ view }: { view: FairOpen }) {
   return (
     <section className={`panel ${styles.ifClosed}`} aria-labelledby="if-closed">
       <h2 id="if-closed" className={styles.sectionTitle}>
-        If the window closed now
+        {view.phase === "due" ? "At the open" : "If the window closed now"}
       </h2>
       <dl className={styles.facts}>
         <div>
@@ -255,9 +296,7 @@ function IfClosedNow({ view }: { view: FairOpen }) {
         )}
         <div>
           <dt>The pot would buy with</dt>
-          <dd>
-            <Sol lamports={view.allocation.spend} />
-          </dd>
+          <dd data-testid="fair-open-rung">{rung === null ? "Nothing: too little" : <Sol lamports={rung} />}</dd>
         </div>
         <div>
           <dt>Your deposit buys with</dt>
@@ -274,6 +313,16 @@ function IfClosedNow({ view }: { view: FairOpen }) {
           </dd>
         </div>
       </dl>
+      {rung === null ? (
+        BigInt(spend) > 0n && <p className="note">The pot would spend less than its smallest buy, so the open could not run and every deposit would come back.</p>
+      ) : (
+        BigInt(rung) < BigInt(spend) && (
+          <p className="note">
+            The open buys in 5% steps down from the pot&apos;s cap, so it would spend <span className="num">{sol(rung, 9)}</span> of the{" "}
+            <span className="num">{sol(spend, 9)}</span> SOL the shares add up to: every share is scaled down alike, and the rest is refunded.
+          </p>
+        )
+      )}
       <p className="note">
         Worked example: a 15 SOL pot with 30 people asking 0.1 SOL and 50 asking 0.5 to 2 SOL. The 30 get 0.1 each, the 50 get 0.24 each, and the rest is
         refunded.

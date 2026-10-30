@@ -44,6 +44,20 @@ function refusalOf(outcome: FairOpenOutcome) {
 }
 
 type Action = "deposit" | "withdraw" | "mark-failed" | "refund";
+
+/** What a landed transaction did, in words. */
+function doneText(action: Action, lamports: bigint | undefined, seated: boolean) {
+  switch (action) {
+    case "deposit":
+      return `Deposited ${sol(lamports ?? 0n, 2)} SOL.`;
+    case "withdraw":
+      return `Took back ${sol(lamports ?? 0n, 2)} SOL.`;
+    case "mark-failed":
+      return seated ? "Marked failed, and your deposit and both rents are back in your wallet." : "Marked failed: every depositor can now take their SOL back.";
+    case "refund":
+      return "Your deposit and both rents are back in your wallet.";
+  }
+}
 type Sending = { phase: "idle" } | { phase: "preparing" | "signing" | "confirming"; action: Action } | { phase: "done"; text: string; explorer: string } | { phase: "failed"; text: string };
 
 const TIER_NAMES = { unverified: "Unverified", scored: "Scored", verified: "Verified" } as const;
@@ -116,13 +130,7 @@ function Seated({ view, account, chain, onChanged }: { view: FairOpen; account: 
       if (outcome.status !== "landed") {
         setSending({ phase: "failed", text: refusalOf(outcome) });
       } else {
-        const done = {
-          deposit: `Deposited ${sol(lamports!, 2)} SOL.`,
-          withdraw: `Took back ${sol(lamports!, 2)} SOL.`,
-          "mark-failed": seat ? "Marked failed, and your deposit and both rents are back in your wallet." : "Marked failed: every depositor can now take their SOL back.",
-          refund: "Your deposit and both rents are back in your wallet.",
-        }[action];
-        setSending({ phase: "done", text: done, explorer: outcome.explorer });
+        setSending({ phase: "done", text: doneText(action, lamports, seat !== null), explorer: outcome.explorer });
         setText("");
       }
       await onChanged();
@@ -141,17 +149,21 @@ function Seated({ view, account, chain, onChanged }: { view: FairOpen; account: 
         <dl className={styles.holding}>
           <div>
             <dt className="eyebrow">Your seat holds</dt>
-            <dd className={`num ${styles.held}`} data-testid="fair-open-held">
-              {sol(seat.deposit, 2)} SOL
+            <dd className={styles.held} data-testid="fair-open-held">
+              <span className="num">{sol(seat.deposit, 2)}</span> SOL
             </dd>
           </div>
           <div>
             <dt className="eyebrow">Rent kept for you</dt>
-            <dd className="num">{sol(seatRent, 6)} SOL</dd>
+            <dd>
+              <span className="num">{sol(seatRent, 6)}</span> SOL
+            </dd>
           </div>
         </dl>
       ) : (
-        view.phase !== "failed" && view.phase !== "closed" && <p className="note">You hold no seat here yet.</p>
+        you.admission.admitted && (
+          <p className="note">{view.phase === "failed" || view.phase === "closed" ? "You hold no seat here." : "You hold no seat here yet."}</p>
+        )
       )}
 
       {view.phase === "window" && you.admission.admitted && (
@@ -221,14 +233,11 @@ function Seated({ view, account, chain, onChanged }: { view: FairOpen; account: 
           {seat ? "Mark it failed and take back my SOL" : "Mark it failed"}
         </button>
       )}
-      {view.phase === "failed" &&
-        (seat ? (
-          <button type="button" className="btn btn-go" disabled={busy} onClick={() => void send("refund")}>
-            Take back {sol(BigInt(seat.deposit) + seatRent, 6)} SOL
-          </button>
-        ) : (
-          <p className="note">You hold no seat here: nothing waits for you.</p>
-        ))}
+      {view.phase === "failed" && seat && (
+        <button type="button" className="btn btn-go" disabled={busy} onClick={() => void send("refund")}>
+          Take back {sol(BigInt(seat.deposit) + seatRent, 6)} SOL
+        </button>
+      )}
 
       <Status sending={sending} />
     </div>
