@@ -159,7 +159,15 @@ export function FairOpenPage({ initial }: { initial: FairOpen }) {
                 <span className={styles.unit}> SOL</span>
               </span>
               <span className="note">
-                from {people} {people === 1 ? "person" : "people"}, buying up to <span className="num">{sol(view.potCap, 2)}</span>&nbsp;SOL
+                {!ended ? (
+                  <>
+                    from {people} {people === 1 ? "person" : "people"}, buying up to <span className="num">{sol(view.potCap, 2)}</span>&nbsp;SOL
+                  </>
+                ) : people > 0 ? (
+                  `from ${people} ${people === 1 ? "person" : "people"}, still to go back`
+                ) : (
+                  "Every deposit has gone back."
+                )}
               </span>
             </div>
             <div className={`panel ${styles.figure}`}>
@@ -167,7 +175,7 @@ export function FairOpenPage({ initial }: { initial: FairOpen }) {
               {minRaise === 0n ? (
                 <>
                   <span className={styles.big}>None</span>
-                  <span className="note">The coin opens with whatever the pot holds, down to its smallest buy.</span>
+                  <span className="note">{ended ? "The creator set none." : "The coin opens with whatever the pot holds, down to its smallest buy."}</span>
                 </>
               ) : (
                 <>
@@ -177,7 +185,9 @@ export function FairOpenPage({ initial }: { initial: FairOpen }) {
                   </span>
                   <span className="note">
                     {reached
-                      ? "Reached. If the pot misses it, no coin is created and everyone is refunded."
+                      ? windowOpen
+                        ? "Reached. If the pot misses it, no coin is created and everyone is refunded."
+                        : "Reached."
                       : windowOpen
                         ? "Not reached yet. If the pot misses it, no coin is created and everyone is refunded."
                         : "Missed: no coin is created, and everyone is refunded."}

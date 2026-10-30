@@ -7,9 +7,11 @@ import styles from "./FairOpen.module.css";
 /**
  * The pot filling against its cap (spec 9, screen 2): Unverified deposits from the left, everyone else's after them,
  * anything past the cap hatched, refunded at the open, and the dashed line past which Unverified deposits stop counting:
- * together they buy at most a quarter of what the pot spends (spec 2.1 step 9).
+ * together they buy at most a quarter of what the pot spends (spec 2.1 step 9). Once the launch cannot open, it buys
+ * nothing, and the pot shows only the deposits still to go back. Past the cap, the bar runs to the total.
  */
 export function PotMeter({ view }: { view: FairOpen }) {
+  const ended = view.phase === "failing" || view.phase === "failed" || view.phase === "closed";
   const cap = BigInt(view.potCap);
   const unverified = BigInt(view.pot.unverified);
   const others = BigInt(view.pot.scored) + BigInt(view.pot.verified);
@@ -35,20 +37,26 @@ export function PotMeter({ view }: { view: FairOpen }) {
       <div
         className={styles.track}
         role="img"
-        aria-label={`${sol(total, 2)} SOL deposited against a ${sol(cap, 2)} SOL cap; Unverified deposits count up to ${sol(line, 2)} SOL.`}
+        aria-label={`${sol(total, 2)} SOL deposited against a ${sol(cap, 2)} SOL cap${ended ? "" : `; Unverified deposits count up to ${sol(line, 2)} SOL`}.`}
       >
         <i className={styles.fillUnverified} style={{ width: at(unverified) }} />
         <i className={styles.fillOthers} style={{ left: at(unverified), width: at(others) }} />
         {over > 0n && <i className={styles.over} style={{ left: at(cap), width: at(over) }} />}
-        {allocation.unverified.limited && unverified > line && <i className={styles.cut} style={{ left: at(line), width: at(unverified - line) }} />}
-        {total > 0n && <i className={styles.line} style={{ left: at(line) }} />}
+        {!ended && allocation.unverified.limited && unverified > line && <i className={styles.cut} style={{ left: at(line), width: at(unverified - line) }} />}
+        {!ended && total > 0n && <i className={styles.line} style={{ left: at(line) }} />}
         {over > 0n && <i className={styles.capMark} style={{ left: at(cap) }} />}
       </div>
       <div className={`spread note ${styles.scale}`}>
         <span className="num">0</span>
-        <span>
-          <span className="num">{sol(cap, 2)}</span> SOL cap
-        </span>
+        {over > 0n ? (
+          <span>
+            <span className="num">{sol(total, 2)}</span> SOL
+          </span>
+        ) : (
+          <span>
+            <span className="num">{sol(cap, 2)}</span> SOL cap
+          </span>
+        )}
       </div>
       <ul className={styles.legend}>
         <li>
@@ -63,12 +71,14 @@ export function PotMeter({ view }: { view: FairOpen }) {
             Scored and Verified <b className="num">{sol(others, 2)}</b> SOL
           </span>
         </li>
-        <li>
-          <i className={styles.swatchLine} aria-hidden="true" />
-          <span>
-            Unverified deposits count up to <b className="num">{sol(line, 2)}</b> SOL, a quarter of what the pot spends
-          </span>
-        </li>
+        {!ended && (
+          <li>
+            <i className={styles.swatchLine} aria-hidden="true" />
+            <span>
+              Unverified deposits count up to <b className="num">{sol(line, 2)}</b> SOL: together they buy at most a quarter of what the pot spends
+            </span>
+          </li>
+        )}
         {over > 0n && (
           <li>
             <i className={styles.swatchOver} aria-hidden="true" />
@@ -78,10 +88,12 @@ export function PotMeter({ view }: { view: FairOpen }) {
           </li>
         )}
       </ul>
-      <p className={`note ${styles.target}`}>
-        The pot buys at most 20% of the <span className="num">{sol(target, 2)}</span> SOL Graduation Target, so the public opens at most 1.25 times above the
-        pot&apos;s price.
-      </p>
+      {!ended && (
+        <p className={`note ${styles.target}`}>
+          The pot buys at most 20% of the <span className="num">{sol(target, 2)}</span> SOL Graduation Target, so the public opens at most 1.25 times above the
+          pot&apos;s price.
+        </p>
+      )}
     </section>
   );
 }

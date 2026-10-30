@@ -43,6 +43,16 @@ function refusalOf(outcome: FairOpenOutcome) {
   return (custom && REFUSALS[Number(custom)]) || `It failed on chain: ${outcome.error ?? "no reason given"}.`;
 }
 
+/** What connecting a wallet is for, as the launch stands. */
+const CONNECT: Record<FairOpen["phase"], string> = {
+  scheduled: "Connect a wallet to deposit. Your tier sets your cap: Unverified 0.1 SOL, Scored 0.5 SOL, Verified 2 SOL.",
+  window: "Connect a wallet to deposit. Your tier sets your cap: Unverified 0.1 SOL, Scored 0.5 SOL, Verified 2 SOL.",
+  due: "The window has closed. Connect a wallet to see your seat.",
+  failing: "Connect a wallet to see your seat and take back your SOL.",
+  failed: "Connect a wallet to see your seat and take back your SOL.",
+  closed: "Every deposit and rent has gone back.",
+};
+
 type Action = "deposit" | "withdraw" | "mark-failed" | "refund";
 
 /** What a landed transaction did, in words. */
@@ -84,8 +94,8 @@ export function DepositPanel({ view, onChanged }: { view: FairOpen; onChanged: (
       </div>
       {!account ? (
         <>
-          <p className="muted">Connect a wallet to deposit. Your tier sets your cap: Unverified 0.1 SOL, Scored 0.5 SOL, Verified 2 SOL.</p>
-          <WalletButton variant="inline" />
+          <p className="muted">{CONNECT[view.phase]}</p>
+          {view.phase !== "closed" && <WalletButton variant="inline" />}
         </>
       ) : !view.you || view.you.wallet !== account.address ? (
         <p className="muted">Reading your seat from the chain…</p>
@@ -106,6 +116,13 @@ function Seated({ view, account, chain, onChanged }: { view: FairOpen; account: 
   const [text, setText] = useState("");
   const [sending, setSending] = useState<Sending>({ phase: "idle" });
   const busy = sending.phase === "preparing" || sending.phase === "signing" || sending.phase === "confirming";
+  // A deposit's or withdrawal's outcome belongs to the window: once it closes, what the panel offers is another phase's.
+  const windowOpen = view.phase === "window";
+  const [wasOpen, setWasOpen] = useState(windowOpen);
+  if (wasOpen !== windowOpen) {
+    setWasOpen(windowOpen);
+    if (!busy) setSending({ phase: "idle" });
+  }
 
   const held = seat ? BigInt(seat.deposit) : 0n;
   const cap = you.admission.admitted ? BigInt(you.admission.cap) : 0n;
@@ -258,7 +275,7 @@ function Tier({ view }: { view: FairOpen }) {
   if (admission.tier === "unverified") {
     return (
       <p className="note">
-        Unverified wallets deposit up to 0.1 SOL, and all of them together buy at most a quarter of the pot.{" "}
+        Unverified wallets deposit up to 0.1 SOL, and all of them together get at most a quarter of the pot&apos;s buy.{" "}
         <a href={linkXUrl(`/fair-open/${view.launch}`)}>Link X</a> to deposit up to 0.5 SOL.
       </p>
     );
