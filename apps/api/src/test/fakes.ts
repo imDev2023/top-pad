@@ -126,8 +126,8 @@ export class Fakes {
       case "getBlockHeight":
         return ok(Number(this.blockHeight));
       case "getMinimumBalanceForRentExemption":
-        // The rent every cluster charges: two years of 3,480 lamports a byte, with 128 bytes for the account itself.
-        return ok((Number(params[0]) + 128) * 6_960);
+        // The rent devnet and mainnet charged on 2026-10-30: 5,080 lamports a byte, with 128 bytes for the account itself.
+        return ok((Number(params[0]) + 128) * 5_080);
       case "simulateTransaction": {
         this.simulated.push(decode(params[0] as string));
         if (this.simulationError) return ok({ context, value: { err: this.simulationError, logs: ["Transfer: insufficient lamports 0, need 17000000"], accounts: null, unitsConsumed: 0, returnData: null } });

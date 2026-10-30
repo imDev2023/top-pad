@@ -120,7 +120,8 @@ describe("a Fair Open's page", () => {
       tierCaps: { unverified: "100000000", scored: "500000000", verified: "2000000000" },
       pot: { total: "1800000000", seats: 4, unverified: "100000000", scored: "500000000", verified: "1200000000" },
       allocation: { spend: "1700000000", others: { level: "550000000", limited: true }, rung: "1700000000" },
-      rent: { seat: `${(178 + 128) * 6960}`, coinAccount: `${(165 + 128) * 6960}` },
+      // A seat's rent and a coin account's, 0.00155 and 0.00149 SOL, as devnet charged them on 2026-10-30.
+      rent: { seat: "1554480", coinAccount: "1488440" },
       you: null,
     });
     expect(Date.parse(page.lateAt) - Date.parse(page.opensAt)).toBe(15 * 60_000);
