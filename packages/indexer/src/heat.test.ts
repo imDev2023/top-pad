@@ -2,12 +2,26 @@ import { readFileSync } from "node:fs";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { CLUSTERS } from "@top-pad/chain";
-import { candles, coins, createDb, creators, feeClaims, indexedTransactions, launches, pools, trades, windowClaims, type Db } from "@top-pad/db";
+import {
+  candles,
+  coins,
+  createDb,
+  creators,
+  fairOpens,
+  fairOpenSeatEvents,
+  feeClaims,
+  indexedTransactions,
+  launches,
+  pools,
+  trades,
+  windowClaims,
+  type Db,
+} from "@top-pad/db";
 import { createTestDatabase } from "@top-pad/db/testing";
 import { CANDLE_SECONDS, foldTrade, rebuildCandles, writtenCandles, type CandleSeconds } from "./candles";
 import type { RawTransaction } from "./decode";
 import { heatHandler, orderKey, type Indexed } from "./heat";
-import { indexTransactions, reindexTransactions } from "./index";
+import { IndexBatchError, indexTransactions, reindexTransactions } from "./index";
 
 let db: Db;
 let cleanup: () => Promise<void>;
@@ -22,7 +36,9 @@ beforeAll(async () => {
 });
 afterAll(() => cleanup());
 beforeEach(async () => {
-  for (const table of [candles, trades, coins, launches, creators, pools, indexedTransactions, windowClaims, feeClaims]) await db.delete(table);
+  for (const table of [candles, trades, coins, launches, creators, pools, indexedTransactions, windowClaims, feeClaims, fairOpens, fairOpenSeatEvents]) {
+    await db.delete(table);
+  }
 });
 
 const heat = CLUSTERS.devnet!;
@@ -185,6 +201,61 @@ describe("indexing Heat's transactions", () => {
     const [launch] = await db.select().from(launches);
     expect(launch).toMatchObject({ status: "landed", slot: 516_292_177 });
     expect((await db.select().from(coins))[0]).toMatchObject({ launchId: launch!.id, creatorId: creator!.id, imageUri: "https://turbo-gateway.com/image", ticker: "LUMEN" });
+  });
+});
+
+describe("indexing a Fair Open", () => {
+  it("writes the launch, every change to its seats, and its failure, and hands each to its live room", async () => {
+    const { handle, published, asked } = handler();
+    const life = ["fair-open-created", "fair-open-deposit", "fair-open-top-up", "fair-open-withdraw", "fair-open-failed-with-refund", "fair-open-refund"];
+    expect(await indexTransactions(db, handle, life.map(fixture))).toEqual({ transactions: 6, fairOpen: 7 });
+    expect(asked).toEqual([]);
+    const [launch] = await db.select().from(fairOpens);
+    expect(launch).toMatchObject({
+      launch: "FLdTZ9qAbNVp4QTvdS8TyK3Vbnidy9DxSBowRdZ3yRLJ",
+      creator: "3hTTgfj2YqqYJeEgSF49U8ZyZwyHnwPhF9LRsXy4fMY8",
+      depositsOpenAt: new Date(1_793_330_703_000),
+      opensAt: new Date(1_793_331_303_000),
+      minRaise: 1_000_000_000n,
+      potCap: 1_700_000_000n,
+      status: "failed",
+      failure: "min_raise_missed",
+      failedAt: new Date(1_793_331_307_000),
+      teaser: null,
+      createdSlot: 516_640_676,
+    });
+    const events = await db.select().from(fairOpenSeatEvents).orderBy(fairOpenSeatEvents.slot);
+    expect(events.map((e) => [e.kind, e.tier, e.amount, e.deposit, e.rent])).toEqual([
+      ["deposit", "unverified", 50_000_000n, 50_000_000n, null],
+      ["deposit", "unverified", 30_000_000n, 80_000_000n, null],
+      ["withdraw", null, 20_000_000n, 60_000_000n, null],
+      ["refund", null, 360_000_000n, 0n, 3_042_920n],
+      ["refund", null, 100_000_000n, 0n, 3_042_920n],
+    ]);
+    expect(published.map((p) => [p.fairOpens.length, p.seatEvents.length, p.fairOpenEnds.length])).toEqual([
+      [1, 0, 0],
+      [0, 1, 0],
+      [0, 1, 0],
+      [0, 1, 0],
+      [0, 1, 1],
+      [0, 1, 0],
+    ]);
+  });
+
+  it("keeps a closed launch closed, whichever of its failure and its closing it indexes first", async () => {
+    const { handle } = handler();
+    await indexTransactions(db, handle, [fixture("fair-open-late-created"), fixture("fair-open-closed"), fixture("fair-open-late")]);
+    const [launch] = await db.select().from(fairOpens);
+    expect(launch).toMatchObject({ launch: "8EQ7fu8Fb4gt7jNqmnkSFk9Htx1oRKxapgwyQ9sp21xf", status: "closed", failure: "late", failedAt: new Date(1_793_331_349_000) });
+  });
+
+  it("leaves a failure seen before its launch for reconciliation, which finds the launch first", async () => {
+    const { handle } = handler();
+    // The live source reports the failure of a launch created before the indexer was watching.
+    await expect(indexTransactions(db, handle, [fixture("fair-open-late")])).rejects.toBeInstanceOf(IndexBatchError);
+    expect(await db.select().from(indexedTransactions)).toEqual([]);
+    expect(await indexTransactions(db, handle, [fixture("fair-open-late-created"), fixture("fair-open-late")])).toEqual({ transactions: 2, fairOpen: 2 });
+    expect((await db.select().from(fairOpens))[0]).toMatchObject({ status: "failed", failure: "late" });
   });
 });
 

@@ -7,11 +7,18 @@ import { decodeTransaction, type RawTransaction } from "./decode";
 
 // Real devnet transactions (2026-10-29): an Instant launch whose creator bought in the same transaction, paying the
 // 99% cliff (tests/devnet), a launch from the launch flow with no buy, and a coin's window claim and its creator's first
-// claim (tests/devnet/src/fee-claims.test.ts).
+// claim (tests/devnet/src/fee-claims.test.ts). And two Fair Opens (2026-10-30): one through its page end to end
+// (tests/ui/src/fair-open.spec.ts), its pot missing the minimum raise, and one failed 15 minutes late and closed
+// (tests/devnet/src/fair-open.test.ts).
 const fixture = (name: string) => JSON.parse(readFileSync(new URL(`./fixtures/${name}.json`, import.meta.url), "utf8")) as RawTransaction;
 const { instant, fairOpen } = CLUSTERS.devnet!.configs!;
 const HEAT = new Set<string>([instant, fairOpen]);
 const base58 = getBase58Encoder();
+
+const E2E_LAUNCH = "FLdTZ9qAbNVp4QTvdS8TyK3Vbnidy9DxSBowRdZ3yRLJ";
+const DEPOSITOR = "ExjeR7CttzZhwoDyzbFptwXeWwMauYLZs1LTPerAJMoo";
+const PERSON = "37b3121364e33954eee4c3225e8704a4e24e4b7fcfe60faad3d41aed77554fce";
+const LATE_LAUNCH = "8EQ7fu8Fb4gt7jNqmnkSFk9Htx1oRKxapgwyQ9sp21xf";
 
 describe("decoding a transaction", () => {
   it("finds a launch's pool, its coin's registration and the creator's creation-slot buy at the 99% cliff", () => {
@@ -82,6 +89,51 @@ describe("decoding a transaction", () => {
       },
     ]);
     expect(decoded.windowClaims).toEqual([]);
+  });
+
+  it("finds a Fair Open scheduled, with its terms", () => {
+    const decoded = decodeTransaction(fixture("fair-open-created"), HEAT);
+    expect(decoded.fairOpens).toEqual([
+      {
+        launch: E2E_LAUNCH,
+        creator: "3hTTgfj2YqqYJeEgSF49U8ZyZwyHnwPhF9LRsXy4fMY8",
+        nonce: "4hTdL9g7NaQS4Pn7Zwqf7badUTxjprJKv8xKgPVft7SM",
+        dbcConfig: fairOpen,
+        quoteMint: "So11111111111111111111111111111111111111112",
+        identityHash: "d91f0113e70121f7efb0fc50c6b1193d9f48c6d8cd9cbe7064cd9e2132b78ae6",
+        depositsOpenAt: 1_793_330_703n,
+        opensAt: 1_793_331_303n,
+        minRaise: 1_000_000_000n,
+        potCap: 1_700_000_000n,
+        lowestRung: 67_148_451n,
+        step: 10_000_000n,
+      },
+    ]);
+    expect([decoded.seatEvents, decoded.fairOpenEnds, decoded.pools]).toEqual([[], [], []]);
+  });
+
+  it("finds a seat's deposits and withdrawal, each with what it holds after", () => {
+    const seat = (name: string) => decodeTransaction(fixture(name), HEAT).seatEvents;
+    const common = { eventIndex: 0, launch: E2E_LAUNCH, wallet: DEPOSITOR, person: PERSON, rent: null, seatClosed: false };
+    expect(seat("fair-open-deposit")).toEqual([{ ...common, kind: "deposit", tier: "unverified", amount: 50_000_000n, deposit: 50_000_000n, seatOpened: true }]);
+    expect(seat("fair-open-top-up")).toEqual([{ ...common, kind: "deposit", tier: "unverified", amount: 30_000_000n, deposit: 80_000_000n, seatOpened: false }]);
+    expect(seat("fair-open-withdraw")).toEqual([{ ...common, kind: "withdraw", tier: null, amount: 20_000_000n, deposit: 60_000_000n, seatOpened: false }]);
+  });
+
+  it("finds a launch marked failed with the sender's own refund, and another depositor's refund", () => {
+    const failed = decodeTransaction(fixture("fair-open-failed-with-refund"), HEAT);
+    expect(failed.fairOpenEnds).toEqual([{ launch: E2E_LAUNCH, kind: "failed", failure: "min_raise_missed" }]);
+    // The deposit back, and both rents: the coin account's 1,488,440 lamports and the seat's 1,554,480 on devnet.
+    const refund = { eventIndex: 0, launch: E2E_LAUNCH, kind: "refund", tier: null, deposit: 0n, rent: 3_042_920n, seatOpened: false, seatClosed: true };
+    expect(failed.seatEvents).toEqual([{ ...refund, wallet: DEPOSITOR, person: PERSON, amount: 360_000_000n }]);
+    expect(decodeTransaction(fixture("fair-open-refund"), HEAT).seatEvents).toEqual([
+      { ...refund, wallet: "EfPnzdQ5FKXMEwFuAhRU3QRNjvAcGG3stRP6KG4hNZRy", person: "1b8c0a794baa0825101492343ce0fd73bb10a245aefc3475c5addbf074ae19d8", amount: 100_000_000n },
+    ]);
+  });
+
+  it("finds a launch failed 15 minutes after its open, then closed", () => {
+    expect(decodeTransaction(fixture("fair-open-late"), HEAT).fairOpenEnds).toEqual([{ launch: LATE_LAUNCH, kind: "failed", failure: "late" }]);
+    expect(decodeTransaction(fixture("fair-open-closed"), HEAT).fairOpenEnds).toEqual([{ launch: LATE_LAUNCH, kind: "closed" }]);
   });
 
   it("holds nothing on configs that are not Heat's, or when the transaction failed", () => {
