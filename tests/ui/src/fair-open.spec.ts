@@ -105,6 +105,7 @@ test("a Fair Open takes deposits and withdrawals from its page, then fails and r
       await untilChainTime(data.opensAt);
       await expect(page.getByTestId("fair-open-phase")).toContainText("The open is due", { timeout: 60_000 });
       await expect(page.getByText("Your deposit is locked until the open.")).toBeVisible();
+      await expect(page.getByText(/^The window closed at \d\d:\d\d:\d\d UTC\.$/)).toBeVisible();
       await expect(page.getByRole("radio", { name: "Deposit" })).toHaveCount(0);
       await snap(page, "fair-open-6-due");
     }

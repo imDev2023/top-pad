@@ -198,6 +198,7 @@ export function FairOpenPage({ initial }: { initial: FairOpen }) {
 
 /** What happens at the open (spec 2.1 steps 10 to 14), and when the launch fails if it never comes. */
 function OpenSteps({ view, at }: { view: FairOpen; at: number }) {
+  const closed = view.phase === "due";
   return (
     <section className={`panel ${styles.steps}`} aria-labelledby="open-steps">
       <h2 id="open-steps" className={styles.sectionTitle}>
@@ -205,7 +206,8 @@ function OpenSteps({ view, at }: { view: FairOpen; at: number }) {
       </h2>
       <ol className={styles.list}>
         <li>
-          <b>The window closes at {clock(view.opensAt, at)}.</b> <span className="muted">Until then you can take back any or all of your deposit.</span>
+          <b>The window {closed ? "closed" : "closes"} at {clock(view.opensAt, at)}.</b>{" "}
+          <span className="muted">{closed ? "Every deposit is locked until the open." : "Until then you can take back any or all of your deposit."}</span>
         </li>
         <li>
           <b>One transaction creates the coin, its pool and the pot&apos;s buy.</b>{" "}
