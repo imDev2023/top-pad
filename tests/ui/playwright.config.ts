@@ -1,8 +1,8 @@
 // The launch flow end to end (`direnv exec . pnpm --filter @top-pad/tests-ui e2e`): the web app and the API run locally, X is
 // the stand-in in tests/x-stand-in, and everything else is real: devnet, Meteora's programs, the fee program, Turbo and
 // Arweave. `e2e:devnet` runs the same flow against the deployed devnet site, whose API links the deployed stand-in. Either
-// spends devnet SOL from the Solana CLI's wallet, and locally the API signs with the keeper key, which only this Mac holds
-// (~/.config/top-pad/devnet/keeper.json), so it runs by hand, like the devnet tests, never in CI. Local servers already
+// spends devnet SOL from the Solana CLI's wallet, and locally the API signs with the keeper and admission keys, which only
+// this Mac holds (~/.config/top-pad/devnet), so it runs by hand, like the devnet tests, never in CI. Local servers already
 // running on the ports are reused.
 import { defineConfig } from "@playwright/test";
 import { TARGET } from "./src/target";
@@ -23,6 +23,7 @@ function localServers() {
         `--var X_AUTHORIZE_URL:${X_STAND_IN}/i/oauth2/authorize --var X_API_URL:${X_STAND_IN}`,
         `--var "RPC_URL:${rpcUrl}"`,
         '--var "KEEPER_KEY:$(cat "$HOME/.config/top-pad/devnet/keeper.json")"',
+        '--var "ADMISSION_KEY:$(cat "$HOME/.config/top-pad/devnet/admission.json")"',
       ].join(" "),
       cwd: "../../apps/api",
       url: "http://localhost:8801/platform",

@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./devnet": "./src/devnet.ts"
+    "./devnet": "./src/devnet.ts",
+    "./fair-open": "./src/fairOpen.ts"
   },
   "scripts": {
     "test": "vitest run",

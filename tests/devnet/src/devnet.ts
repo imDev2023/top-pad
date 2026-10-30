@@ -27,6 +27,7 @@ import {
 } from "@solana/kit";
 import { getTransferSolInstruction } from "@solana-program/system";
 import { CLUSTERS, dbcPoolAddress, FEE_PROGRAM_ADDRESS, instantLaunchInstructions, swapInstructions } from "@top-pad/chain";
+import { fetchRawTransaction, type RawTransaction } from "@top-pad/indexer";
 
 export const rpcUrl = process.env.DEVNET_RPC_URL || "https://api.devnet.solana.com";
 export const devnet = CLUSTERS.devnet!;
@@ -142,4 +143,75 @@ export async function poolAroundHeat(creator: KeyPairSigner): Promise<{ mint: Ad
   const instructions = (await instantLaunchInstructions(launch)).filter((ix) => ix.programAddress !== FEE_PROGRAM_ADDRESS);
   await send(creator, instructions);
   return { mint: mint.address, pool: await dbcPoolAddress(launch.config, mint.address, launch.quoteMint) };
+}
+
+/** The chain's clock now: the block time of the latest confirmed slot. */
+export async function chainTime(): Promise<bigint> {
+  const slot = await rpc.getSlot({ commitment: "confirmed" }).send();
+  return BigInt((await rpc.getBlockTime(slot).send()) ?? 0n);
+}
+
+/**
+ * A landed transaction as the RPC serves it, asked again while it is not served yet or the public endpoint answers
+ * 429, whose per-IP budget every session on this Mac shares.
+ */
+export async function landed(signature: string): Promise<RawTransaction> {
+  for (let attempt = 0; ; attempt++) {
+    const raw = await fetchRawTransaction(rpcUrl, signature).catch((e: Error) => {
+      if (!/429/.test(e.message) || attempt > 8) throw e;
+      return null;
+    });
+    if (raw) return raw;
+    if (attempt > 12) throw new Error(`${signature} was not served`);
+    await sleep(Math.min(1_000 * 2 ** Math.min(attempt, 3), 8_000));
+  }
+}
+
+/** What one of our programs used of a landed transaction's compute: the last of its log lines is the instruction's own. */
+export async function programCompute(signature: string, program: Address): Promise<number> {
+  const pattern = new RegExp(`^Program ${program} consumed (\\d+) of`);
+  const used = ((await landed(signature)).meta?.logMessages ?? []).flatMap((line) => pattern.exec(line)?.[1] ?? []);
+  return Number(used.at(-1));
+}
+
+/** A transaction of `instructions`, `payer` paying and every signer they name signing. */
+async function signed(payer: TransactionSigner, instructions: Instruction[]) {
+  const { value: lifetime } = await rpc.getLatestBlockhash({ commitment: "confirmed" }).send();
+  return signTransactionMessageWithSigners(
+    pipe(
+      createTransactionMessage({ version: 0 }),
+      (m) => setTransactionMessageFeePayerSigner(payer, m),
+      (m) => setTransactionMessageLifetimeUsingBlockhash(lifetime, m),
+      (m) => appendTransactionMessageInstructions(instructions, m),
+    ),
+  );
+}
+
+/** The custom error a failed transaction's instruction returned, or -1 for another failure, or null for none. */
+const customError = (err: unknown) => {
+  const custom = (err as { InstructionError?: [number, { Custom?: bigint | number }] } | null)?.InstructionError?.[1]?.Custom;
+  return custom !== undefined ? Number(custom) : err ? -1 : null;
+};
+
+/** The custom error a simulated transaction of `instructions` fails with, `payer` paying. */
+export async function simulatedError(payer: TransactionSigner, instructions: Instruction[]): Promise<number | null> {
+  const transaction = await signed(payer, instructions);
+  const { value } = await rpc.simulateTransaction(getBase64EncodedWireTransaction(transaction), { encoding: "base64", commitment: "confirmed" }).send();
+  return customError(value.err);
+}
+
+/**
+ * Sends a transaction the program will refuse, with no preflight, so the refusal lands on chain as a failed transaction
+ * (its fee paid): its signature and the custom error it failed with.
+ */
+export async function sendRefused(payer: TransactionSigner, instructions: Instruction[]): Promise<{ signature: string; error: number | null }> {
+  const transaction = await signed(payer, instructions);
+  const signature = getSignatureFromTransaction(transaction);
+  await rpc.sendTransaction(getBase64EncodedWireTransaction(transaction), { encoding: "base64", skipPreflight: true }).send();
+  for (let poll = 0; poll < 60; poll++) {
+    await sleep(1_000);
+    const { value: [status] } = await rpc.getSignatureStatuses([signature]).send();
+    if (status?.confirmationStatus === "confirmed" || status?.confirmationStatus === "finalized") return { signature, error: customError(status.err) };
+  }
+  throw new Error(`transaction ${signature} did not land`);
 }

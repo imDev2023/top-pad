@@ -9,16 +9,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
-  appendTransactionMessageInstructions,
   compileTransaction,
   createKeyPairSignerFromBytes,
-  createTransactionMessage,
   generateKeyPairSigner,
-  getBase64EncodedWireTransaction,
-  pipe,
-  setTransactionMessageFeePayerSigner,
-  setTransactionMessageLifetimeUsingBlockhash,
-  signTransactionMessageWithSigners,
   type Address,
   type Instruction,
   type KeyPairSigner,
@@ -42,8 +35,8 @@ import {
 } from "@top-pad/chain";
 import { fetchVirtualPool, getTransferPoolCreatorInstruction } from "@top-pad/clients/dbc";
 import { fetchCoinRecord, fetchWindowClaim, findWindowClaimPda, getClaimFeesInstructionAsync } from "@top-pad/clients/fee";
-import { decodeTransaction, fetchRawTransaction, type RawTransaction, type WindowClaimed } from "@top-pad/indexer";
-import { devnet, fundedWallets, poolAroundHeat, rpc, rpcUrl, send, swap, sweep } from "./devnet";
+import { decodeTransaction, type WindowClaimed } from "@top-pad/indexer";
+import { chainTime, devnet, fundedWallets, landed, poolAroundHeat, programCompute, rpc, send, simulatedError, swap, sweep } from "./devnet";
 
 const keeperFile = join(homedir(), ".config/top-pad/devnet/keeper.json");
 const load = async (path: string) => createKeyPairSignerFromBytes(Uint8Array.from(JSON.parse(readFileSync(path, "utf8"))));
@@ -62,37 +55,11 @@ const NOT_THE_CREATORS_ACCOUNT = 6013;
 const pool = async (address: Address): Promise<ClaimablePool> => claimablePool(address, (await fetchVirtualPool(rpc, address)).data.poolState, quoteMint);
 const lamports = async (owner: Address) => (await rpc.getBalance(owner, { commitment: "confirmed" }).send()).value;
 
-/** The chain's clock now: the block time of the latest confirmed slot. */
-async function chainTime(): Promise<bigint> {
-  const slot = await rpc.getSlot({ commitment: "confirmed" }).send();
-  return BigInt((await rpc.getBlockTime(slot).send()) ?? 0n);
-}
-
-/**
- * A landed transaction as the RPC serves it, asked again while it is not served yet or the public endpoint answers
- * 429, whose per-IP budget every session on this Mac shares.
- */
-async function landed(signature: string): Promise<RawTransaction> {
-  for (let attempt = 0; ; attempt++) {
-    const raw = await fetchRawTransaction(rpcUrl, signature).catch((e: Error) => {
-      if (!/429/.test(e.message) || attempt > 8) throw e;
-      return null;
-    });
-    if (raw) return raw;
-    if (attempt > 12) throw new Error(`${signature} was not served`);
-    await sleep(Math.min(1_000 * 2 ** Math.min(attempt, 3), 8_000));
-  }
-}
-
 /** A landed transaction as the indexer decodes it. */
 const decoded = async (signature: string) => decodeTransaction(await landed(signature), HEAT);
 
-/** What the fee program used of a landed transaction's compute: the last of its log lines is the instruction's own. */
-async function feeProgramCompute(signature: string): Promise<number> {
-  const pattern = new RegExp(`^Program ${FEE_PROGRAM_ADDRESS} consumed (\\d+) of`);
-  const used = ((await landed(signature)).meta?.logMessages ?? []).flatMap((line) => pattern.exec(line)?.[1] ?? []);
-  return Number(used.at(-1));
-}
+/** What the fee program used of a landed transaction's compute. */
+const feeProgramCompute = (signature: string) => programCompute(signature, FEE_PROGRAM_ADDRESS);
 
 /** How a landed transaction changed `owner`'s balance of the quote, from its own token balances. */
 async function quoteChange(signature: string, owner: Address): Promise<bigint> {
@@ -111,23 +78,6 @@ async function windowClaimAmong(account: Address, mint: Address): Promise<{ sign
     if (claim) return { signature, claim };
   }
   throw new Error(`no window claim of ${mint} among ${account}'s transactions`);
-}
-
-/** The custom error a simulated transaction of `instructions` fails with, `payer` paying. */
-async function simulatedError(payer: KeyPairSigner, instructions: Instruction[]): Promise<number | null> {
-  const { value: lifetime } = await rpc.getLatestBlockhash({ commitment: "confirmed" }).send();
-  const signed = await signTransactionMessageWithSigners(
-    pipe(
-      createTransactionMessage({ version: 0 }),
-      (m) => setTransactionMessageFeePayerSigner(payer, m),
-      (m) => setTransactionMessageLifetimeUsingBlockhash(lifetime, m),
-      (m) => appendTransactionMessageInstructions(instructions, m),
-    ),
-  );
-  const { value } = await rpc.simulateTransaction(getBase64EncodedWireTransaction(signed), { encoding: "base64", commitment: "confirmed" }).send();
-  const err = value.err as { InstructionError?: [number, { Custom?: bigint | number }] } | null;
-  const custom = err?.InstructionError?.[1]?.Custom;
-  return custom !== undefined ? Number(custom) : err ? -1 : null;
 }
 
 /** A creator's claim of one pool, signed and sent by the creator. */
