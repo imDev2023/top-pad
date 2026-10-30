@@ -1,0 +1,2122 @@
+{
+  "address": "HeatPiBAgiwq6VJr8eqyagQiQ2gvaK2y85q26bbBu4bo",
+  "metadata": {
+    "name": "fair_open",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "The Fair Open program: deposits, the open and the pot"
+  },
+  "instructions": [
+    {
+      "name": "close_launch",
+      "docs": [
+        "Closes a failed launch once every seat has been returned, giving the creator back the rent of the launch and its",
+        "vault. Anyone may send it; it pays only the creator."
+      ],
+      "discriminator": [
+        27,
+        216,
+        111,
+        223,
+        10,
+        230,
+        19,
+        211
+      ],
+      "accounts": [
+        {
+          "name": "launch",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  97,
+                  117,
+                  110,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "launch.nonce",
+                "account": "Launch"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "launch"
+              }
+            ]
+          }
+        },
+        {
+          "name": "creator",
+          "writable": true,
+          "relations": [
+            "launch"
+          ]
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "create_launch",
+      "docs": [
+        "Schedules a Fair Open (spec 2.1 steps 4 to 7): its window, its optional minimum raise and the hash its coin's",
+        "identity is sealed behind, on Heat's Fair Open config and with the durable nonce its open will be signed on. The",
+        "Creator wallet signs and prepays the rent of the launch and its vault; our keeper co-signs, so every launch is",
+        "one Heat scheduled, as every Heat coin is one our launch key co-signed (spec 2.4)."
+      ],
+      "discriminator": [
+        239,
+        223,
+        255,
+        134,
+        39,
+        121,
+        127,
+        62
+      ],
+      "accounts": [
+        {
+          "name": "program_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  103,
+                  114,
+                  97,
+                  109,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "creator",
+          "docs": [
+            "The Creator wallet, which pays the rent."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "keeper",
+          "signer": true,
+          "relations": [
+            "program_config"
+          ]
+        },
+        {
+          "name": "dbc_config",
+          "docs": [
+            "handler."
+          ],
+          "relations": [
+            "program_config"
+          ]
+        },
+        {
+          "name": "nonce",
+          "docs": [
+            "the handler."
+          ]
+        },
+        {
+          "name": "launch",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  97,
+                  117,
+                  110,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "nonce"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "launch"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "params",
+          "type": {
+            "defined": {
+              "name": "LaunchParams"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "deposit",
+      "docs": [
+        "A deposit during the window (spec 2.1 step 9), with our admission server's signature over who may make it, as an",
+        "Ed25519 precompile instruction right before this one. The first wallet of a person takes their seat and prepays",
+        "its rent and their coin account's; a second wallet of the same person is refused, so one person holds one seat",
+        "and one cap. The same wallet may add to its deposit, under the cap of its latest admission. Nothing is ever",
+        "revoked inside a window."
+      ],
+      "discriminator": [
+        242,
+        35,
+        198,
+        137,
+        82,
+        225,
+        242,
+        182
+      ],
+      "accounts": [
+        {
+          "name": "program_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  103,
+                  114,
+                  97,
+                  109,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "launch",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  97,
+                  117,
+                  110,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "launch.nonce",
+                "account": "Launch"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "launch"
+              }
+            ]
+          }
+        },
+        {
+          "name": "seat",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  97,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "launch"
+              },
+              {
+                "kind": "arg",
+                "path": "admission.person"
+              }
+            ]
+          }
+        },
+        {
+          "name": "depositor",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "instructions",
+          "address": "Sysvar1nstructions1111111111111111111111111"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "admission",
+          "type": {
+            "defined": {
+              "name": "Admission"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "initialize",
+      "docs": [
+        "Creates the `ProgramConfig`. Only the program's upgrade authority may, so whoever controls upgrades also",
+        "controls the admission signer and the keeper (spec 5.3): a plain offline key on devnet, Squads behind a 7-day",
+        "timelock on mainnet."
+      ],
+      "discriminator": [
+        175,
+        175,
+        109,
+        31,
+        13,
+        152,
+        155,
+        237
+      ],
+      "accounts": [
+        {
+          "name": "program_config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  103,
+                  114,
+                  97,
+                  109,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "program_data",
+          "docs": [
+            "This program's ProgramData, at the address the upgradeable loader derives from the program id."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  247,
+                  91,
+                  203,
+                  188,
+                  194,
+                  53,
+                  30,
+                  48,
+                  176,
+                  138,
+                  243,
+                  133,
+                  128,
+                  16,
+                  130,
+                  127,
+                  81,
+                  54,
+                  155,
+                  38,
+                  214,
+                  187,
+                  208,
+                  159,
+                  245,
+                  87,
+                  192,
+                  4,
+                  139,
+                  216,
+                  147,
+                  78
+                ]
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                2,
+                168,
+                246,
+                145,
+                78,
+                136,
+                161,
+                176,
+                226,
+                16,
+                21,
+                62,
+                247,
+                99,
+                174,
+                43,
+                0,
+                194,
+                185,
+                61,
+                22,
+                193,
+                36,
+                210,
+                192,
+                83,
+                122,
+                16,
+                4,
+                128,
+                0,
+                0
+              ]
+            }
+          }
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "settings",
+          "type": {
+            "defined": {
+              "name": "ProgramSettings"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "mark_failed",
+      "docs": [
+        "Marks a launch that cannot open as failed, so no coin is ever created and every deposit comes back (spec 2.1",
+        "step 15). Anyone may send it once the window has closed: at once when the pot would spend less than the lowest",
+        "rung or the minimum raise, and from 15 minutes after the scheduled open whatever the pot holds."
+      ],
+      "discriminator": [
+        58,
+        234,
+        53,
+        63,
+        84,
+        15,
+        46,
+        105
+      ],
+      "accounts": [
+        {
+          "name": "launch",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  97,
+                  117,
+                  110,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "launch.nonce",
+                "account": "Launch"
+              }
+            ]
+          }
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "update_program_config",
+      "docs": [
+        "Replaces the settings, again only by the upgrade authority: how a leaked admission or keeper key is rotated."
+      ],
+      "discriminator": [
+        214,
+        3,
+        187,
+        98,
+        170,
+        106,
+        33,
+        45
+      ],
+      "accounts": [
+        {
+          "name": "program_config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  103,
+                  114,
+                  97,
+                  109,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "program_data",
+          "docs": [
+            "This program's ProgramData, at the address the upgradeable loader derives from the program id."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  247,
+                  91,
+                  203,
+                  188,
+                  194,
+                  53,
+                  30,
+                  48,
+                  176,
+                  138,
+                  243,
+                  133,
+                  128,
+                  16,
+                  130,
+                  127,
+                  81,
+                  54,
+                  155,
+                  38,
+                  214,
+                  187,
+                  208,
+                  159,
+                  245,
+                  87,
+                  192,
+                  4,
+                  139,
+                  216,
+                  147,
+                  78
+                ]
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                2,
+                168,
+                246,
+                145,
+                78,
+                136,
+                161,
+                176,
+                226,
+                16,
+                21,
+                62,
+                247,
+                99,
+                174,
+                43,
+                0,
+                194,
+                185,
+                61,
+                22,
+                193,
+                36,
+                210,
+                192,
+                83,
+                122,
+                16,
+                4,
+                128,
+                0,
+                0
+              ]
+            }
+          }
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "settings",
+          "type": {
+            "defined": {
+              "name": "ProgramSettings"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "withdraw",
+      "docs": [
+        "Takes back part or all of a deposit while the window is open (spec 2.1 step 9). Taking back everything closes",
+        "the seat and returns both rents."
+      ],
+      "discriminator": [
+        183,
+        18,
+        70,
+        156,
+        148,
+        109,
+        161,
+        34
+      ],
+      "accounts": [
+        {
+          "name": "launch",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  97,
+                  117,
+                  110,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "launch.nonce",
+                "account": "Launch"
+              }
+            ]
+          },
+          "relations": [
+            "seat"
+          ]
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "launch"
+              }
+            ]
+          }
+        },
+        {
+          "name": "seat",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  97,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "launch"
+              },
+              {
+                "kind": "account",
+                "path": "seat.person",
+                "account": "Seat"
+              }
+            ]
+          }
+        },
+        {
+          "name": "wallet",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "seat"
+          ]
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "withdraw_failed",
+      "docs": [
+        "Returns a failed launch's deposit and both rents to its depositor's wallet (spec 2.1 step 15). The depositor can",
+        "send it alone, with no Heat server running; anyone else may send it too, since it pays only that wallet."
+      ],
+      "discriminator": [
+        235,
+        53,
+        122,
+        63,
+        87,
+        220,
+        130,
+        215
+      ],
+      "accounts": [
+        {
+          "name": "launch",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  97,
+                  117,
+                  110,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "launch.nonce",
+                "account": "Launch"
+              }
+            ]
+          },
+          "relations": [
+            "seat"
+          ]
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "launch"
+              }
+            ]
+          }
+        },
+        {
+          "name": "seat",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  97,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "launch"
+              },
+              {
+                "kind": "account",
+                "path": "seat.person",
+                "account": "Seat"
+              }
+            ]
+          }
+        },
+        {
+          "name": "wallet",
+          "docs": [
+            "The seat's wallet, which everything goes back to."
+          ],
+          "writable": true,
+          "relations": [
+            "seat"
+          ]
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    }
+  ],
+  "accounts": [
+    {
+      "name": "Launch",
+      "discriminator": [
+        144,
+        51,
+        51,
+        163,
+        206,
+        85,
+        213,
+        38
+      ]
+    },
+    {
+      "name": "ProgramConfig",
+      "discriminator": [
+        196,
+        210,
+        90,
+        231,
+        144,
+        149,
+        140,
+        63
+      ]
+    },
+    {
+      "name": "Seat",
+      "discriminator": [
+        90,
+        228,
+        22,
+        90,
+        162,
+        86,
+        173,
+        26
+      ]
+    },
+    {
+      "name": "Vault",
+      "discriminator": [
+        211,
+        8,
+        232,
+        43,
+        2,
+        152,
+        117,
+        119
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "Deposited",
+      "discriminator": [
+        111,
+        141,
+        26,
+        45,
+        161,
+        35,
+        100,
+        57
+      ]
+    },
+    {
+      "name": "FailedDepositReturned",
+      "discriminator": [
+        39,
+        244,
+        152,
+        103,
+        35,
+        169,
+        40,
+        66
+      ]
+    },
+    {
+      "name": "LaunchClosed",
+      "discriminator": [
+        18,
+        101,
+        70,
+        162,
+        2,
+        120,
+        163,
+        0
+      ]
+    },
+    {
+      "name": "LaunchCreated",
+      "discriminator": [
+        59,
+        38,
+        190,
+        230,
+        33,
+        34,
+        89,
+        20
+      ]
+    },
+    {
+      "name": "LaunchFailed",
+      "discriminator": [
+        237,
+        176,
+        20,
+        83,
+        102,
+        56,
+        66,
+        116
+      ]
+    },
+    {
+      "name": "ProgramConfigChanged",
+      "discriminator": [
+        126,
+        10,
+        248,
+        111,
+        53,
+        234,
+        162,
+        103
+      ]
+    },
+    {
+      "name": "Withdrawn",
+      "discriminator": [
+        20,
+        89,
+        223,
+        198,
+        194,
+        124,
+        219,
+        13
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "NotUpgradeAuthority",
+      "msg": "Only the program's upgrade authority can change its settings"
+    },
+    {
+      "code": 6001,
+      "name": "MissingSetting",
+      "msg": "A setting is the default address"
+    },
+    {
+      "code": 6002,
+      "name": "NotTheKeeper",
+      "msg": "The keeper did not sign"
+    },
+    {
+      "code": 6003,
+      "name": "NotTheFairOpenConfig",
+      "msg": "A Fair Open runs on Heat's Fair Open config"
+    },
+    {
+      "code": 6004,
+      "name": "NotADbcConfig",
+      "msg": "The config is not a DBC config"
+    },
+    {
+      "code": 6005,
+      "name": "QuoteNotSupported",
+      "msg": "A Fair Open takes SOL only, until another quote's deposits are built"
+    },
+    {
+      "code": 6006,
+      "name": "MinRaiseAboveCap",
+      "msg": "The minimum raise is more than the pot can spend"
+    },
+    {
+      "code": 6007,
+      "name": "WindowOver",
+      "msg": "The window would already be over"
+    },
+    {
+      "code": 6008,
+      "name": "TooFarAhead",
+      "msg": "A window starts at most 7 days ahead"
+    },
+    {
+      "code": 6009,
+      "name": "NoIdentity",
+      "msg": "The coin's identity hash is missing"
+    },
+    {
+      "code": 6010,
+      "name": "NotOurNonce",
+      "msg": "The nonce is not a durable nonce account held by the keeper"
+    },
+    {
+      "code": 6011,
+      "name": "NotScheduled",
+      "msg": "The launch is not taking deposits: it failed or opened"
+    },
+    {
+      "code": 6012,
+      "name": "WindowNotStarted",
+      "msg": "The deposit window has not started"
+    },
+    {
+      "code": 6013,
+      "name": "WindowClosed",
+      "msg": "The deposit window has closed"
+    },
+    {
+      "code": 6014,
+      "name": "OffStep",
+      "msg": "Deposits and withdrawals move in whole steps of 0.01 SOL"
+    },
+    {
+      "code": 6015,
+      "name": "NoAdmission",
+      "msg": "A deposit needs our admission server's signature, verified right before it"
+    },
+    {
+      "code": 6016,
+      "name": "NotOurAdmission",
+      "msg": "The admission is not signed by our admission server"
+    },
+    {
+      "code": 6017,
+      "name": "NotThisAdmission",
+      "msg": "The admission is for another wallet, launch, person, tier, cap or expiry"
+    },
+    {
+      "code": 6018,
+      "name": "AdmissionExpired",
+      "msg": "The admission has expired"
+    },
+    {
+      "code": 6019,
+      "name": "CapOverTier",
+      "msg": "The admission's cap is above its tier's or off the step"
+    },
+    {
+      "code": 6020,
+      "name": "SeatHeldByAnotherWallet",
+      "msg": "This person's seat is held by another wallet"
+    },
+    {
+      "code": 6021,
+      "name": "OverCap",
+      "msg": "The deposit would be over the seat's cap"
+    },
+    {
+      "code": 6022,
+      "name": "OverDeposit",
+      "msg": "That is more than the seat holds"
+    },
+    {
+      "code": 6023,
+      "name": "TooManySeats",
+      "msg": "Too many seats ask the same deposit"
+    },
+    {
+      "code": 6024,
+      "name": "SeatNotCounted",
+      "msg": "The seat is not counted in the launch"
+    },
+    {
+      "code": 6025,
+      "name": "NotThisLaunchsSeat",
+      "msg": "The seat is another launch's"
+    },
+    {
+      "code": 6026,
+      "name": "NotYourSeat",
+      "msg": "The seat is another wallet's"
+    },
+    {
+      "code": 6027,
+      "name": "VaultShort",
+      "msg": "The vault would hold less than it owes"
+    },
+    {
+      "code": 6028,
+      "name": "WindowNotClosed",
+      "msg": "The deposit window has not closed"
+    },
+    {
+      "code": 6029,
+      "name": "CanStillOpen",
+      "msg": "The pot can still open: it may fail only 15 minutes after the scheduled open"
+    },
+    {
+      "code": 6030,
+      "name": "NotFailed",
+      "msg": "The launch has not failed"
+    },
+    {
+      "code": 6031,
+      "name": "SeatsLeft",
+      "msg": "Seats still hold deposits"
+    },
+    {
+      "code": 6032,
+      "name": "NotTheCreator",
+      "msg": "That is not the launch's creator"
+    }
+  ],
+  "types": [
+    {
+      "name": "Admission",
+      "docs": [
+        "Who our admission server admitted to a launch, as the deposit carries it."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "person",
+            "docs": [
+              "The person's pseudonym in this launch: a keyed hash of their cluster id, salted per launch, so the chain never",
+              "links one person's wallets across launches (spec 5.3)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "tier",
+            "type": {
+              "defined": {
+                "name": "Tier"
+              }
+            }
+          },
+          {
+            "name": "cap",
+            "docs": [
+              "The most the person may have in the launch, in the quote's raw units: at most their tier's cap."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "expires_at",
+            "docs": [
+              "When the admission lapses, a Unix timestamp."
+            ],
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Deposited",
+      "docs": [
+        "A deposit: `amount` added, `deposit` what the seat now holds; `pot` and `seats` the launch's after it."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "launch",
+            "type": "pubkey"
+          },
+          {
+            "name": "wallet",
+            "type": "pubkey"
+          },
+          {
+            "name": "person",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "tier",
+            "type": {
+              "defined": {
+                "name": "Tier"
+              }
+            }
+          },
+          {
+            "name": "cap",
+            "type": "u64"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "deposit",
+            "type": "u64"
+          },
+          {
+            "name": "new_seat",
+            "docs": [
+              "Whether this deposit took the seat, and so prepaid its rent and the coin account's."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "pot",
+            "type": "u64"
+          },
+          {
+            "name": "seats",
+            "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "FailedDepositReturned",
+      "docs": [
+        "A failed launch's seat returned: its deposit, the coin account's rent and the seat's own rent, to its wallet."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "launch",
+            "type": "pubkey"
+          },
+          {
+            "name": "wallet",
+            "type": "pubkey"
+          },
+          {
+            "name": "person",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "deposit",
+            "type": "u64"
+          },
+          {
+            "name": "coin_rent",
+            "type": "u64"
+          },
+          {
+            "name": "seat_rent",
+            "type": "u64"
+          },
+          {
+            "name": "seats",
+            "docs": [
+              "Seats still holding a deposit."
+            ],
+            "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Failure",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "BelowLowestRung"
+          },
+          {
+            "name": "MinRaiseMissed"
+          },
+          {
+            "name": "Late"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Launch",
+      "docs": [
+        "One per Fair Open, at the PDA of its durable nonce account: its schedule and terms, and how many seats ask each",
+        "deposit, from which the allocation is found with no list of seats (spec 2.1 step 11)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "creator",
+            "docs": [
+              "The Creator wallet: signs the launch, pays its rent and gets it back, and its seat is the creator's seat."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "dbc_config",
+            "type": "pubkey"
+          },
+          {
+            "name": "quote_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "nonce",
+            "docs": [
+              "The durable nonce the open is signed on, which only our keeper may advance."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "identity_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "deposits_open_at",
+            "docs": [
+              "When the window opens and when it closes, which is the scheduled open, Unix timestamps."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "opens_at",
+            "type": "i64"
+          },
+          {
+            "name": "min_raise",
+            "docs": [
+              "In the quote's raw units: the least the pot must spend, the most it may (20% of the Graduation Target), and the",
+              "ladder's lowest rung, below which it cannot open."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "pot_cap",
+            "type": "u64"
+          },
+          {
+            "name": "lowest_rung",
+            "type": "u64"
+          },
+          {
+            "name": "step",
+            "docs": [
+              "The deposit step, in the quote's raw units."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "status",
+            "type": {
+              "defined": {
+                "name": "LaunchStatus"
+              }
+            }
+          },
+          {
+            "name": "failure",
+            "docs": [
+              "Why the launch failed and when, by the chain's clock."
+            ],
+            "type": {
+              "option": {
+                "defined": {
+                  "name": "Failure"
+                }
+              }
+            }
+          },
+          {
+            "name": "failed_at",
+            "type": "i64"
+          },
+          {
+            "name": "seats",
+            "docs": [
+              "Seats holding a deposit."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "unverified_deposits",
+            "docs": [
+              "What each tier's seats have deposited, in the quote's raw units."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "scored_deposits",
+            "type": "u64"
+          },
+          {
+            "name": "verified_deposits",
+            "type": "u64"
+          },
+          {
+            "name": "coin_rent",
+            "docs": [
+              "The coin-account rent the seats prepaid, held in the vault until the push or a refund."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "counts",
+            "docs": [
+              "How many Scored and Verified seats ask each deposit: `counts[k]` ask `(k + 1)` steps, up to the Verified cap."
+            ],
+            "type": {
+              "array": [
+                "u32",
+                200
+              ]
+            }
+          },
+          {
+            "name": "unverified_counts",
+            "docs": [
+              "How many Unverified seats ask each deposit, up to the Unverified cap."
+            ],
+            "type": {
+              "array": [
+                "u32",
+                10
+              ]
+            }
+          },
+          {
+            "name": "reserved",
+            "docs": [
+              "Room for what the open, the pushes and the Tax Share will record."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                128
+              ]
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "vault_bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LaunchClosed",
+      "docs": [
+        "A failed launch closed, its rent and its vault's returned to the creator."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "launch",
+            "type": "pubkey"
+          },
+          {
+            "name": "creator",
+            "type": "pubkey"
+          },
+          {
+            "name": "rent",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LaunchCreated",
+      "docs": [
+        "A Fair Open scheduled: its terms, as the launch account holds them."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "launch",
+            "type": "pubkey"
+          },
+          {
+            "name": "creator",
+            "type": "pubkey"
+          },
+          {
+            "name": "dbc_config",
+            "type": "pubkey"
+          },
+          {
+            "name": "quote_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "nonce",
+            "type": "pubkey"
+          },
+          {
+            "name": "identity_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "deposits_open_at",
+            "type": "i64"
+          },
+          {
+            "name": "opens_at",
+            "type": "i64"
+          },
+          {
+            "name": "min_raise",
+            "type": "u64"
+          },
+          {
+            "name": "pot_cap",
+            "type": "u64"
+          },
+          {
+            "name": "lowest_rung",
+            "type": "u64"
+          },
+          {
+            "name": "step",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LaunchFailed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "launch",
+            "type": "pubkey"
+          },
+          {
+            "name": "failure",
+            "type": {
+              "defined": {
+                "name": "Failure"
+              }
+            }
+          },
+          {
+            "name": "spend",
+            "docs": [
+              "What the pot would have spent, and what it held."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "pot",
+            "type": "u64"
+          },
+          {
+            "name": "seats",
+            "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LaunchParams",
+      "docs": [
+        "What the creator chooses when scheduling (spec 2.1 steps 4 and 5)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "deposits_open_at",
+            "docs": [
+              "When the window opens, a Unix timestamp; it closes 10 minutes later, at the scheduled open."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "min_raise",
+            "docs": [
+              "The least the pot must spend for the coin to be created, in the quote's raw units; 0 for none."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "identity_hash",
+            "docs": [
+              "The SHA-256 the coin's name, ticker and metadata URI are sealed behind: of DBC's `initialize_virtual_pool`",
+              "parameters as they are serialized, which the open checks against the coin it creates (spec 2.1 step 5)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "LaunchStatus",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Scheduled"
+          },
+          {
+            "name": "Failed"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProgramConfig",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "admission_signer",
+            "type": "pubkey"
+          },
+          {
+            "name": "keeper",
+            "type": "pubkey"
+          },
+          {
+            "name": "fee_program",
+            "type": "pubkey"
+          },
+          {
+            "name": "dbc_config",
+            "type": "pubkey"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProgramConfigChanged",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "admission_signer",
+            "type": "pubkey"
+          },
+          {
+            "name": "keeper",
+            "type": "pubkey"
+          },
+          {
+            "name": "fee_program",
+            "type": "pubkey"
+          },
+          {
+            "name": "dbc_config",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProgramSettings",
+      "docs": [
+        "Who the program trusts: the admission signer and the keeper, which program its coins register with, and the config",
+        "its launches run on."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "admission_signer",
+            "docs": [
+              "Signs each deposit's admission (spec 10.3), and holds no funds."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "keeper",
+            "docs": [
+              "Heat's keeper key: co-signs every launch, holds each launch's durable nonce, and sends the open."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "fee_program",
+            "docs": [
+              "The fee program, which `settle` registers each Fair Open's coin with."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "dbc_config",
+            "docs": [
+              "Heat's Fair Open DBC config: every launch's coin is created on it."
+            ],
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Seat",
+      "docs": [
+        "One per launch and person, at the PDA of the launch and the person's pseudonym, held by the one wallet that took it",
+        "(spec 5.3, 6.3)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "launch",
+            "type": "pubkey"
+          },
+          {
+            "name": "wallet",
+            "type": "pubkey"
+          },
+          {
+            "name": "person",
+            "docs": [
+              "The person's pseudonym in this launch."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "tier",
+            "type": {
+              "defined": {
+                "name": "Tier"
+              }
+            }
+          },
+          {
+            "name": "cap",
+            "docs": [
+              "The most the seat may hold, in the quote's raw units, from its latest admission."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "deposit",
+            "docs": [
+              "What the seat has deposited: what it asks the pot to buy with."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "coin_rent",
+            "docs": [
+              "The coin account's rent the depositor prepaid, which the push spends or returns."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "reserved",
+            "docs": [
+              "Room for the fill, coins, refund and Tax Share the open and the pushes will record."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                48
+              ]
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Tier",
+      "docs": [
+        "A person's Depositor tier (spec 2.1 step 9, 6.3): how strongly they have shown they are one person."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Unverified"
+          },
+          {
+            "name": "Scored"
+          },
+          {
+            "name": "Verified"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Vault",
+      "docs": [
+        "Holds a launch's deposits as plain SOL (spec 5.3), at the PDA of its launch."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "launch",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Withdrawn",
+      "docs": [
+        "A withdrawal during the window: `deposit` what the seat still holds; the seat closed if nothing."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "launch",
+            "type": "pubkey"
+          },
+          {
+            "name": "wallet",
+            "type": "pubkey"
+          },
+          {
+            "name": "person",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "deposit",
+            "type": "u64"
+          },
+          {
+            "name": "closed",
+            "type": "bool"
+          },
+          {
+            "name": "pot",
+            "type": "u64"
+          },
+          {
+            "name": "seats",
+            "type": "u32"
+          }
+        ]
+      }
+    }
+  ],
+  "constants": [
+    {
+      "name": "DEPOSIT_STEP",
+      "docs": [
+        "The deposit step (spec 12): deposits, withdrawals and caps move in 0.01 SOL."
+      ],
+      "type": "u64",
+      "value": "10000000"
+    },
+    {
+      "name": "LATE_OPEN_SECONDS",
+      "docs": [
+        "From 15 minutes after the scheduled open, the open is refused and anyone may mark the launch failed (spec 2.1",
+        "step 15)."
+      ],
+      "type": "i64",
+      "value": "900"
+    },
+    {
+      "name": "MAX_SCHEDULE_SECONDS",
+      "docs": [
+        "How far ahead a window may start (spec 2.1 step 4): 7 days."
+      ],
+      "type": "i64",
+      "value": "604800"
+    },
+    {
+      "name": "POT_CAP_PERCENT",
+      "docs": [
+        "The pot's cap, as a share of the config's Graduation Target (spec 12): 20%."
+      ],
+      "type": "u64",
+      "value": "20"
+    },
+    {
+      "name": "SCORED_CAP_STEPS",
+      "type": "u64",
+      "value": "50"
+    },
+    {
+      "name": "UNVERIFIED_CAP_STEPS",
+      "docs": [
+        "Each Depositor tier's cap per Fair Open, in deposit steps (spec 2.1 step 9): Unverified 0.1 SOL, Scored 0.5 SOL,",
+        "Verified 2 SOL. Our admission server signs each person's cap, and a stolen admission key still admits no one above",
+        "these."
+      ],
+      "type": "u64",
+      "value": "10"
+    },
+    {
+      "name": "VERIFIED_CAP_STEPS",
+      "type": "u64",
+      "value": "200"
+    },
+    {
+      "name": "WINDOW_SECONDS",
+      "docs": [
+        "The deposit window (spec 2.1 step 4): a fixed 10 minutes, ending at the scheduled open."
+      ],
+      "type": "i64",
+      "value": "600"
+    }
+  ]
+}

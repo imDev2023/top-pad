@@ -8,7 +8,10 @@
   "scripts": {
     "typecheck": "tsc -p .",
     "test": "vitest run",
-    "fee-config": "tsx scripts/fee-config.ts"
+    "fee-config": "tsx scripts/fee-config.ts",
+    "allocation-cases": "tsx scripts/allocation-cases.ts",
+    "fair-open-config": "tsx scripts/fair-open-config.ts",
+    "fair-open": "tsx scripts/fair-open.ts"
   },
   "dependencies": {
     "@solana-program/compute-budget": "^0.20.0",

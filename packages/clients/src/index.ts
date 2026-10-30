@@ -4,3 +4,4 @@ export * as dbc from "./generated/dbc";
 export * as dammV2 from "./generated/damm-v2";
 export * as jupiterLock from "./generated/jupiter-lock";
 export * as fee from "./generated/fee";
+export * as fairOpen from "./generated/fair-open";

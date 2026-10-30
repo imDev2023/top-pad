@@ -1,9 +1,9 @@
-// Our own decoding of Meteora's and our programs' events (spec 10.2). DBC and the fee program emit their events through
+// Our own decoding of Meteora's and our programs' events (spec 10.2). DBC and our two programs emit their events through
 // Anchor's event CPI, as an inner instruction carrying the event, so a transaction's logs say nothing and the indexer
-// decodes the transaction itself: each event belongs to the instruction that emitted it, the nearest DBC (or fee
-// program) instruction before it that is not itself an event.
+// decodes the transaction itself: each event belongs to the instruction that emitted it, the nearest instruction of the
+// same program before it that is not itself an event.
 import { getBase58Encoder, type ReadonlyUint8Array } from "@solana/kit";
-import { FEE_PROGRAM_ADDRESS } from "@top-pad/chain";
+import { FAIR_OPEN_PROGRAM_ADDRESS, FEE_PROGRAM_ADDRESS } from "@top-pad/chain";
 import {
   DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS,
   DynamicBondingCurveInstruction,
@@ -23,6 +23,20 @@ import {
   parseWindowFeesClaimedEvent,
   WINDOW_FEES_CLAIMED_EVENT_DISCRIMINATOR,
 } from "@top-pad/clients/fee";
+import {
+  DEPOSITED_EVENT_DISCRIMINATOR,
+  FAILED_DEPOSIT_RETURNED_EVENT_DISCRIMINATOR,
+  LAUNCH_CLOSED_EVENT_DISCRIMINATOR,
+  LAUNCH_CREATED_EVENT_DISCRIMINATOR,
+  LAUNCH_FAILED_EVENT_DISCRIMINATOR,
+  parseDepositedEvent,
+  parseFailedDepositReturnedEvent,
+  parseLaunchClosedEvent,
+  parseLaunchCreatedEvent,
+  parseLaunchFailedEvent,
+  parseWithdrawnEvent,
+  WITHDRAWN_EVENT_DISCRIMINATOR,
+} from "@top-pad/clients/fair-open";
 
 /** An instruction as `getTransaction` answers with `encoding: "json"`: accounts are indexes into the transaction's keys. */
 export type RawInstruction = { programIdIndex: number; accounts: number[]; data: string; stackHeight?: number | null };
@@ -100,7 +114,65 @@ export type FeesClaimed = {
   treasuryAmount: bigint;
 };
 
-export type Decoded = { pools: PoolCreated[]; coins: CoinRegistered[]; swaps: Swap[]; windowClaims: WindowClaimed[]; feeClaims: FeesClaimed[] };
+/** A Fair Open scheduled (spec 2.1 steps 4 to 7): its terms, as its launch account holds them. */
+export type FairOpenCreated = {
+  launch: string;
+  creator: string;
+  nonce: string;
+  dbcConfig: string;
+  quoteMint: string;
+  /** Hex. */
+  identityHash: string;
+  /** Unix seconds. */
+  depositsOpenAt: bigint;
+  opensAt: bigint;
+  minRaise: bigint;
+  potCap: bigint;
+  lowestRung: bigint;
+  step: bigint;
+};
+
+const TIERS = ["unverified", "scored", "verified"] as const;
+export type DepositorTier = (typeof TIERS)[number];
+
+/** A change to a Fair Open seat: a deposit, a withdrawal in the window, or a failed launch's refund. */
+export type SeatEvent = {
+  /** The event's place among its transaction's seat events, in execution order. */
+  eventIndex: number;
+  launch: string;
+  wallet: string;
+  /** The person's pseudonym in the launch, hex. */
+  person: string;
+  kind: "deposit" | "withdraw" | "refund";
+  tier: DepositorTier | null;
+  amount: bigint;
+  /** What the seat held after it. */
+  deposit: bigint;
+  /** A refund's rents returned, the coin account's and the seat's; null otherwise. */
+  rent: bigint | null;
+  /** Whether a deposit took the seat, or a withdrawal or refund closed it. */
+  seatOpened: boolean;
+  seatClosed: boolean;
+};
+
+const FAILURES = ["below_lowest_rung", "min_raise_missed", "late"] as const;
+export type FairOpenFailure = (typeof FAILURES)[number];
+
+/** A Fair Open that failed, or that closed after failing, its creator's rent returned. */
+export type FairOpenEnded = { launch: string; kind: "failed"; failure: FairOpenFailure } | { launch: string; kind: "closed" };
+
+export type Decoded = {
+  pools: PoolCreated[];
+  coins: CoinRegistered[];
+  swaps: Swap[];
+  windowClaims: WindowClaimed[];
+  feeClaims: FeesClaimed[];
+  fairOpens: FairOpenCreated[];
+  seatEvents: SeatEvent[];
+  fairOpenEnds: FairOpenEnded[];
+};
+
+const hex = (bytes: ReadonlyUint8Array) => Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 
 /** Anchor's tag on an event CPI's data, before the event's own discriminator (`EVENT_IX_TAG_LE`). */
 const EVENT_IX_TAG = new Uint8Array([0xe4, 0x45, 0xa5, 0x2e, 0x51, 0xcb, 0x9a, 0x1d]);
@@ -135,7 +207,7 @@ function executionOrder(tx: RawTransaction) {
  * event, so a transaction is never indexed half right.
  */
 export function decodeTransaction(tx: RawTransaction, configs: ReadonlySet<string>): Decoded {
-  const decoded: Decoded = { pools: [], coins: [], swaps: [], windowClaims: [], feeClaims: [] };
+  const decoded: Decoded = { pools: [], coins: [], swaps: [], windowClaims: [], feeClaims: [], fairOpens: [], seatEvents: [], fairOpenEnds: [] };
   if (!tx.meta || tx.meta.err) return decoded;
   const keys = [...tx.transaction.message.accountKeys, ...(tx.meta.loadedAddresses?.writable ?? []), ...(tx.meta.loadedAddresses?.readonly ?? [])];
   const key = (index: number) => {
@@ -150,7 +222,7 @@ export function decodeTransaction(tx: RawTransaction, configs: ReadonlySet<strin
 
   for (const ix of executionOrder(tx)) {
     const program = key(ix.programIdIndex);
-    if (program !== DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS && program !== FEE_PROGRAM_ADDRESS) continue;
+    if (program !== DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS && program !== FEE_PROGRAM_ADDRESS && program !== FAIR_OPEN_PROGRAM_ADDRESS) continue;
     const data = base58.encode(ix.data);
     if (!startsWith(data, EVENT_IX_TAG)) {
       const emitter = { ix, data, swapEvents: 0 };
@@ -164,7 +236,9 @@ export function decodeTransaction(tx: RawTransaction, configs: ReadonlySet<strin
     const emitter = emitters.get(program);
     if (!emitter) throw new Error(`an event of ${program} with no instruction of it before`);
 
-    if (program === FEE_PROGRAM_ADDRESS) {
+    if (program === FAIR_OPEN_PROGRAM_ADDRESS) {
+      decodeFairOpenEvent(event, decoded);
+    } else if (program === FEE_PROGRAM_ADDRESS) {
       if (startsWith(event, COIN_REGISTERED_EVENT_DISCRIMINATOR)) {
         const e = parseCoinRegisteredEvent(event);
         if (!configs.has(e.config)) continue;
@@ -245,4 +319,73 @@ export function decodeTransaction(tx: RawTransaction, configs: ReadonlySet<strin
   const unaccounted = swapsSeen.find((s) => s.swapEvents !== 1);
   if (unaccounted) throw new Error(`a swap on a Heat config emitted ${unaccounted.swapEvents} EvtSwap3 events, not one`);
   return decoded;
+}
+
+/** One of the Fair Open program's events. Every launch it holds is on Heat's Fair Open config, which it alone allows. */
+function decodeFairOpenEvent(event: ReadonlyUint8Array, decoded: Decoded) {
+  const seat = (e: Omit<SeatEvent, "eventIndex">) => decoded.seatEvents.push({ eventIndex: decoded.seatEvents.length, ...e });
+  if (startsWith(event, LAUNCH_CREATED_EVENT_DISCRIMINATOR)) {
+    const e = parseLaunchCreatedEvent(event);
+    decoded.fairOpens.push({
+      launch: e.launch,
+      creator: e.creator,
+      nonce: e.nonce,
+      dbcConfig: e.dbcConfig,
+      quoteMint: e.quoteMint,
+      identityHash: hex(e.identityHash),
+      depositsOpenAt: e.depositsOpenAt,
+      opensAt: e.opensAt,
+      minRaise: e.minRaise,
+      potCap: e.potCap,
+      lowestRung: e.lowestRung,
+      step: e.step,
+    });
+  } else if (startsWith(event, DEPOSITED_EVENT_DISCRIMINATOR)) {
+    const e = parseDepositedEvent(event);
+    seat({
+      launch: e.launch,
+      wallet: e.wallet,
+      person: hex(e.person),
+      kind: "deposit",
+      tier: TIERS[e.tier]!,
+      amount: e.amount,
+      deposit: e.deposit,
+      rent: null,
+      seatOpened: e.newSeat,
+      seatClosed: false,
+    });
+  } else if (startsWith(event, WITHDRAWN_EVENT_DISCRIMINATOR)) {
+    const e = parseWithdrawnEvent(event);
+    seat({
+      launch: e.launch,
+      wallet: e.wallet,
+      person: hex(e.person),
+      kind: "withdraw",
+      tier: null,
+      amount: e.amount,
+      deposit: e.deposit,
+      rent: null,
+      seatOpened: false,
+      seatClosed: e.closed,
+    });
+  } else if (startsWith(event, FAILED_DEPOSIT_RETURNED_EVENT_DISCRIMINATOR)) {
+    const e = parseFailedDepositReturnedEvent(event);
+    seat({
+      launch: e.launch,
+      wallet: e.wallet,
+      person: hex(e.person),
+      kind: "refund",
+      tier: null,
+      amount: e.deposit,
+      deposit: 0n,
+      rent: e.coinRent + e.seatRent,
+      seatOpened: false,
+      seatClosed: true,
+    });
+  } else if (startsWith(event, LAUNCH_FAILED_EVENT_DISCRIMINATOR)) {
+    const e = parseLaunchFailedEvent(event);
+    decoded.fairOpenEnds.push({ launch: e.launch, kind: "failed", failure: FAILURES[e.failure]! });
+  } else if (startsWith(event, LAUNCH_CLOSED_EVENT_DISCRIMINATOR)) {
+    decoded.fairOpenEnds.push({ launch: parseLaunchClosedEvent(event).launch, kind: "closed" });
+  }
 }

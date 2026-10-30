@@ -29,6 +29,13 @@
       "when": 1793306167125,
       "tag": "0003_fee_claims",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793329001234,
+      "tag": "0004_fair_open",
+      "breakpoints": true
     }
   ]
 }

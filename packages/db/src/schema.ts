@@ -390,3 +390,94 @@ export const feeClaims = pgTable(
   },
   (t) => [primaryKey({ columns: [t.signature, t.eventIndex] }), index("fee_claims_creator_idx").on(t.creator), index("fee_claims_mint_idx").on(t.mint)],
 );
+
+/**
+ * Each Fair Open on chain (spec 2.1, 5.3), from the Fair Open program's events: its terms as scheduled, and whether it
+ * failed or closed. What its pot holds is read from its launch account, the one place it is always right; the teaser is
+ * the calendar's text, which the scheduling flow sets (spec 2.1 step 4).
+ */
+export const fairOpens = pgTable(
+  "fair_opens",
+  {
+    launch: text("launch").primaryKey(),
+    /** The Creator wallet that signed it. */
+    creator: text("creator").notNull(),
+    nonce: text("nonce").notNull().unique(),
+    dbcConfig: text("dbc_config").notNull(),
+    quoteMint: text("quote_mint").notNull(),
+    /** The SHA-256 its coin's identity is sealed behind, hex. */
+    identityHash: text("identity_hash").notNull(),
+    depositsOpenAt: timestamp("deposits_open_at", { withTimezone: true }).notNull(),
+    opensAt: timestamp("opens_at", { withTimezone: true }).notNull(),
+    /** In the quote's raw units. */
+    minRaise: bigint("min_raise", { mode: "bigint" }).notNull(),
+    potCap: bigint("pot_cap", { mode: "bigint" }).notNull(),
+    lowestRung: bigint("lowest_rung", { mode: "bigint" }).notNull(),
+    step: bigint("step", { mode: "bigint" }).notNull(),
+    status: text("status", { enum: ["scheduled", "failed", "closed"] })
+      .notNull()
+      .default("scheduled"),
+    failure: text("failure", { enum: ["below_lowest_rung", "min_raise_missed", "late"] }),
+    failedAt: timestamp("failed_at", { withTimezone: true }),
+    teaser: text("teaser"),
+    createdSignature: text("created_signature").notNull(),
+    createdSlot: bigint("created_slot", { mode: "number" }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [index("fair_opens_opens_at_idx").on(t.opensAt), index("fair_opens_creator_idx").on(t.creator)],
+);
+
+/**
+ * Every change to a Fair Open seat (spec 2.1 step 9, 15), from the Fair Open program's events: a deposit, a withdrawal in
+ * the window, or a failed launch's refund. Keyed by its transaction and its place among the transaction's seat events.
+ */
+export const fairOpenSeatEvents = pgTable(
+  "fair_open_seat_events",
+  {
+    signature: text("signature").notNull(),
+    eventIndex: integer("event_index").notNull(),
+    slot: bigint("slot", { mode: "number" }).notNull(),
+    /** The block's time. */
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    launch: text("launch").notNull(),
+    wallet: text("wallet").notNull(),
+    /** The person's pseudonym in this launch, hex. */
+    person: text("person").notNull(),
+    kind: text("kind", { enum: ["deposit", "withdraw", "refund"] }).notNull(),
+    /** The tier a deposit was admitted at; none on a withdrawal or refund. */
+    tier: text("tier", { enum: ["unverified", "scored", "verified"] }),
+    /** What moved, in the quote's raw units: a refund's is the deposit alone, its rents apart. */
+    amount: bigint("amount", { mode: "bigint" }).notNull(),
+    /** What the seat held after it. */
+    deposit: bigint("deposit", { mode: "bigint" }).notNull(),
+    /** A refund's rents returned: the coin account's and the seat's. */
+    rent: bigint("rent", { mode: "bigint" }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.signature, t.eventIndex] }),
+    index("fair_open_seat_events_launch_idx").on(t.launch, t.slot),
+    index("fair_open_seat_events_wallet_idx").on(t.wallet),
+  ],
+);
+
+/**
+ * The admission server's record of who it admitted to each Fair Open (spec 6.3, 10.2): one row per launch and wallet,
+ * whose person is fixed at its first admission, so a wallet keeps one seat and a person one wallet in a launch. The
+ * person is a cluster id: an X account (`x:<user id>`), or until one is linked the wallet itself (`wallet:<address>`);
+ * the linkage pipeline merges clusters later. The pseudonym is what the chain sees.
+ */
+export const admissions = pgTable(
+  "admissions",
+  {
+    launch: text("launch").notNull(),
+    wallet: text("wallet").notNull(),
+    cluster: text("cluster").notNull(),
+    /** The person's pseudonym in this launch, hex: the seat's address derives from it. */
+    pseudonym: text("pseudonym").notNull(),
+    /** The highest tier the wallet has been admitted at in this launch: a tier never falls inside a window. */
+    tier: text("tier", { enum: ["unverified", "scored", "verified"] }).notNull(),
+    createdAt: createdAt(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.launch, t.wallet] }), uniqueIndex("admissions_launch_cluster").on(t.launch, t.cluster)],
+);

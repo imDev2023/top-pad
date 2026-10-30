@@ -7,7 +7,8 @@
     "./dbc": "./src/generated/dbc/index.ts",
     "./damm-v2": "./src/generated/damm-v2/index.ts",
     "./jupiter-lock": "./src/generated/jupiter-lock/index.ts",
-    "./fee": "./src/generated/fee/index.ts"
+    "./fee": "./src/generated/fee/index.ts",
+    "./fair-open": "./src/generated/fair-open/index.ts"
   },
   "scripts": {
     "typecheck": "tsc -p .",

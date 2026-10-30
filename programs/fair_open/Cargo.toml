@@ -22,15 +22,19 @@ custom-heap = []
 custom-panic = []
 
 [dependencies]
-anchor-lang.workspace = true
+anchor-lang = { workspace = true, features = ["event-cpi", "init-if-needed"] }
 solana-security-txt.workspace = true
+solana-instructions-sysvar.workspace = true
 
 [dev-dependencies]
-litesvm.workspace = true
+# The precompiles, so a deposit's admission is verified by the real Ed25519 precompile.
+litesvm = { workspace = true, features = ["precompiles"] }
 solana-message.workspace = true
 solana-transaction.workspace = true
 solana-signer.workspace = true
 solana-keypair.workspace = true
+solana-account.workspace = true
+serde_json.workspace = true
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

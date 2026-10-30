@@ -1,11 +1,33 @@
 // What the indexer writes for Heat (spec 10.2): the pools on Heat's configs, the coins the fee program registers, every
-// trade with its candles, and the fee program's claims. Each transaction is written in one database transaction that first claims its
-// signature, so the live source, the browser's fast path and reconciliation can all hand it in and it is written once.
+// trade with its candles, the fee program's claims, and each Fair Open with its seats' deposits, withdrawals and refunds.
+// Each transaction is written in one database transaction that first claims its signature, so the live source, the
+// browser's fast path and reconciliation can all hand it in and it is written once.
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { priceOfSqrtPrice, type HeatCluster } from "@top-pad/chain";
-import { coins, feeClaims, indexedTransactions, launches, pools, trades, windowClaims, type DbOrTransaction } from "@top-pad/db";
+import {
+  coins,
+  fairOpens,
+  fairOpenSeatEvents,
+  feeClaims,
+  indexedTransactions,
+  launches,
+  pools,
+  trades,
+  windowClaims,
+  type DbOrTransaction,
+} from "@top-pad/db";
 import { foldTrade } from "./candles";
-import { decodeTransaction, type CoinRegistered, type FeesClaimed, type PoolCreated, type RawTransaction, type WindowClaimed } from "./decode";
+import {
+  decodeTransaction,
+  type CoinRegistered,
+  type FairOpenCreated,
+  type FairOpenEnded,
+  type FeesClaimed,
+  type PoolCreated,
+  type RawTransaction,
+  type SeatEvent,
+  type WindowClaimed,
+} from "./decode";
 import type { IndexResult, TransactionHandler } from "./index";
 
 export type Trade = typeof trades.$inferSelect;
@@ -19,6 +41,9 @@ export type Indexed = {
   trades: Trade[];
   windowClaims: WindowClaimed[];
   feeClaims: FeesClaimed[];
+  fairOpens: FairOpenCreated[];
+  seatEvents: SeatEvent[];
+  fairOpenEnds: FairOpenEnded[];
 };
 
 export type HeatHandlerOptions = {
@@ -142,6 +167,57 @@ export function heatHandler({ heat, blockIndexOf, onIndexed }: HeatHandlerOption
           })
           .onConflictDoNothing();
       }
+      for (const f of decoded.fairOpens) {
+        await t
+          .insert(fairOpens)
+          .values({
+            launch: f.launch,
+            creator: f.creator,
+            nonce: f.nonce,
+            dbcConfig: f.dbcConfig,
+            quoteMint: f.quoteMint,
+            identityHash: f.identityHash,
+            depositsOpenAt: new Date(Number(f.depositsOpenAt) * 1000),
+            opensAt: new Date(Number(f.opensAt) * 1000),
+            minRaise: f.minRaise,
+            potCap: f.potCap,
+            lowestRung: f.lowestRung,
+            step: f.step,
+            createdSignature: signature,
+            createdSlot: tx.slot,
+            createdAt: blockTime,
+          })
+          .onConflictDoNothing();
+      }
+      for (const e of decoded.seatEvents) {
+        await t
+          .insert(fairOpenSeatEvents)
+          .values({
+            signature,
+            eventIndex: e.eventIndex,
+            slot: tx.slot,
+            at: blockTime,
+            launch: e.launch,
+            wallet: e.wallet,
+            person: e.person,
+            kind: e.kind,
+            tier: e.tier,
+            amount: e.amount,
+            deposit: e.deposit,
+            rent: e.rent,
+          })
+          .onConflictDoNothing();
+      }
+      // A launch fails once, then may close, and a closed launch stays closed. One whose creation the indexer has not
+      // seen (the live source reporting a failure first) is left to reconciliation, which goes oldest first.
+      for (const end of decoded.fairOpenEnds) {
+        const set =
+          end.kind === "failed"
+            ? { status: sql`case when ${fairOpens.status} = 'closed' then 'closed' else 'failed' end`, failure: end.failure, failedAt: blockTime }
+            : { status: "closed" as const };
+        const [found] = await t.update(fairOpens).set(set).where(eq(fairOpens.launch, end.launch)).returning({ launch: fairOpens.launch });
+        if (!found) throw new Error(`Fair Open ${end.launch} ${end.kind}, and the indexer has not seen it created`);
+      }
       return added;
     });
     if (!added) return {};
@@ -155,6 +231,9 @@ export function heatHandler({ heat, blockIndexOf, onIndexed }: HeatHandlerOption
         trades: added,
         windowClaims: decoded.windowClaims,
         feeClaims: decoded.feeClaims,
+        fairOpens: decoded.fairOpens,
+        seatEvents: decoded.seatEvents,
+        fairOpenEnds: decoded.fairOpenEnds,
       });
     }
     const result: IndexResult = { transactions: 1 };
@@ -163,6 +242,8 @@ export function heatHandler({ heat, blockIndexOf, onIndexed }: HeatHandlerOption
     if (added.length) result.trades = added.length;
     const claims = decoded.windowClaims.length + decoded.feeClaims.length;
     if (claims) result.claims = claims;
+    const fairOpen = decoded.fairOpens.length + decoded.seatEvents.length + decoded.fairOpenEnds.length;
+    if (fairOpen) result.fairOpen = fairOpen;
     return result;
   };
 }

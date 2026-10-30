@@ -11,9 +11,9 @@ export const TOKEN_METADATA_PROGRAM_ADDRESS = "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6
 export const TOKEN_PROGRAM_ADDRESS = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" as Address;
 
 /**
- * Where the fee program reads a pool's config, creator, base mint, accrued partner fee and activation point, and a
- * config's fee claimer, in DBC 0.2.2's zero-copy accounts: the same numbers as `fee::dbc` in `programs/fee`, checked
- * against the generated decoders here.
+ * Where our programs read DBC 0.2.2's zero-copy accounts: the fee program a pool's config, creator, base mint, accrued
+ * partner fee and activation point, and a config's fee claimer (`fee::dbc` in `programs/fee`); the Fair Open program a
+ * config's quote and Graduation Target (`fair_open::dbc`). Checked against the generated decoders here.
  */
 export const DBC_LAYOUT = {
   poolConfigOffset: 72,
@@ -21,7 +21,9 @@ export const DBC_LAYOUT = {
   poolBaseMintOffset: 136,
   poolPartnerQuoteFeeOffset: 272,
   poolActivationPointOffset: 296,
+  configQuoteMintOffset: 8,
   configFeeClaimerOffset: 40,
+  configMigrationQuoteThresholdOffset: 264,
 } as const;
 
 const utf8 = getUtf8Encoder();

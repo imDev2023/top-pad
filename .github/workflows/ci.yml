@@ -70,8 +70,8 @@ jobs:
       # Before `anchor build`, whose IDL build compiles those tests, and they embed it.
       - run: cargo build-sbf --manifest-path tests/dbc-stand-in/Cargo.toml --tools-version v1.57 --arch v2
       - run: anchor build
-      # The committed IDL is what the generated clients came from: the program's own build must not change it.
-      - run: cp target/idl/fee.json packages/clients/idl/fee.json && git diff --exit-code packages/clients/idl
+      # The committed IDLs are what the generated clients came from: the programs' own build must not change them.
+      - run: cp target/idl/fee.json target/idl/fair_open.json packages/clients/idl/ && git diff --exit-code packages/clients/idl
       # After the build, since the tests embed the built programs.
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test

@@ -36,6 +36,14 @@ describe("DBC's account layout", () => {
     data.set(addressBytes.encode(some(4)), DBC_LAYOUT.configFeeClaimerOffset);
     expect(getPoolConfigDecoder().decode(data).feeClaimer).toBe(some(4));
   });
+
+  it("puts a config's quote and Graduation Target where the Fair Open program reads them", () => {
+    const data = new Uint8Array(getPoolConfigSize());
+    data.set(POOL_CONFIG_DISCRIMINATOR, 0);
+    data.set(addressBytes.encode(some(5)), DBC_LAYOUT.configQuoteMintOffset);
+    new DataView(data.buffer).setBigUint64(DBC_LAYOUT.configMigrationQuoteThresholdOffset, 8_500_000_000n, true);
+    expect(getPoolConfigDecoder().decode(data)).toMatchObject({ quoteMint: some(5), migrationQuoteThreshold: 8_500_000_000n });
+  });
 });
 
 describe("a coin's pool address", () => {
