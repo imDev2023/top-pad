@@ -15,6 +15,7 @@ import {
 } from "@solana/kit";
 import {
   admissionMessage,
+  closeLaunchInstructions,
   createLaunchInstructions,
   depositInstructions,
   FAIR_OPEN_PROGRAM_ADDRESS,
@@ -135,14 +136,14 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * Brings back what a run left in a launch, whether it finished or stopped partway: waits until the launch may fail (its
- * window closed with a pot that cannot open, or 15 minutes after its open), marks it failed if nobody has, and returns
- * the seats of `wallets` to them, so the sweep after it leaves nothing behind in the program.
+ * window closed with a pot that cannot open, or 15 minutes after its open), marks it failed if nobody has, returns the
+ * seats of `wallets` to them, and once no seat is left closes the launch, returning its creator's rent, so the sweep
+ * after it leaves nothing behind in the program. The nonce's rent comes back only through the keeper (#46).
  */
 export async function recoverDeposits(launch: Address, sender: KeyPairSigner, wallets: KeyPairSigner[]) {
   const seated: KeyPairSigner[] = [];
   for (const wallet of wallets) if (await seatOf(launch, wallet.address)) seated.push(wallet);
-  if (!seated.length) return;
-  for (;;) {
+  while (seated.length) {
     const account = await fetchMaybeLaunch(rpc, launch);
     if (!account.exists) return;
     const now = await chainTime();
@@ -157,4 +158,8 @@ export async function recoverDeposits(launch: Address, sender: KeyPairSigner, wa
     await sleep(Number(until - now) * 1_000 + 2_000);
   }
   for (const wallet of seated) await refund(launch, wallet);
+  const account = await fetchMaybeLaunch(rpc, launch);
+  if (account.exists && account.data.seats === 0 && fairOpenPhase(account.data, await chainTime()).phase === "failed") {
+    await send(sender, await closeLaunchInstructions({ launch, creator: account.data.creator, computeUnitPrice: 0n }));
+  }
 }
