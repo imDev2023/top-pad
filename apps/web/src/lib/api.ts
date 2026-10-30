@@ -5,12 +5,15 @@ import {
   CoinCandles,
   CoinTrades,
   CreatorEarnings,
+  FairOpen,
+  FairOpenOutcome,
   Health,
   LaunchRefusal,
   LaunchStatus,
   Me,
   Platform,
   PreparedClaim,
+  PreparedFairOpenTransaction,
   PreparedLaunch,
   VampShieldVerdict,
   type CandleSeconds,
@@ -156,3 +159,31 @@ export const reportClaim = (signatures: string[]) =>
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ signatures }),
   });
+
+/** A Fair Open as the server renders its page: "missing" when there is none at the address, "unavailable" when the API did not answer. */
+export async function loadFairOpen(launch: string): Promise<FairOpen | "missing" | "unavailable"> {
+  try {
+    const res = await fetch(`${API_URL}/fair-opens/${encodeURIComponent(launch)}`, { cache: "no-store", signal: AbortSignal.timeout(8_000) });
+    if (res.status === 404) return "missing";
+    const parsed = FairOpen.safeParse(await res.json());
+    return res.ok && parsed.success ? parsed.data : "unavailable";
+  } catch {
+    return "unavailable";
+  }
+}
+
+/** A Fair Open, with the wallet's admission and seat when there is a wallet. */
+export const getFairOpen = (launch: string, wallet?: string) =>
+  call(FairOpen, `/fair-opens/${encodeURIComponent(launch)}${wallet ? `?wallet=${encodeURIComponent(wallet)}` : ""}`);
+
+const postJson = (body: unknown): RequestInit => ({ method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+
+/** A Fair Open transaction for the wallet to sign and send: a deposit, a withdrawal, the failure or a refund. */
+export const prepareFairOpen = (launch: string, action: "deposit" | "withdraw" | "mark-failed" | "refund", body: { wallet: string; amount?: string }) =>
+  call(PreparedFairOpenTransaction, `/fair-opens/${encodeURIComponent(launch)}/${action}`, postJson(body));
+
+/** A sent Fair Open transaction, settled by the API against the chain. */
+export const reportFairOpen = (signature: string) => call(FairOpenOutcome, "/fair-opens/transactions", postJson({ signature }));
+
+/** A Fair Open's live room: its deposits, withdrawals and failure as they land (spec 10.2). */
+export const fairOpenLiveUrl = (launch: string) => `${API_URL.replace(/^http/, "ws")}/live/fair-opens/${encodeURIComponent(launch)}`;

@@ -1,0 +1,518 @@
+/*
+ * A Fair Open's page (spec 9, screen 2): the sealed coin across the top, then the countdown, the pot and what happens at
+ * the open beside the visitor's deposit and what it would buy now. On a phone the deposit comes first (spec 9).
+ */
+.page {
+  display: grid;
+  gap: 16px;
+}
+
+/* The sealed coin */
+.head {
+  display: grid;
+  gap: 12px;
+  padding: 18px 20px;
+}
+
+.identity {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.sealed {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+  color: var(--muted);
+  font-family: var(--font-display);
+  font-size: 1.7rem;
+  font-weight: 700;
+}
+
+.title {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.handle {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.teaser {
+  font-size: 1.05rem;
+  font-style: italic;
+  color: var(--fg);
+}
+
+.hash {
+  color: var(--fg);
+  white-space: nowrap;
+}
+
+/* The two columns: the story on the left, the visitor's deposit on the right */
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 380px;
+  grid-template-areas: "main side";
+  align-items: start;
+  gap: 16px;
+}
+
+.main {
+  grid-area: main;
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.side {
+  grid-area: side;
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.sectionTitle {
+  font-size: 1.05rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* The countdown, the pot and the minimum raise */
+.figures {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.figure {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  padding: 14px 16px;
+}
+
+.big {
+  font-family: var(--font-display);
+  font-size: 1.85rem;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: 0.01em;
+}
+
+.big:global(.num),
+.big :global(.num) {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.unit {
+  font-family: var(--font-body);
+  font-size: 1rem;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.reached {
+  color: var(--go);
+}
+
+.reached .unit {
+  color: var(--go);
+}
+
+/* The headline figure takes the phase's flag colour along its left edge */
+.scheduled,
+.window {
+  border-left: 4px solid var(--info);
+}
+
+.window .big {
+  color: var(--fg);
+}
+
+.due {
+  border-left: 4px solid var(--caution);
+}
+
+.failing,
+.failed,
+.closed {
+  border-left: 4px solid var(--stop);
+}
+
+.failing .big,
+.failed .big {
+  color: var(--stop);
+}
+
+.closed .big {
+  color: var(--muted);
+}
+
+/* The pot */
+.pot {
+  display: grid;
+  gap: 10px;
+  padding: 16px 18px;
+}
+
+.track {
+  position: relative;
+  height: 22px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+}
+
+.track i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+
+.fillUnverified,
+.swatchUnverified {
+  left: 0;
+  background: var(--info);
+}
+
+.fillOthers,
+.swatchOthers {
+  background: var(--go);
+}
+
+.over,
+.swatchOver {
+  background: repeating-linear-gradient(135deg, var(--caution) 0 5px, transparent 5px 10px);
+  opacity: 0.85;
+}
+
+.cut {
+  background: repeating-linear-gradient(135deg, var(--panel) 0 4px, transparent 4px 8px);
+  opacity: 0.7;
+}
+
+.line {
+  width: 0;
+  border-left: 2px dashed var(--fg);
+  opacity: 0.75;
+}
+
+.capMark {
+  width: 2px;
+  background: var(--fg);
+}
+
+.scale {
+  margin-top: -4px;
+}
+
+.target {
+  margin-top: -2px;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legend b {
+  color: var(--fg);
+  font-weight: 500;
+}
+
+.legend i {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+}
+
+.swatchLine {
+  width: 0 !important;
+  height: 14px !important;
+  border-left: 2px dashed var(--fg);
+  border-radius: 0 !important;
+  margin: 0 5px;
+}
+
+/* What happens at the open */
+.steps {
+  display: grid;
+  gap: 12px;
+  padding: 16px 18px;
+}
+
+.list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0 0 0 22px;
+  font-size: 0.92rem;
+}
+
+.list li::marker {
+  color: var(--muted);
+  font-family: var(--font-mono);
+}
+
+.list b {
+  font-weight: 600;
+}
+
+/* The visitor's deposit */
+.deposit {
+  display: grid;
+  gap: 12px;
+  padding: 16px 18px;
+  border-top: 3px solid var(--go);
+}
+
+.seated {
+  display: grid;
+  gap: 12px;
+}
+
+.holding {
+  display: grid;
+  grid-template-columns: repeat(2, auto);
+  justify-content: start;
+  align-items: baseline;
+  gap: 4px 28px;
+  margin: 0;
+}
+
+.holding dd {
+  margin: 0;
+}
+
+.held {
+  font-size: 1.5rem;
+  font-weight: 500;
+  line-height: 1.2;
+}
+
+.form {
+  display: grid;
+  gap: 12px;
+}
+
+.modes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+}
+
+.mode {
+  min-height: 34px;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.mode:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.modeOn {
+  background: var(--panel);
+  color: var(--fg);
+  box-shadow: 0 0 0 1px var(--line-strong);
+}
+
+.amount {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.amount :global(.btn) {
+  min-height: 42px;
+}
+
+.invalid {
+  color: var(--stop);
+}
+
+.progress {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.9rem;
+}
+
+.progress li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.mark {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--line-strong);
+  border-radius: 50%;
+}
+
+.done {
+  color: var(--fg);
+}
+
+.done .mark {
+  border-color: var(--go);
+  background: var(--go) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.5 5 9l4.5-5.5' fill='none' stroke='white' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 12px no-repeat;
+}
+
+.active {
+  color: var(--fg);
+  font-weight: 500;
+}
+
+.active .mark {
+  border-color: var(--go) var(--go) var(--line-strong) var(--line-strong);
+  animation: spin 0.9s linear infinite;
+}
+
+.pending {
+  color: var(--faint);
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* If the window closed now */
+.ifClosed {
+  display: grid;
+  gap: 12px;
+  padding: 16px 18px;
+}
+
+.facts {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.facts div {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.facts dt {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.facts dd {
+  margin: 0;
+  text-align: right;
+  white-space: nowrap;
+}
+
+@media (max-width: 1000px) {
+  .figures {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .figures > :first-child {
+    grid-column: 1 / -1;
+  }
+}
+
+/*
+ * On a phone, one column: the deposit first (spec 9), then where the window stands and the pot, then what the pot would
+ * buy now, then what happens at the open. The two columns' sections join one list to take that order.
+ */
+@media (max-width: 820px) {
+  .layout {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .main,
+  .side {
+    display: contents;
+  }
+
+  .deposit {
+    order: 1;
+  }
+
+  .figures {
+    order: 2;
+  }
+
+  .pot {
+    order: 3;
+  }
+
+  .ifClosed {
+    order: 4;
+  }
+
+  .steps {
+    order: 5;
+  }
+}
+
+@media (max-width: 560px) {
+  .head,
+  .pot,
+  .steps,
+  .deposit,
+  .ifClosed {
+    padding: 14px 16px;
+  }
+
+  .figures {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .big {
+    font-size: 1.6rem;
+  }
+
+  .facts div {
+    align-items: flex-start;
+  }
+}
