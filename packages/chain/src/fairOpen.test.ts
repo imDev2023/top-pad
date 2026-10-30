@@ -32,6 +32,7 @@ import {
   rungs,
   seatAddress,
   signAdmission,
+  spentOf,
   Tier,
   tierCap,
 } from "./fairOpen";
@@ -67,6 +68,22 @@ describe("the allocation (spec 2.1 step 11)", () => {
     expect(a.others.level).toBe(240_000_000n);
     expect(fillOf(a, Tier.Scored, SOL / 10n)).toBe(SOL / 10n);
     expect(fillOf(a, Tier.Verified, 2n * SOL)).toBe(240_000_000n);
+  });
+
+  it("scales each fill to the rung the pot opens on, rounding up", () => {
+    // 4 seats asking 0.5 SOL into a 1.7 SOL pot: 0.425 SOL each, 1.7 SOL in all, so the pot opens on its top rung.
+    const counts = new Array<number>(200).fill(0);
+    counts[49] = 4;
+    const a = allocate(counts, new Array(10).fill(0), DEPOSIT_STEP, 1_700_000_000n);
+    expect(rungAtOrBelow(1_700_000_000n, a.spend)).toBe(1_700_000_000n);
+    expect(spentOf(a, 1_700_000_000n, Tier.Scored, SOL / 2n)).toBe(425_000_000n);
+    // The same seats into a pot that opens a rung lower spend 5% less each, rounded up to the lamport.
+    expect(spentOf(a, 1_615_000_000n, Tier.Scored, SOL / 2n)).toBe(403_750_000n);
+    // Three seats of 0.03 SOL: a third of a rung a lamport short of 0.09 SOL is a fraction, rounded up; a third of one
+    // three lamports short is whole.
+    const odd = allocate([0, 0, 3], [], DEPOSIT_STEP, 1_700_000_000n);
+    expect(spentOf(odd, 89_999_999n, Tier.Verified, 30_000_000n)).toBe(30_000_000n);
+    expect(spentOf(odd, 89_999_997n, Tier.Verified, 30_000_000n)).toBe(29_999_999n);
   });
 
   it("fills an Unverified seat to its own lower level", () => {

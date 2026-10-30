@@ -33,6 +33,11 @@ export type Bindings = {
    * Secrets Store binding when deployed, or a plain var that local development passes from ~/.config/top-pad.
    */
   KEEPER_KEY?: SecretBinding | string;
+  /**
+   * The admission key, which signs each Fair Open deposit's admission and holds no funds (spec 10.3), as a 64-byte
+   * keypair array: a Secrets Store binding when deployed, or a plain var that local development passes.
+   */
+  ADMISSION_KEY?: SecretBinding | string;
   BLOBS?: BlobStore;
   TURBO_UPLOAD_URL?: string;
   TURBO_PAYMENT_URL?: string;
@@ -148,6 +153,17 @@ export function instantLaunchSetup(cfg: Config, env: Bindings):
     keeperKey: typeof keeperKey === "string" ? { get: async () => keeperKey } : keeperKey,
     blobs: env.BLOBS,
   };
+}
+
+/** What Fair Open deposits need on this cluster, or why they cannot be taken here. */
+export function fairOpenSetup(cfg: Config, env: Bindings):
+  | { ok: true; admission: Address; admissionKey: SecretBinding }
+  | { ok: false; reason: string } {
+  const admission = cfg.heat?.keys?.admission;
+  if (!cfg.heat?.configs || !admission) return { ok: false, reason: `Heat runs no Fair Opens on ${cfg.cluster}.` };
+  const admissionKey = env.ADMISSION_KEY;
+  if (!admissionKey) return { ok: false, reason: "The admission key is not bound to this deployment." };
+  return { ok: true, admission, admissionKey: typeof admissionKey === "string" ? { get: async () => admissionKey } : admissionKey };
 }
 
 /** A transaction's or an address's page on Solana's explorer, on this cluster. */

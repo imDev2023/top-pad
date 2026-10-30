@@ -16,9 +16,10 @@ import {
   type Transaction,
 } from "@solana/kit";
 import { parseDataItem } from "@top-pad/arweave";
-import { DBC_LAYOUT, DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS, FEE_PROGRAM_ADDRESS } from "@top-pad/chain";
+import { DBC_LAYOUT, DEPOSIT_STEP, DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS, FAIR_OPEN_PROGRAM_ADDRESS, FEE_PROGRAM_ADDRESS, lowestRung, Tier } from "@top-pad/chain";
 import { getVirtualPoolSize, VIRTUAL_POOL_DISCRIMINATOR } from "@top-pad/clients/dbc";
 import { getCoinRecordEncoder, LaunchMode } from "@top-pad/clients/fee";
+import { getLaunchEncoder, getSeatEncoder, LaunchStatus, type LaunchArgs } from "@top-pad/clients/fair-open";
 import type { RawTransaction } from "@top-pad/indexer";
 import type { BlobStore, Bindings } from "../env";
 
@@ -124,6 +125,9 @@ export class Fakes {
         return ok({ context, value: Number(this.balance) });
       case "getBlockHeight":
         return ok(Number(this.blockHeight));
+      case "getMinimumBalanceForRentExemption":
+        // The rent every cluster charges: two years of 3,480 lamports a byte, with 128 bytes for the account itself.
+        return ok((Number(params[0]) + 128) * 6_960);
       case "simulateTransaction": {
         this.simulated.push(decode(params[0] as string));
         if (this.simulationError) return ok({ context, value: { err: this.simulationError, logs: ["Transfer: insufficient lamports 0, need 17000000"], accounts: null, unitsConsumed: 0, returnData: null } });
@@ -219,6 +223,63 @@ export function coinRecord(p: { mint: Address; pool: Address; windowClaimed: boo
     bump: 254,
   });
   return { owner: FEE_PROGRAM_ADDRESS as string, data: new Uint8Array(data) };
+}
+
+/**
+ * A Fair Open's launch account as the program keeps it: a window from `depositsOpenAt`, devnet's 1.7 SOL pot, and the
+ * seats `asks` counts, as [deposit in steps, tier] pairs.
+ */
+export function fairOpenLaunch(p: { creator: Address; nonce: Address; depositsOpenAt: bigint; minRaise?: bigint; asks?: [number, Tier][]; failure?: number }) {
+  const counts = new Array<number>(200).fill(0);
+  const unverifiedCounts = new Array<number>(10).fill(0);
+  const deposits = [0n, 0n, 0n];
+  for (const [steps, tier] of p.asks ?? []) {
+    (tier === Tier.Unverified ? unverifiedCounts : counts)[steps - 1]! += 1;
+    deposits[tier]! += BigInt(steps) * DEPOSIT_STEP;
+  }
+  const launch: LaunchArgs = {
+    creator: p.creator,
+    dbcConfig: "rPqMj6mwJp9qnZBMeawF8s2iC74EkhpbUSvhWd9XTnC" as Address,
+    quoteMint: "So11111111111111111111111111111111111111112" as Address,
+    nonce: p.nonce,
+    identityHash: new Uint8Array(32).fill(0xab),
+    depositsOpenAt: p.depositsOpenAt,
+    opensAt: p.depositsOpenAt + 600n,
+    minRaise: p.minRaise ?? 0n,
+    potCap: 1_700_000_000n,
+    lowestRung: lowestRung(1_700_000_000n),
+    step: DEPOSIT_STEP,
+    status: p.failure === undefined ? LaunchStatus.Scheduled : LaunchStatus.Failed,
+    failure: p.failure ?? null,
+    failedAt: 0n,
+    seats: (p.asks ?? []).length,
+    unverifiedDeposits: deposits[0]!,
+    scoredDeposits: deposits[1]!,
+    verifiedDeposits: deposits[2]!,
+    coinRent: BigInt((p.asks ?? []).length) * 2_039_280n,
+    counts,
+    unverifiedCounts,
+    reserved: new Uint8Array(128),
+    bump: 255,
+    vaultBump: 254,
+  };
+  return { owner: FAIR_OPEN_PROGRAM_ADDRESS as string, data: new Uint8Array(getLaunchEncoder().encode(launch)) };
+}
+
+/** A seat as the program keeps it. */
+export function fairOpenSeat(p: { launch: Address; wallet: Address; person: Uint8Array; tier: Tier; deposit: bigint }) {
+  const data = getSeatEncoder().encode({
+    launch: p.launch,
+    wallet: p.wallet,
+    person: p.person,
+    tier: p.tier,
+    cap: [10n, 50n, 200n][p.tier]! * DEPOSIT_STEP,
+    deposit: p.deposit,
+    coinRent: 2_039_280n,
+    reserved: new Uint8Array(48),
+    bump: 253,
+  });
+  return { owner: FAIR_OPEN_PROGRAM_ADDRESS as string, data: new Uint8Array(data) };
 }
 
 /** The Worker's bindings for a test: devnet's configs, every outside service faked. */

@@ -112,11 +112,15 @@ export type Candle = z.infer<typeof Candle>;
 export const CoinCandles = z.object({ seconds: CandleSeconds, candles: z.array(Candle) });
 export type CoinCandles = z.infer<typeof CoinCandles>;
 
-/** What a live room pushes (spec 10.2): its new trades, coins and window claims, batched every 100 ms. */
+/**
+ * What a live room pushes (spec 10.2): its new trades, coins and window claims, and a Fair Open's changes, batched every
+ * 100 ms. A Fair Open's page reads the launch again on its event, since the pot is the launch account's to say.
+ */
 export const LiveEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("trade"), mint: Address, trade: Trade }),
   z.object({ type: z.literal("coin"), mint: Address, name: z.string(), ticker: z.string(), heat: z.boolean() }),
   z.object({ type: z.literal("window_claim"), mint: Address, windowClaim: WindowClaim }),
+  z.object({ type: z.literal("fair_open"), launch: Address, change: z.enum(["created", "deposit", "withdraw", "refund", "failed", "closed"]) }),
 ]);
 export type LiveEvent = z.infer<typeof LiveEvent>;
 

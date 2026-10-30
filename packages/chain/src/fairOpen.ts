@@ -247,6 +247,17 @@ export function fillOf(a: Allocation, tier: Tier, deposit: bigint): bigint {
   return deposit < level ? deposit : level;
 }
 
+/**
+ * What a seat's deposit buys with when the pot opens on `rung`: its fill scaled down to the rung pro rata, rounded up to
+ * the lamport (spec 12), so the lamports the rounding gathers go to the launch's Tax Share and stay with depositors. The
+ * rest of the deposit is refunded.
+ */
+export function spentOf(a: Allocation, rung: bigint, tier: Tier, deposit: bigint): bigint {
+  const fill = fillOf(a, tier, deposit);
+  if (a.spend === 0n || fill === 0n) return 0n;
+  return (fill * rung + a.spend - 1n) / a.spend;
+}
+
 /** The ladder's 64 rungs, largest first: the pot's cap, then each 95% of the one before, rounded down (spec 2.1 step 6). */
 export function rungs(cap: bigint): bigint[] {
   const all = [cap];
@@ -393,16 +404,26 @@ export async function withdrawInstructions(w: FairOpenWithdrawal): Promise<Instr
   ];
 }
 
-/** Marking a launch failed, which anyone may send once it cannot open. */
-export async function markFailedInstructions(m: { launch: Address; computeUnitPrice: bigint }): Promise<Instruction[]> {
-  return [...budget(FAIR_OPEN_COMPUTE_UNITS.markFailed, m.computeUnitPrice), getMarkFailedInstruction({ launch: m.launch, ...(await programAccounts()) })];
+type Refund = { launch: Address; seat: Address; wallet: Address };
+
+async function withdrawFailedInstruction(r: Refund): Promise<Instruction> {
+  const [vault] = await findVaultPda({ launch: r.launch });
+  return getWithdrawFailedInstructionAsync({ launch: r.launch, vault, seat: r.seat, wallet: r.wallet, ...(await programAccounts()) });
 }
 
-/** A failed launch's seat returned to its wallet: anyone may send it, `payer` paying the fee. */
-export async function withdrawFailedInstructions(r: { launch: Address; seat: Address; wallet: Address; computeUnitPrice: bigint }): Promise<Instruction[]> {
-  const [vault] = await findVaultPda({ launch: r.launch });
-  const refund = await getWithdrawFailedInstructionAsync({ launch: r.launch, vault, seat: r.seat, wallet: r.wallet, ...(await programAccounts()) });
-  return [...budget(FAIR_OPEN_COMPUTE_UNITS.withdrawFailed, r.computeUnitPrice), refund];
+/**
+ * Marking a launch failed, which anyone may send once it cannot open; with `refund`, the sender's own seat comes back in
+ * the same transaction.
+ */
+export async function markFailedInstructions(m: { launch: Address; refund?: Omit<Refund, "launch">; computeUnitPrice: bigint }): Promise<Instruction[]> {
+  const units = FAIR_OPEN_COMPUTE_UNITS.markFailed + (m.refund ? FAIR_OPEN_COMPUTE_UNITS.withdrawFailed : 0);
+  const refund = m.refund ? [await withdrawFailedInstruction({ launch: m.launch, ...m.refund })] : [];
+  return [...budget(units, m.computeUnitPrice), getMarkFailedInstruction({ launch: m.launch, ...(await programAccounts()) }), ...refund];
+}
+
+/** A failed launch's seat returned to its wallet: anyone may send it, the sender paying the fee. */
+export async function withdrawFailedInstructions(r: Refund & { computeUnitPrice: bigint }): Promise<Instruction[]> {
+  return [...budget(FAIR_OPEN_COMPUTE_UNITS.withdrawFailed, r.computeUnitPrice), await withdrawFailedInstruction(r)];
 }
 
 /** A failed launch closed once every seat is back, its rent and its vault's returned to the creator. */

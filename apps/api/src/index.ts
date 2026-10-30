@@ -11,6 +11,7 @@ import { notifyPending, runJob } from "@top-pad/jobs";
 import { finishXLink, logout, me, startXLink } from "./auth";
 import { getCoin, getCoinCandles, getCoinTrades } from "./coins";
 import { getEarnings, prepareClaim, reportClaim } from "./earnings";
+import { getFairOpen, prepareDeposit, prepareMarkFailed, prepareRefund, prepareWithdrawal, reportFairOpenTransaction } from "./fairOpens";
 import { indexerOf } from "./indexing";
 import { config, instantLaunchSetup, type Bindings } from "./env";
 import { sameOriginWrites, withConfig, withDb, type AppEnv } from "./http";
@@ -78,7 +79,7 @@ app.post("*", async (c, next) => {
   const refusal: LaunchRefusal = { error: `The image is too large: a coin's image can be at most ${Math.round(maxImageBytes / 1024)} KB.`, code: "image" };
   return bodyLimit({ maxSize: maxImageBytes + 16 * 1024, onError: (c) => c.json(refusal, 413) })(c, next);
 });
-for (const path of ["/auth/*", "/me", "/launches", "/launches/*", "/vamp-shield/*", "/coins/*", "/earnings/*"]) app.use(path, withDb);
+for (const path of ["/auth/*", "/me", "/launches", "/launches/*", "/vamp-shield/*", "/coins/*", "/earnings/*", "/fair-opens/*"]) app.use(path, withDb);
 app.get("/auth/x/start", startXLink);
 app.get("/auth/x/callback", finishXLink);
 app.post("/auth/logout", logout);
@@ -93,6 +94,12 @@ app.get("/coins/:mint/candles", getCoinCandles);
 app.get("/earnings/:wallet", getEarnings);
 app.post("/earnings/claims", reportClaim);
 app.post("/earnings/:wallet/claim", prepareClaim);
+app.post("/fair-opens/transactions", reportFairOpenTransaction);
+app.get("/fair-opens/:launch", getFairOpen);
+app.post("/fair-opens/:launch/deposit", prepareDeposit);
+app.post("/fair-opens/:launch/withdraw", prepareWithdrawal);
+app.post("/fair-opens/:launch/mark-failed", prepareMarkFailed);
+app.post("/fair-opens/:launch/refund", prepareRefund);
 
 /**
  * `GET /indexer`: how the indexer stands; asking also starts it if it is not running, as the cron does, and moves it to
@@ -142,12 +149,13 @@ async function scheduled(_controller: ScheduledController, env: Bindings, ctx: E
 }
 
 const ADDRESS = "[1-9A-HJ-NP-Za-km-z]{32,44}";
-const LIVE_PATH = new RegExp(`^/live/(?:board|coins/(${ADDRESS}))$`);
+const LIVE_PATH = new RegExp(`^/live/(?:board|coins/(${ADDRESS})|fair-opens/(${ADDRESS}))$`);
 
 /**
- * `GET /live/board` and `GET /live/coins/:mint`: a WebSocket on a live room (spec 10.2), handed straight to its Durable
- * Object, outside Hono, whose middleware would rewrite the 101 answer's headers. Browsers always send their origin on a
- * WebSocket handshake, and only Heat's pages may join; a client with no origin reads the same public trades as the API.
+ * `GET /live/board`, `GET /live/coins/:mint` and `GET /live/fair-opens/:launch`: a WebSocket on a live room (spec 10.2),
+ * handed straight to its Durable Object, outside Hono, whose middleware would rewrite the 101 answer's headers. Browsers
+ * always send their origin on a WebSocket handshake, and only Heat's pages may join; a client with no origin reads the
+ * same public events as the API.
  */
 function liveRoom(request: Request, env: Bindings): Promise<Response> | null {
   const match = LIVE_PATH.exec(new URL(request.url).pathname);
@@ -158,7 +166,8 @@ function liveRoom(request: Request, env: Bindings): Promise<Response> | null {
   if (origin && !config(env).webOrigins.includes(origin)) return refuse(403, "Only Heat's own pages may join a live room.");
   const rooms = env.LIVE_ROOMS;
   if (!rooms) return refuse(503, "Live rooms are not bound to this deployment.");
-  return rooms.get(rooms.idFromName(match[1] ? `coin:${match[1]}` : "board")).fetch(request);
+  const room = match[1] ? `coin:${match[1]}` : match[2] ? `fair-open:${match[2]}` : "board";
+  return rooms.get(rooms.idFromName(room)).fetch(request);
 }
 
 export default {

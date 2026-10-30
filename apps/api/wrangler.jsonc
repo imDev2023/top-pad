@@ -26,7 +26,7 @@
   // The version this code is, which the indexer checks against the Worker's after a deploy.
   "version_metadata": { "binding": "CF_VERSION_METADATA" },
   // Local development (`wrangler dev`) runs against devnet, the one cluster with Heat's configs, on the docker database.
-  // The keeper key and the X app's client come in as vars from outside the repo (CLAUDE.md, "The build").
+  // The keeper and admission keys and the X app's client come in as vars from outside the repo (CLAUDE.md, "The build").
   "vars": {
     "CLUSTER": "devnet",
     // The web app's origins, comma-separated; the only ones a browser may call the API from.
@@ -76,10 +76,12 @@
       },
       "workflows": [{ "name": "top-pad-instant-launches-devnet", "binding": "INSTANT_LAUNCHES", "class_name": "InstantLaunchKeeper" }],
       "version_metadata": { "binding": "CF_VERSION_METADATA" },
-      // The keeper key, which is also the launch key (spec 10.3), from the account's Secrets Store and bound to this Worker
-      // alone; put there by the owner on 2026-10-29, read only when a launch is signed.
+      // The keeper key, which is also the launch key, and the admission key, which signs each Fair Open deposit's
+      // admission and holds no funds (spec 10.3), from the account's Secrets Store and bound to this Worker alone; put
+      // there by the owner on 2026-10-29 and 2026-10-30, read only when a launch or an admission is signed.
       "secrets_store_secrets": [
-        { "binding": "KEEPER_KEY", "store_id": "bbb2e2aa36724838a433d7495bbe9baf", "secret_name": "top-pad-devnet-keeper-key" }
+        { "binding": "KEEPER_KEY", "store_id": "bbb2e2aa36724838a433d7495bbe9baf", "secret_name": "top-pad-devnet-keeper-key" },
+        { "binding": "ADMISSION_KEY", "store_id": "bbb2e2aa36724838a433d7495bbe9baf", "secret_name": "top-pad-devnet-admission-key" }
       ]
     }
   }

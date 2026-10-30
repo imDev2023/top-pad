@@ -1,11 +1,11 @@
 // The indexer (spec 10.2) as one Durable Object, on the devnet source: a `logsSubscribe` WebSocket on Heat's two
-// configs and the fee program says which transactions to fetch and index at once, and reconciliation from each
+// configs and its two programs says which transactions to fetch and index at once, and reconciliation from each
 // account's cursor catches whatever the socket missed. An alarm every 15 s keeps the object awake, reopens a dropped
 // socket and reconciles every minute, or at once while the socket is down; the cron wakes it after a deploy. The
 // socket is only the fast path: a trade the socket never reports is still indexed within a minute.
 import { DurableObject } from "cloudflare:workers";
 import { inArray } from "drizzle-orm";
-import { FEE_PROGRAM_ADDRESS } from "@top-pad/chain";
+import { FAIR_OPEN_PROGRAM_ADDRESS, FEE_PROGRAM_ADDRESS } from "@top-pad/chain";
 import type { LiveEvent } from "@top-pad/contract";
 import { createDb, indexedTransactions } from "@top-pad/db";
 import {
@@ -63,10 +63,13 @@ export class Indexer extends DurableObject<Bindings> {
   /** Where reconciliation stands on each account, read from Postgres once per instance, then kept here. */
   private cursors = new Map<string, string | null>();
 
-  /** The accounts whose transactions are Heat's: both configs (every pool and swap on them) and the fee program. */
+  /**
+   * The accounts whose transactions are Heat's: both configs (every pool and swap on them), the fee program, and the
+   * Fair Open program (every launch, deposit, withdrawal and refund).
+   */
   private watching(): string[] {
     const configs = config(this.env).heat?.configs;
-    return configs ? [configs.instant, configs.fairOpen, FEE_PROGRAM_ADDRESS] : [];
+    return configs ? [configs.instant, configs.fairOpen, FEE_PROGRAM_ADDRESS, FAIR_OPEN_PROGRAM_ADDRESS] : [];
   }
 
   private handler(): TransactionHandler {
@@ -226,10 +229,10 @@ export class Indexer extends DurableObject<Bindings> {
   }
 
   /**
-   * Sends what a transaction added to its coins' rooms and the board's, and starts the keeper for each Instant launch
-   * registered, which the launch's own landing may not have (a launch whose browser went away, or another deployment's).
+   * Sends what a transaction added to its coins' rooms and the board's, and a Fair Open's changes to its room, and starts
+   * the keeper for each Instant launch registered, which the launch's own landing may not have (a launch whose browser went away, or another deployment's).
    */
-  private async publish({ signature, pools, coins, trades, windowClaims }: Indexed) {
+  private async publish({ signature, pools, coins, trades, windowClaims, fairOpens, seatEvents, fairOpenEnds }: Indexed) {
     for (const coin of coins) {
       if (coin.launchMode === "instant") await startKeeper(this.env, coin.mint).catch((e) => console.error(`starting the keeper for ${coin.mint} failed`, e));
     }
@@ -258,6 +261,14 @@ export class Indexer extends DurableObject<Bindings> {
       });
       add(`coin:${claim.mint}`, { type: "window_claim", mint: claim.mint, windowClaim });
     }
+    // A Fair Open's page reads the launch again on any change, so one event per launch and kind is enough.
+    const fairOpen = (launch: string, change: Extract<LiveEvent, { type: "fair_open" }>["change"]) => {
+      const room = `fair-open:${launch}`;
+      if (!events.get(room)?.some((e) => e.type === "fair_open" && e.change === change)) add(room, { type: "fair_open", launch, change });
+    };
+    for (const f of fairOpens) fairOpen(f.launch, "created");
+    for (const e of seatEvents) fairOpen(e.launch, e.kind);
+    for (const end of fairOpenEnds) fairOpen(end.launch, end.kind);
     await Promise.all(
       [...events].map(([room, batch]) =>
         rooms
