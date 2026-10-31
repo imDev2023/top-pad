@@ -28,7 +28,6 @@ import {
   type KeyPairSigner,
   type Signature,
 } from "@solana/kit";
-import { findAssociatedTokenPda, getCloseAccountInstruction } from "@solana-program/token";
 import { getTransferSolInstruction } from "@solana-program/system";
 import {
   allocate,
@@ -39,7 +38,6 @@ import {
   seatOutcome,
   swapInstructions,
   Tier,
-  TOKEN_PROGRAM_ADDRESS,
   type Creation,
   type SignedRung,
 } from "@top-pad/chain";
@@ -68,6 +66,7 @@ import {
   recoverDeposits,
   scheduleFairOpen,
   seatOf,
+  sellAll,
   signedLadder,
   type ScheduledFairOpen,
 } from "./fairOpen";
@@ -133,16 +132,6 @@ async function sniperBuys(sniper: KeyPairSigner, mint: Address, count: number, a
       return { wire: getBase64EncodedWireTransaction(transaction), signature: getSignatureFromTransaction(transaction) };
     }),
   );
-}
-
-/** Sells back every coin a wallet holds of `mint` once the tax window is over, and closes its coin account. */
-async function sellAll(wallet: KeyPairSigner, mint: Address) {
-  const coins = await coinBalance(wallet.address, mint);
-  if (coins === 0n) return;
-  const pool = await dbcPoolAddress(FAIR_OPEN_CONFIG, mint, devnet.quote.mint);
-  const [coinAccount] = await findAssociatedTokenPda({ owner: wallet.address, mint, tokenProgram: TOKEN_PROGRAM_ADDRESS });
-  const sell = await swapInstructions({ config: FAIR_OPEN_CONFIG, pool, mint, quoteMint: devnet.quote.mint, trader: wallet, side: "sell", amountIn: coins, minimumOut: 1n });
-  await send(wallet, [...sell, getCloseAccountInstruction({ account: coinAccount, destination: wallet.address, owner: wallet })]);
 }
 
 /** A test's depositors: a launch's derived wallets, funded for their deposits, the seat and coin account rent, and fees. */

@@ -94,12 +94,18 @@ Fair Open is preselected.
 - Our keeper holds the nonce and our server generated the mint, so the creator cannot spoil a signed ladder: they can neither advance the nonce nor create that mint first.
 - Fallback for a wallet that cannot sign a batch: the creator signs once, online, at the open.
 - Signing 64 transactions in one prompt is **unproven** in Phantom, Solflare and Backpack.
+- As built ([#46](https://github.com/imDev2023/top-pad/issues/46)): `signLadder` in `@top-pad/chain` signs the 64 rungs on the launch's nonce, each by the creator, our keeper and the mint key, and every rung compresses its common accounts through Heat's shared address lookup table, frozen so no signed rung's lookups can change (devnet `B2XYd5qp7wyT5Dnvg3CJh6aZxoiiAAX4QRvLLMsgxMHT`, 19 addresses, made by `pnpm --filter @top-pad/chain lookup-table`).
+  Until the creator's flow exists ([#47](https://github.com/imDev2023/top-pad/issues/47)), `pnpm --filter @top-pad/chain fair-open` signs the ladder at scheduling with Heat's bank as the creator, into `~/.config/top-pad/<cluster>/ladders/<launch>.json`, and `fair-open-open` sends the rung the pot covers, pushes every seat and closes the nonce.
 
 **7. Prepay the launch's rent.**
 About 0.03 SOL, all of it rent: the DBC pool accounts (about 0.02 SOL), the launch account (about 1,100 bytes, 0.0062 SOL) and the nonce account (0.00106 SOL).
 The launch and nonce rent come back when the launch closes, and all of it comes back if the Fair Open fails.
 It is not a Heat fee; it puts a small, refundable price on filling the launch calendar.
 As built ([#45](https://github.com/imDev2023/top-pad/issues/45), devnet rent on 2026-10-30): scheduling takes the launch account (1,233 bytes, 0.0069 SOL), its vault (0.00085 SOL) and the nonce (0.00106 SOL); `close_launch` returns the first two once a failed launch's every seat is back, and the nonce's comes back through the keeper, its authority, with the open's Workflow ([#46](https://github.com/imDev2023/top-pad/issues/46)); the pool's rent is the open's.
+As built ([#46](https://github.com/imDev2023/top-pad/issues/46)): scheduling also prepays the open's rent into the vault, 23,517,880 lamports at devnet's rent on 2026-10-31: DBC's mint, pool and two vaults, the coin's Metaplex metadata (607 bytes, with Metaplex's 0.01 SOL creation fee), the pot's coin account and the coin's record, so neither our keeper nor an empty Creator wallet stands between the depositors and their coins.
+At the open our keeper fronts that rent as DBC's payer, and `settle` pays it back exactly what the open's accounts cost it, from the prepayment: on devnet the keeper paid only the transaction's fee.
+What is left comes back to the creator with the launch's own rent; a failed launch's `close_launch` returns all of it.
+Our keeper closes the nonce once the launch has opened or failed, every lamport going to the creator: it cannot ride in the creation transaction, since a nonce cannot be emptied in the transaction that advances it.
 
 **8. The calendar entry.**
 A sealed entry: a "?" tile, the time, the creator and their record summary, the terms (pot up to 17 SOL, minimum raise, 10 minutes) and the teaser.
@@ -131,6 +137,12 @@ The creation transaction, in order, with one shared address lookup table:
 On devnet the prototype's version came to 979 bytes with a lookup table (1,193 without, against a 1,232-byte limit) and 160k to 204k compute units for its DBC part; with the fee-program record it is about 1,014 bytes, **unproven** ([Fair Open creation transaction on devnet](https://github.com/imDev2023/top-pad/issues/31)).
 Every buy in the creation slot other than the pot's pays the 99% cliff of the sniper tax; public trading starts in that same instant.
 The keeper holds the broadcast up to 10 s if the metadata URI is not yet served.
+As built ([#46](https://github.com/imDev2023/top-pad/issues/46), 2026-10-31):
+- The transaction is a nonce advance, a compute budget, `open`, DBC's pool creation, the Associated Token Account program making the launch's own account of the coin (the pot's coin account, which `swap2` needs before it runs), `swap2` with the instructions sysvar, and `settle`; `open` checks every one of them (`programs/fair_open/src/creation.rs`), the coin's identity hash included, so a rung for another coin fails as `IdentityMismatch`.
+- `open` makes the pot's wrapped-SOL account at a PDA of the program, funded from the vault with its rent and exactly the rung, so nobody can make it first or send it more than a donation, and approves our keeper for the rung; `settle` closes it back into the vault once SPL Token has cleared the spent allowance, the check that the swap spent exactly the rung.
+- The coin's record comes from one CPI, the fee program's `register_fair_open_coin(launch, pot_fee)`, signed by the Fair Open program's coin registrar, in place of `record_pot_fee` and `register_coin`.
+- Measured on devnet: the creation transaction was 1,093 bytes and used 291,992 compute units; the pot's 1.615 SOL buy paid exactly 1.25% (20,187,500 lamports), of which the pot's own fee, the partner's four fifths, is recorded; 2 of 10 buys a sniper sent behind it landed in the creation slot and paid 99%, 990,000 lamports on a 0.001 SOL buy; offline, with the longest coin a creator can enter, it is 1,136 bytes.
+  Of the static accounts, the programs it invokes must stay out of the lookup table, so it carries its own launch's and coin's ten addresses, three signers and five programs in full.
 
 **11. Allocation: one price, equal shares.**
 - Every depositor buys at the pot's single average price.
@@ -143,12 +155,16 @@ The keeper holds the broadcast up to 10 s if the metadata URI is not yet served.
 - As built ([#45](https://github.com/imDev2023/top-pad/issues/45)): one level for every seat while the Unverified fills stay within a quarter (three times theirs at most everyone else's, to the lamport); past it, everyone else shares up to three quarters of the cap and the Unverified seats a third of what that fills, within what the cap has left.
   The rungs fall from the cap as each rung's 19/20, rounded down, 64 of them, and a seat's spend is its fill times the rung over the pot's spend, rounded up.
   `@top-pad/chain` holds the reference calculation the Fair Open page shows; the program's own (`programs/fair_open/src/allocation.rs`) gives the same numbers to the lamport on 404 pots that both test suites read (`packages/chain/src/fixtures/allocations.json`).
+- As built ([#46](https://github.com/imDev2023/top-pad/issues/46)): a seat spends its fill's share of the rung, `fill * rung / spend` rounded up, and buys its share of the pot's coins, `fill * coins / spend` rounded down; the same fixture now carries each pot's rung and its seats' spend and coins added up, for 394 pots that can open, so both suites check the shares too.
+  On devnet the oversubscribed pot of 3 Verified seats asking 0.6 SOL and 6 Unverified asking 0.1 SOL spent 1,699,999,998 lamports of fills at levels of 0.425 and 0.070833333 SOL, opened on the 1.615 SOL rung, and every seat's coins and refund matched the reference to the lamport, as did a partial fill of 0.9 SOL opening on a lower rung.
 
 **12. Pushes.**
 Right after the open anyone can run the push, and our keeper does it at once, in parallel batches of 10 transactions.
 One push transaction pays about 8 depositors their coins and refund; a 500-depositor Fair Open needs about 100 push transactions, paid by Heat (about 0.0005 SOL in base fees plus priority fees).
 Every seat gets its coins and refund within 2 minutes of the open; anything a push cannot deliver stays in the seat for the depositor to claim.
 There is no vesting for depositors: the 60 s sniper tax also taxes sells, so a first-minute dump pays up to 99%.
+As built ([#46](https://github.com/imDev2023/top-pad/issues/46)): a push carries 7 seats, not 8: a transaction's instructions, calls included, stop at 64, and a seat whose coin account the push makes takes 8 of them (devnet refused 8 seats as "Max instruction trace length exceeded"); measured on devnet, 203,352 compute units for 7 seats.
+Each seat's coin account is its wallet's own associated account, made from the rent the seat prepaid, or that rent comes back with the refund when it exists; the creator's seat waits for the Creator lock; a depositor can claim into any account of the coin they own; once every seat has its coins, the coin dust is burnt and the pot's coin account closed.
 
 **13. The Creator lock.**
 Right after the open, anyone can run the lock instruction, which moves the creator's share of the pot's coins into a Jupiter Lock vesting escrow ([Creator lock](https://github.com/imDev2023/top-pad/issues/11), [ADR 0004](adr/0004-the-creator-buys-only-through-the-fair-open-pot.md)):
@@ -377,6 +393,7 @@ On devnet (2026-10-29, [#41](https://github.com/imDev2023/top-pad/issues/41)): d
 Upgraded on devnet with the claims on 2026-10-29 ([#44](https://github.com/imDev2023/top-pad/issues/44)), again from a verified build: executable hash `a8c66760cc62473a165997298051834e3a46f04cffdf92fc771626ff669c0bbb`, commit `467e101`, 329,544 bytes, the program account extended for about 0.44 SOL.
 Measured against DBC 0.2.2 on devnet: `claim_window_fees` 37,820 compute units and `claim_fees` 61,722 a pool, each DBC payout about 16,000 with DBC's own event.
 The claims' unit tests run in LiteSVM against `tests/dbc-stand-in`, our own stand-in for DBC's partner fee claim written from its source, never deployed; `tests/devnet/src/fee-claims.test.ts` runs them against DBC itself.
+Upgraded on devnet with `register_fair_open_coin` on 2026-10-31 ([#46](https://github.com/imDev2023/top-pad/issues/46)), from a verified build: executable hash `a953b6c93c2675592c445e7800cb5efb10151fa88593aba78e3c7c5aa3bc4ded`, commit `23aae8a`, 349,544 bytes, rebuilt from GitHub and recorded on chain; it checks its signer is the coin registrar of the Fair Open program the `FeeConfig` names (`vtRQaZaTtix75wDG6zHS3HrdgpqNNHpKdxQbHwJiFAG`).
 
 Invariants:
 - It never holds a creator balance after an instruction ends.
@@ -416,7 +433,7 @@ Invariants:
 - At most one open per launch, never before its scheduled time, never from 15 minutes after it.
 - No seat's fill exceeds its tier's cap; Unverified fills add up to at most 25% of the SOL spent.
 - The creator's coins leave the pot only into the Jupiter Lock escrow.
-- **Unproven**: the program on chain at all (the prototype's never ran: the wallet had 0.027 SOL), its compute, `settle`, `claim`, the partial fill past the target, and the Jupiter Lock CPI.
+- **Unproven**: the Jupiter Lock CPI ([#49](https://github.com/imDev2023/top-pad/issues/49)); `open`, `settle`, `push`, `claim` and a partial fill ran on devnet on 2026-10-31 ([#46](https://github.com/imDev2023/top-pad/issues/46)).
 
 As built on devnet ([#45](https://github.com/imDev2023/top-pad/issues/45), 2026-10-30), the window and the failure path:
 - Deployed from a verified build: executable hash `eed50f6f97903e24791299a47d43c2f106d31cf9092df49650fabbbf42df1265`, commit `585e447`, 409,664 bytes (2.08 SOL of rent), rebuilt from GitHub by `solana-verify verify-from-repo` and recorded on chain.
@@ -432,6 +449,13 @@ As built on devnet ([#45](https://github.com/imDev2023/top-pad/issues/45), 2026-
 - The program checks after every deposit, withdrawal and refund that the vault holds what it owes, and a LiteSVM test checks it after each of hundreds of random instructions against the seats themselves.
 - The launch and seat accounts keep reserved bytes (128 and 48) for what the open, the pushes and the Tax Share will record, so a seat left in a failed launch still reads after those upgrades.
 - Compute in LiteSVM: `create_launch` 35,406 units, a deposit taking a seat 41,686 and a top-up 34,368, a withdrawal about 28,400, `mark_failed` 74,047 (it runs the allocation over every step), `withdraw_failed` 27,919; on devnet (2026-10-30), `create_launch` 38,404, a deposit taking a seat 38,708 and a top-up 34,390, a withdrawal 28,401, `mark_failed` 74,341 to 74,904, `withdraw_failed` 27,919 to 27,941 and `close_launch` 12,843; a deposit's transaction paid 10,000 lamports, and a launch's 15,000, signed by the creator, the keeper and the new nonce.
+
+As built on devnet ([#46](https://github.com/imDev2023/top-pad/issues/46), 2026-10-31), the open and the pushes:
+- Upgraded from a verified build: executable hash `847e7f7ae324951005c75b97ffa13cd126593e38f8f3514a39b20b671cbacfcf`, commit `23aae8a`, 542,832 bytes, the program account extended for about 0.68 SOL, rebuilt from GitHub and recorded on chain.
+- `open(rung)`, `settle`, `push` and `claim` as in 2.1 steps 10 to 12; the launch account's reserved bytes took the open's record (the open's rent, the coin, the levels, the rung, the coins, refunds paid and seats delivered) and the seat's its spend, coins, refund and delivery, so both keep their sizes, 1,233 and 178 bytes.
+- The open's whole transaction ran in LiteSVM against a stand-in for DBC's pool creation and swap (`tests/dbc-stand-in`), every shape it refuses unit-tested natively (`creation.rs`), and against DBC itself in `tests/devnet/src/fair-open-open.test.ts`.
+- Lamports leave the vault by hand, so the first CPI after such a move carries the vault too, and a push pays its refunds after its last CPI: the runtime refuses a CPI that sees one side of a move and not the other (`UnbalancedInstruction`).
+- Compute on devnet: the creation transaction 291,992 units, a push of 7 seats 203,352, a claim 39,956.
 
 ## 6. Anti-abuse
 
@@ -853,9 +877,9 @@ Not in this build; each returns only as its own effort, mostly the mainnet effor
 ## 16. Risks and what is unproven
 
 Unproven, and proved by section 11's tests:
-- Our programs on chain at all: compute, `settle`, `claim`, the Jupiter Lock CPI, a partial fill past the target, and the creation transaction at about 1,014 bytes with the coin record; the `fee_claimer` PDA's claims by CPI were shown on devnet on 2026-10-29 ([#44](https://github.com/imDev2023/top-pad/issues/44)), and the Fair Open program's deposits, admissions, withdrawals and failure path on 2026-10-30 ([#45](https://github.com/imDev2023/top-pad/issues/45)).
+- The Jupiter Lock CPI; the `fee_claimer` PDA's claims by CPI were shown on devnet on 2026-10-29 ([#44](https://github.com/imDev2023/top-pad/issues/44)), the Fair Open program's deposits, admissions, withdrawals and failure path on 2026-10-30 ([#45](https://github.com/imDev2023/top-pad/issues/45)), and its open, `settle`, pushes, claims and a partial fill on 2026-10-31, the creation transaction measuring 1,093 bytes ([#46](https://github.com/imDev2023/top-pad/issues/46)).
 - Wallets signing a 64-rung ladder in one prompt.
-- A sniper's separate transaction landing in the creation slot.
+- A sniper's separate transaction landing in the creation slot: shown on devnet on 2026-10-31, when 2 of 10 buys a sniper sent behind the open landed in its slot and paid 99% ([#46](https://github.com/imDev2023/top-pad/issues/46)).
 - Turbo serving an upload within 10 s: `turbo-gateway.com` served an Instant launch's upload at once, while `arweave.net` still answered 404 three minutes later (2026-10-29, [#41](https://github.com/imDev2023/top-pad/issues/41)), so metadata URIs name `turbo-gateway.com`; the Fair Open's 10 s hold is still to be measured.
 - How precisely a Workflow wakes (if the open lands more than 2 s late, it moves to a Durable Object alarm): the window claim's Workflow, deployed on devnet, landed its claims 1 s after the minute ended by the chain's clock ([#44](https://github.com/imDev2023/top-pad/issues/44), 2026-10-29); the open's is still to be measured.
 - Codama's output for Meteora's IDLs, settled in [#39](https://github.com/imDev2023/top-pad/issues/39) (2026-10-27): clean for DAMM v2 and Jupiter Lock; for DBC, two generic fixes applied to the IDL before generation (two fields with the same camelCase name, and a type embedding an account's struct), so no client falls back to the SDK.

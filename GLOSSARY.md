@@ -24,6 +24,14 @@ _Avoid_: vault (that is Meteora's Alpha Vault), presale pool, treasury
 The moment a Fair Open's deposit window ends and its coin is created and starts trading, with the pot's buy first.
 _Avoid_: launch (that is the whole process), TGE, go-live
 
+**Rung**:
+One of the 64 creation transactions the creator signs in advance, one per possible size of the pot's buy, falling in 5% steps from the pot's cap; at the open the largest the pot covers is sent, and the others can never be.
+_Avoid_: tier (that is a depositor's), bracket, level (that is the allocation's)
+
+**Push**:
+Delivering seats their coins and refund after the open, which anyone may send and Heat's keeper sends at once; a depositor no push has reached claims their own.
+_Avoid_: airdrop, distribution, unlock
+
 **Depositor tier**:
 How much one person may put into a Fair Open, set by how strongly they have shown they are one person: Verified, Scored or Unverified.
 _Avoid_: whitelist level, allocation tier

@@ -27,6 +27,7 @@ import {
   type Nonce,
 } from "@solana/kit";
 import { fetchNonce } from "@solana-program/system";
+import { findAssociatedTokenPda, getCloseAccountInstruction } from "@solana-program/token";
 import {
   admissionMessage,
   closeLaunchInstructions,
@@ -42,8 +43,11 @@ import {
   pushInstructions,
   PUSH_SEATS,
   SEAT_LAYOUT,
+  swapInstructions,
+  TOKEN_PROGRAM_ADDRESS,
   closeNonceInstruction,
   creationInstructions,
+  dbcPoolAddress,
   fetchLookupTable,
   signAdmission,
   signLadder,
@@ -57,7 +61,7 @@ import {
   type SignedRung,
 } from "@top-pad/chain";
 import { fetchMaybeLaunch, getSeatDecoder, getSeatSize, type Seat } from "@top-pad/clients/fair-open";
-import { bankFile, chainTime, devnet, rpc, send } from "./devnet";
+import { bankFile, chainTime, coinBalance, devnet, rpc, send } from "./devnet";
 
 const keyFile = (name: string) => Uint8Array.from(JSON.parse(readFileSync(join(homedir(), ".config/top-pad/devnet", name), "utf8")) as number[]);
 
@@ -181,6 +185,16 @@ export async function closeNonce(nonce: Address, creator: Address): Promise<stri
   if (lamports === 0n) return null;
   const signer = await keeper();
   return send(signer, [closeNonceInstruction({ nonce, keeper: signer, creator, lamports })]);
+}
+
+/** Sells back every coin a wallet holds of `mint` once the tax window is over, and closes its coin account. */
+export async function sellAll(wallet: KeyPairSigner, mint: Address) {
+  const coins = await coinBalance(wallet.address, mint);
+  if (coins === 0n) return;
+  const pool = await dbcPoolAddress(devnet.configs!.fairOpen, mint, devnet.quote.mint);
+  const [coinAccount] = await findAssociatedTokenPda({ owner: wallet.address, mint, tokenProgram: TOKEN_PROGRAM_ADDRESS });
+  const sell = await swapInstructions({ config: devnet.configs!.fairOpen, pool, mint, quoteMint: devnet.quote.mint, trader: wallet, side: "sell", amountIn: coins, minimumOut: 1n });
+  await send(wallet, [...sell, getCloseAccountInstruction({ account: coinAccount, destination: wallet.address, owner: wallet })]);
 }
 
 /** A test person: a random pseudonym, as our admission server would give one in a launch. */

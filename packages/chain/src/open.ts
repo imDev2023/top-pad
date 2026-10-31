@@ -58,8 +58,13 @@ const EXACT_IN = 0;
 export const OPEN_COMPUTE_UNITS = 450_000;
 export const PUSH_COMPUTE_UNITS = { base: 30_000, seat: 60_000 } as const;
 export const CLAIM_COMPUTE_UNITS = 80_000;
-/** Seats per push: each takes three accounts of its own, and 8 fit a transaction with the shared lookup table. */
-export const PUSH_SEATS = 8;
+/**
+ * Seats per push. A transaction's instructions, its programs' calls to others included, stop at 64 (devnet, 2026-10-31:
+ * "Max instruction trace length exceeded" at 8 seats): a seat whose coin account the push makes takes 8 of them (the
+ * Associated Token Account program's 6, the coin transfer and the seat's event), so 7 seats, the push and its compute
+ * budget come to 58, and 61 with the last push's burn of the coin dust.
+ */
+export const PUSH_SEATS = 7;
 
 const budget = (units: number, computeUnitPrice: bigint) => [
   getSetComputeUnitLimitInstruction({ units }),
