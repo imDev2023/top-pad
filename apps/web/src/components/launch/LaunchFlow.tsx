@@ -1,27 +1,33 @@
 "use client";
 
 // The launch flow (spec 9, screen 4): link X, choose the launch mode, enter the coin with Vamp Shield's live verdicts,
-// sign, done. Fair Open is preselected, as it will be the default, and shown as coming until its scheduling lands; an
-// Instant launch goes through end to end.
+// then for a Fair Open, the default, its schedule and one approval that signs its open in advance (spec 2.1 steps 2 to
+// 8), or for an Instant launch its one signature; done.
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { LaunchRefusal, LaunchStatus, Me, Platform, VampShieldVerdict } from "@top-pad/contract";
-import { canonicalTicker, nameVerdict, NAME_MAX_BYTES, tickerVerdict } from "@top-pad/vamp-shield/rules";
+import { canonicalTicker, nameVerdict, NAME_MAX_BYTES, teaserVerdict, tickerVerdict } from "@top-pad/vamp-shield/rules";
 import { checkVampShield, getMe, getPlatform, linkXUrl, logout } from "@/lib/api";
-import { shortAddress } from "@/lib/format";
+import { shortAddress, sol } from "@/lib/format";
 import type { FittedImage } from "@/lib/image";
 import { WalletButton } from "../WalletButton";
 import { useWallet } from "../WalletProvider";
 import { CoinCard, SealedCard } from "./CoinCard";
 import { ImagePicker } from "./ImagePicker";
+import { EMPTY_SCHEDULE, readSchedule, Schedule, span, when, type ScheduleDraft } from "./Schedule";
+import { SignFairOpen } from "./SignFairOpen";
 import { SignLaunch } from "./SignLaunch";
 import styles from "./Launch.module.css";
 
 type LinkOutcome = "linked" | "denied" | "failed" | null;
 type Mode = "fairOpen" | "instant";
 
-const STEPS = ["Link X", "Launch mode", "Coin", "Sign", "Done"] as const;
+const STEPS = {
+  instant: ["Link X", "Launch mode", "Coin", "Sign", "Done"],
+  fairOpen: ["Link X", "Launch mode", "Coin", "Schedule", "Sign", "Done"],
+} as const;
+type StepName = (typeof STEPS)[Mode][number];
 const LINK_NOTES: Record<Exclude<LinkOutcome, null>, { tone: "go" | "caution" | "stop"; text: string }> = {
   linked: { tone: "go", text: "Your X account is linked." },
   denied: { tone: "caution", text: "You declined on X. Every launch needs a linked X account." },
@@ -47,6 +53,14 @@ export function LaunchFlow({ linkOutcome: arrived }: { linkOutcome: LinkOutcome 
   const [checked, setChecked] = useState<{ key: string; verdict: VampShieldVerdict | null; problem: string | null } | null>(null);
   const [refusal, setRefusal] = useState<LaunchRefusal | null>(null);
   const [landed, setLanded] = useState<LaunchStatus | null>(null);
+  const [schedule, setSchedule] = useState<ScheduleDraft>(EMPTY_SCHEDULE);
+  const [scheduleProblem, setScheduleProblem] = useState<string | null>(null);
+  // The clock the schedule is judged by, moved on every 15 s so "now" stays now.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const tick = setInterval(() => setNow(Date.now()), 15_000);
+    return () => clearInterval(tick);
+  }, []);
   const heading = useRef<HTMLHeadingElement>(null);
   // Set when the creator moves between steps, so the new step's heading takes focus then, and only then.
   const moved = useRef(false);
@@ -124,11 +138,26 @@ export function LaunchFlow({ linkOutcome: arrived }: { linkOutcome: LinkOutcome 
     setChecked(null);
     setRefusal(null);
     setLanded(null);
+    setSchedule(EMPTY_SCHEDULE);
+    setScheduleProblem(null);
     getMe().then(setMe).catch(() => undefined);
     goTo(1);
   }
 
-  const canContinue = step === 0 ? !!me : step === 1 ? mode === "instant" : step === 2 ? coinReady : false;
+  const steps = STEPS[mode];
+  const at: StepName = steps[step]!;
+  const terms = platform?.fairOpen ?? null;
+  const scheduled = terms ? readSchedule(schedule, terms, now) : null;
+  const modeOpen = platform ? (mode === "instant" ? platform.launchModes.instant : platform.launchModes.fairOpen) : false;
+  const canContinue =
+    at === "Link X" ? !!me : at === "Launch mode" ? modeOpen : at === "Coin" ? coinReady : at === "Schedule" ? scheduled?.ok === true : false;
+  const signStep = steps.indexOf("Sign" as never);
+  // The calendar preview shows what is valid so far: a refused teaser is not shown as if it would go out.
+  const teaserRule = teaserVerdict(schedule.teaser);
+  const teaserPreview = teaserRule.ok ? teaserRule.teaser : "";
+  const startPreview = schedule.start === "now" ? now : Date.parse(schedule.start);
+  const opensAtPreview = terms && !Number.isNaN(startPreview) ? startPreview + terms.windowSeconds * 1000 : null;
+  const doneStep = steps.length - 1;
   const linkNote = linkOutcome ? LINK_NOTES[linkOutcome] : null;
 
   return (
@@ -140,9 +169,9 @@ export function LaunchFlow({ linkOutcome: arrived }: { linkOutcome: LinkOutcome 
         </div>
 
         <ol className={styles.stepper} aria-label="Steps">
-          {STEPS.map((label, i) => {
+          {steps.map((label, i) => {
             const done = i < step;
-            const reachable = done && step < 4;
+            const reachable = done && step < doneStep;
             return (
               <li key={label}>
                 <button
@@ -177,7 +206,7 @@ export function LaunchFlow({ linkOutcome: arrived }: { linkOutcome: LinkOutcome 
         )}
 
         <section className={`panel ${styles.body}`} aria-labelledby="step-heading">
-          {step === 0 && (
+          {at === "Link X" && (
             <>
               <h2 id="step-heading" ref={heading} tabIndex={-1}>
                 Link your X account
@@ -206,7 +235,7 @@ export function LaunchFlow({ linkOutcome: arrived }: { linkOutcome: LinkOutcome 
             </>
           )}
 
-          {step === 1 && (
+          {at === "Launch mode" && (
             <>
               <h2 id="step-heading" ref={heading} tabIndex={-1}>
                 How should your coin start trading?
@@ -220,16 +249,13 @@ export function LaunchFlow({ linkOutcome: arrived }: { linkOutcome: LinkOutcome 
                     value="fairOpen"
                     checked={mode === "fairOpen"}
                     onChange={() => setMode("fairOpen")}
-                    aria-labelledby="mode-fair-open mode-fair-open-default mode-fair-open-coming"
+                    aria-labelledby="mode-fair-open mode-fair-open-default"
                     aria-describedby="mode-fair-open-note"
                   />
                   <span className="row">
                     <b id="mode-fair-open">Fair Open</b>
                     <span className="chip chip-go" id="mode-fair-open-default">
                       default
-                    </span>
-                    <span className="chip chip-neutral" id="mode-fair-open-coming">
-                      coming soon
                     </span>
                   </span>
                   <span className="note" id="mode-fair-open-note">
@@ -254,13 +280,15 @@ export function LaunchFlow({ linkOutcome: arrived }: { linkOutcome: LinkOutcome 
                   </span>
                 </label>
               </fieldset>
-              {mode === "fairOpen" && (
-                <p className="note">Fair Open arrives in a coming release of this devnet build. Choose Instant launch to launch now.</p>
+              {platform && !modeOpen && (
+                <p className="note">
+                  {mode === "fairOpen" ? "Fair Opens are" : "Instant launches are"} not open on this deployment yet. Choose the other mode to launch now.
+                </p>
               )}
             </>
           )}
 
-          {step === 2 && (
+          {at === "Coin" && (
             <>
               <h2 id="step-heading" ref={heading} tabIndex={-1}>
                 Your coin
@@ -315,7 +343,56 @@ export function LaunchFlow({ linkOutcome: arrived }: { linkOutcome: LinkOutcome 
             </>
           )}
 
-          {step === 3 && image && (
+          {at === "Schedule" && terms && (
+            <>
+              <h2 id="step-heading" ref={heading} tabIndex={-1}>
+                Schedule the window
+              </h2>
+              <p className="muted">
+                Deposits run for {Math.round(terms.windowSeconds / 60)} minutes, then the coin opens and everyone in the pot buys at one price. Until then
+                your coin stays sealed: only the teaser, the time and you show on the calendar.
+              </p>
+              <Schedule draft={schedule} terms={terms} now={now} onChange={(d) => (setSchedule(d), setScheduleProblem(null))} />
+              {scheduleProblem && (
+                <div className="verdict verdict-stop" role="alert">
+                  <b>Refused</b>
+                  <span className="note">{scheduleProblem}</span>
+                </div>
+              )}
+            </>
+          )}
+
+          {at === "Sign" && mode === "fairOpen" && image && terms && scheduled?.ok && (
+            <>
+              <h2 id="step-heading" ref={heading} tabIndex={-1}>
+                Sign your open in advance
+              </h2>
+              <WalletGate account={account} creatorWallet={creatorWallet} wrongWallet={!!wrongWallet} cluster={platform?.cluster ?? null}>
+                {account && (
+                  <SignFairOpen
+                    account={account}
+                    chain={chain}
+                    coin={{ name: nameRule.ok ? nameRule.name : name, ticker, depositsOpenAt: scheduled.depositsOpenAt, minRaise: scheduled.minRaise, teaser: scheduled.teaser }}
+                    image={image}
+                    rungs={terms.rungs}
+                    onScheduled={(status) => {
+                      setLanded(status);
+                      goTo(doneStep);
+                    }}
+                    onRefused={(r) => {
+                      setRefusal(r);
+                      if (r.code === "teaser" || r.code === "schedule") {
+                        setScheduleProblem(r.error);
+                        goTo(steps.indexOf("Schedule" as never));
+                      } else goTo(2);
+                    }}
+                  />
+                )}
+              </WalletGate>
+            </>
+          )}
+
+          {at === "Sign" && mode === "instant" && image && (
             <>
               <h2 id="step-heading" ref={heading} tabIndex={-1}>
                 Sign the launch
@@ -325,40 +402,8 @@ export function LaunchFlow({ linkOutcome: arrived }: { linkOutcome: LinkOutcome 
                 <b>No creator buy</b>
                 <span className="note">If you buy in the first second, you pay the 99% sniper tax like anyone else.</span>
               </div>
-              {platform && platform.cluster !== "mainnet" && (
-                <p className="note">
-                  Your wallet signs on Solana {platform.cluster}: set it to {platform.cluster} first, so it can show what the
-                  launch costs (in Phantom: Settings, Developer Settings, Testnet Mode).
-                </p>
-              )}
-              {!account ? (
-                <div className="stack">
-                  <p className="note">
-                    {creatorWallet ? (
-                      <>
-                        Connect your Creator wallet, <span className="mono">{shortAddress(creatorWallet)}</span>: it is the only wallet
-                        that can sign your launches.
-                      </>
-                    ) : (
-                      "The wallet that signs this launch becomes your Creator wallet, the only one that can sign your launches."
-                    )}
-                  </p>
-                  <WalletButton variant="inline" />
-                </div>
-              ) : wrongWallet ? (
-                <div className="verdict verdict-stop" role="alert">
-                  <b>This is not your Creator wallet</b>
-                  <span className="note">
-                    Your launches are signed by <span className="mono">{shortAddress(creatorWallet!)}</span>. Connect that wallet to
-                    launch; a new Creator wallet comes by a handover the old one signs.
-                  </span>
-                </div>
-              ) : (
-                <>
-                  <p className="note">
-                    Signing with <span className="mono">{shortAddress(account.address)}</span>
-                    {creatorWallet ? ", your Creator wallet." : ", which becomes your Creator wallet."}
-                  </p>
+              <WalletGate account={account} creatorWallet={creatorWallet} wrongWallet={!!wrongWallet} cluster={platform?.cluster ?? null}>
+                {account && (
                   <SignLaunch
                     account={account}
                     chain={chain}
@@ -366,19 +411,68 @@ export function LaunchFlow({ linkOutcome: arrived }: { linkOutcome: LinkOutcome 
                     image={image}
                     onLanded={(status) => {
                       setLanded(status);
-                      goTo(4);
+                      goTo(doneStep);
                     }}
                     onRefused={(r) => {
                       setRefusal(r);
                       goTo(2);
                     }}
                   />
-                </>
-              )}
+                )}
+              </WalletGate>
             </>
           )}
 
-          {step === 4 && landed && (
+          {at === "Done" && landed?.fairOpen && (
+            <>
+              <h2 id="step-heading" ref={heading} tabIndex={-1}>
+                Scheduled
+              </h2>
+              <p className="muted">
+                Your Fair Open is on the calendar. Deposits open {Date.parse(landed.fairOpen.depositsOpenAt) <= now ? "now" : when(Date.parse(landed.fairOpen.depositsOpenAt))}, and
+                the coin opens {when(Date.parse(landed.fairOpen.opensAt))}.
+              </p>
+              {landed.fairOpen.ladder === "signed" ? (
+                <div className="verdict verdict-go">
+                  <b>Your open is signed</b>
+                  <span className="note">Heat&apos;s keeper opens the coin at its time, even if you are offline, and sends everyone in the pot their coins.</span>
+                </div>
+              ) : (
+                <div className="verdict verdict-caution" role="status">
+                  <b>Come back at {when(Date.parse(landed.fairOpen.opensAt))} to sign your open</b>
+                  <span className="note">
+                    The Fair Open&apos;s page asks your wallet then. Until you sign, the coin cannot open; if it has not opened 15 minutes later, the launch
+                    fails and every deposit comes back.
+                  </span>
+                </div>
+              )}
+              <dl className={styles.facts}>
+                <div>
+                  <dt>Window</dt>
+                  <dd>{span(Date.parse(landed.fairOpen.depositsOpenAt), Date.parse(landed.fairOpen.opensAt))}</dd>
+                </div>
+                <div>
+                  <dt>Minimum raise</dt>
+                  <dd>{landed.fairOpen.minRaise === "0" ? "None" : `${sol(landed.fairOpen.minRaise)} SOL`}</dd>
+                </div>
+                <div>
+                  <dt>Sealed coin</dt>
+                  <dd>
+                    {landed.name} <span className="mono">${landed.ticker}</span>, revealed at the open
+                  </dd>
+                </div>
+              </dl>
+              <div className={styles.links}>
+                {landed.explorer.transaction && (
+                  <a className="btn" href={landed.explorer.transaction} target="_blank" rel="noreferrer">
+                    The schedule on the explorer
+                  </a>
+                )}
+              </div>
+            </>
+          )}
+
+          {at === "Done" && landed && !landed.fairOpen && (
             <>
               <h2 id="step-heading" ref={heading} tabIndex={-1}>
                 Launched
@@ -415,7 +509,7 @@ export function LaunchFlow({ linkOutcome: arrived }: { linkOutcome: LinkOutcome 
           )}
         </section>
 
-        {step < 3 && (
+        {step < signStep && (
           <div className="spread">
             <button type="button" className="btn btn-ghost" onClick={() => goTo(Math.max(0, step - 1))} disabled={step === 0}>
               Back
@@ -425,21 +519,27 @@ export function LaunchFlow({ linkOutcome: arrived }: { linkOutcome: LinkOutcome 
             </button>
           </div>
         )}
-        {step === 3 && (
+        {at === "Sign" && (
           <div className="spread">
-            <button type="button" className="btn btn-ghost" onClick={() => goTo(2)}>
+            <button type="button" className="btn btn-ghost" onClick={() => goTo(signStep - 1)}>
               Back
             </button>
           </div>
         )}
-        {step === 4 && landed && (
+        {at === "Done" && landed && (
           <div className="spread">
             <button type="button" className="btn btn-ghost" onClick={restart}>
               Launch another
             </button>
-            <Link className="btn btn-go" href={`/coin/${landed.mint}`}>
-              Watch it trade
-            </Link>
+            {landed.fairOpen ? (
+              <Link className="btn btn-go" href={`/fair-open/${landed.fairOpen.launch}`}>
+                Open its page
+              </Link>
+            ) : (
+              <Link className="btn btn-go" href={`/coin/${landed.mint}`}>
+                Watch it trade
+              </Link>
+            )}
           </div>
         )}
       </div>
@@ -450,7 +550,13 @@ export function LaunchFlow({ linkOutcome: arrived }: { linkOutcome: LinkOutcome 
         {mode === "instant" ? (
           <CoinCard ticker={ticker} name={nameRule.ok ? nameRule.name : name.trim()} imageUrl={imageUrl} handle={me?.x.handle ?? null} mode={mode} />
         ) : (
-          <SealedCard handle={me?.x.handle ?? null} />
+          <SealedCard
+            handle={me?.x.handle ?? null}
+            teaser={teaserPreview}
+            opensAt={opensAtPreview}
+            minRaise={scheduled?.ok ? scheduled.minRaise : 0n}
+            potCap={terms?.potCap ?? null}
+          />
         )}
         <p className="note">
           {mode === "instant"
@@ -459,6 +565,65 @@ export function LaunchFlow({ linkOutcome: arrived }: { linkOutcome: LinkOutcome 
         </p>
       </aside>
     </div>
+  );
+}
+
+/**
+ * The wallet that signs a launch: connect one if none is, refuse one that is not the record's Creator wallet, and say
+ * which one signs before handing over to the signing step.
+ */
+function WalletGate({
+  account,
+  creatorWallet,
+  wrongWallet,
+  cluster,
+  children,
+}: {
+  account: { address: string } | null;
+  creatorWallet: string | null;
+  wrongWallet: boolean;
+  cluster: Platform["cluster"] | null;
+  children: React.ReactNode;
+}) {
+  return (
+    <>
+      {cluster && cluster !== "mainnet" && (
+        <p className="note">
+          Your wallet signs on Solana {cluster}: set it to {cluster} first, so it can show what the launch costs (in Phantom: Settings, Developer
+          Settings, Testnet Mode).
+        </p>
+      )}
+      {!account ? (
+        <div className="stack">
+          <p className="note">
+            {creatorWallet ? (
+              <>
+                Connect your Creator wallet, <span className="mono">{shortAddress(creatorWallet)}</span>: it is the only wallet that can sign your launches.
+              </>
+            ) : (
+              "The wallet that signs this launch becomes your Creator wallet, the only one that can sign your launches."
+            )}
+          </p>
+          <WalletButton variant="inline" />
+        </div>
+      ) : wrongWallet ? (
+        <div className="verdict verdict-stop" role="alert">
+          <b>This is not your Creator wallet</b>
+          <span className="note">
+            Your launches are signed by <span className="mono">{shortAddress(creatorWallet!)}</span>. Connect that wallet to launch; a new Creator wallet
+            comes by a handover the old one signs.
+          </span>
+        </div>
+      ) : (
+        <>
+          <p className="note">
+            Signing with <span className="mono">{shortAddress(account.address)}</span>
+            {creatorWallet ? ", your Creator wallet." : ", which becomes your Creator wallet."}
+          </p>
+          {children}
+        </>
+      )}
+    </>
   );
 }
 

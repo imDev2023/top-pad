@@ -103,16 +103,25 @@ export function prepareLaunch(form: LaunchForm, image: Blob, imageName: string) 
   body.set("name", form.name);
   body.set("ticker", form.ticker);
   body.set("wallet", form.wallet);
+  if (form.mode === "fair_open") {
+    body.set("depositsOpenAt", form.depositsOpenAt);
+    body.set("minRaise", form.minRaise);
+    body.set("teaser", form.teaser);
+  }
   body.set("image", image, imageName);
   return call(PreparedLaunch, "/launches", { method: "POST", body });
 }
 
-export const submitLaunch = (id: string, transaction: string) =>
+/** A signed launch back to the API: for a Fair Open with its signed ladder, or null to sign the open at the open. */
+export const submitLaunch = (id: string, transaction: string, rungs?: string[] | null) =>
   call(LaunchStatus, `/launches/${id}/submit`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ transaction }),
+    body: JSON.stringify({ transaction, rungs }),
   });
+
+/** A Fair Open's schedule again, on a fresh blockhash, when the wallet took too long to sign the first. */
+export const renewLaunch = (id: string) => call(PreparedLaunch, `/launches/${id}/renew`, { method: "POST" });
 
 export const getLaunch = (id: string) => call(LaunchStatus, `/launches/${id}`);
 
@@ -181,6 +190,14 @@ const postJson = (body: unknown): RequestInit => ({ method: "POST", headers: { "
 /** A Fair Open transaction for the wallet to sign and send: a deposit, a withdrawal, the failure or a refund. */
 export const prepareFairOpen = (launch: string, action: "deposit" | "withdraw" | "mark-failed" | "refund" | "claim", body: { wallet: string; amount?: string }) =>
   call(PreparedFairOpenTransaction, `/fair-opens/${encodeURIComponent(launch)}/${action}`, postJson(body));
+
+/** The rung the pot covers, for the Creator wallet to sign at the open when it could not sign the ladder in advance. */
+export const prepareOpenSignature = (launch: string, wallet: string) =>
+  call(PreparedFairOpenTransaction, `/fair-opens/${encodeURIComponent(launch)}/open`, postJson({ wallet }));
+
+/** That rung signed: our keeper co-signs and sends it. */
+export const submitOpenSignature = (launch: string, transaction: string) =>
+  call(FairOpenOutcome, `/fair-opens/${encodeURIComponent(launch)}/open/submit`, postJson({ transaction }));
 
 /** A sent Fair Open transaction, settled by the API against the chain. */
 export const reportFairOpen = (signature: string) => call(FairOpenOutcome, "/fair-opens/transactions", postJson({ signature }));

@@ -305,6 +305,8 @@ function Tier({ view }: { view: FairOpen }) {
       </div>
     );
   }
+  // Once deposits are over, what a tier could deposit is no longer the visitor's business.
+  if (view.phase !== "scheduled" && view.phase !== "window") return null;
   if (admission.tier === "unverified") {
     return (
       <p className="note">

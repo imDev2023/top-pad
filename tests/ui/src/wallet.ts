@@ -20,6 +20,8 @@ export type TestWallet = {
   signer: KeyPairSigner;
   /** Every transaction the wallet was asked to sign, in order, as the page handed it over. */
   requests: Transaction[];
+  /** Each approval the page asked of the wallet, a prompt in a real wallet, by how many transactions it signed. */
+  approvals: number[];
   /** The next signature request is declined, as a user pressing "Reject" in their wallet. */
   declineNext: () => void;
 };
@@ -43,6 +45,7 @@ function register({ name, icon, address, publicKey }: InitArgs) {
   const fromB64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
   const sign = (window as unknown as { __testWalletSign: (tx: string) => Promise<string> }).__testWalletSign;
   const signAndSend = (window as unknown as { __testWalletSignAndSend: (tx: string) => Promise<string> }).__testWalletSignAndSend;
+  const approve = (window as unknown as { __testWalletApprove: (count: number) => Promise<void> }).__testWalletApprove;
 
   const wallet = {
     version: "1.0.0",
@@ -79,14 +82,18 @@ function register({ name, icon, address, publicKey }: InitArgs) {
       "solana:signTransaction": {
         version: "1.0.0",
         supportedTransactionVersions: ["legacy", 0],
-        signTransaction: (...inputs: { transaction: Uint8Array }[]) =>
-          Promise.all(inputs.map(async ({ transaction }) => ({ signedTransaction: fromB64(await sign(toB64(transaction))) }))),
+        // One approval for every transaction of a request, as a wallet's "sign all" prompt.
+        signTransaction: async (...inputs: { transaction: Uint8Array }[]) => {
+          await approve(inputs.length);
+          return Promise.all(inputs.map(async ({ transaction }) => ({ signedTransaction: fromB64(await sign(toB64(transaction))) })));
+        },
       },
       // As a wallet does, it signs every transaction of a request at once, then sends each through its own RPC.
       "solana:signAndSendTransaction": {
         version: "1.0.0",
         supportedTransactionVersions: ["legacy", 0],
         signAndSendTransaction: async (...inputs: { transaction: Uint8Array }[]) => {
+          await approve(inputs.length);
           const signatures: { signature: Uint8Array }[] = [];
           for (const { transaction } of inputs) signatures.push({ signature: fromB64(await signAndSend(toB64(transaction))) });
           return signatures;
@@ -120,9 +127,14 @@ export async function connectTestWallet(page: Page, button: Locator) {
 }
 
 /** Installs the wallet into a page; call before the first navigation. */
-export async function installTestWallet(page: Page, signer: KeyPairSigner): Promise<TestWallet> {
+export async function installTestWallet(page: Page, signer: KeyPairSigner, options: { maxBatch?: number } = {}): Promise<TestWallet> {
   let decline = false;
-  const wallet: TestWallet = { signer, requests: [], declineNext: () => void (decline = true) };
+  const wallet: TestWallet = { signer, requests: [], approvals: [], declineNext: () => void (decline = true) };
+  await page.exposeFunction("__testWalletApprove", async (count: number) => {
+    // A wallet that cannot sign a batch refuses the request, as some wallets refuse one too large to show.
+    if (count > (options.maxBatch ?? Infinity)) throw new Error(`This wallet signs at most ${options.maxBatch} transactions at once.`);
+    wallet.approvals.push(count);
+  });
   const decodeTx = getTransactionDecoder();
   const encodeTx = getTransactionEncoder();
   await page.exposeFunction("__testWalletSign", async (b64: string) => {

@@ -9,6 +9,7 @@ import { useWallet } from "../WalletProvider";
 import { DepositPanel } from "./DepositPanel";
 import styles from "./FairOpen.module.css";
 import { PotMeter } from "./PotMeter";
+import { SignOpenPanel } from "./SignOpenPanel";
 
 const REFRESH_MS = 15_000;
 
@@ -63,7 +64,7 @@ function headline(view: FairOpen, now: number) {
  */
 export function FairOpenPage({ initial }: { initial: FairOpen }) {
   const launch = initial.launch;
-  const { account } = useWallet();
+  const { account, chain } = useWallet();
   const wallet = account?.address;
   const [view, setView] = useState(initial);
   const [offsetMs, setOffsetMs] = useState(0);
@@ -155,6 +156,9 @@ export function FairOpenPage({ initial }: { initial: FairOpen }) {
 
       <div className={styles.layout}>
         <aside className={styles.side}>
+          {account && account.address === view.creator.wallet && view.ladder !== null && view.ladder !== "signed" && (view.phase === "scheduled" || view.phase === "window" || view.phase === "due") && (
+            <SignOpenPanel view={view} account={account} chain={chain} at={at} onSigned={load} />
+          )}
           <DepositPanel view={view} onChanged={load} />
           {!ended && <IfClosedNow view={view} />}
         </aside>
@@ -276,10 +280,7 @@ function OpenSteps({ view, at }: { view: FairOpen; at: number }) {
       </p>
       <div className="verdict verdict-info">
         <b>Devnet build</b>
-        <span className="note">
-          Heat&apos;s keeper does not send the open on its own yet: here a Fair Open opens when Heat runs it by hand, and one nobody opens fails 15 minutes
-          after its time, every depositor taking their SOL back.
-        </span>
+        <span className="note">The Tax Share and the creator&apos;s locked coins arrive in a coming release of this devnet build.</span>
       </div>
     </section>
   );

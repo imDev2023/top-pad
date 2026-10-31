@@ -33,9 +33,9 @@ test("a creator launches an Instant launch from the site", async ({ browser, pag
   await expect(page.getByText("Your X account is linked.")).toBeVisible();
   await expect(page.getByRole("heading", { name: "How should your coin start trading?" })).toBeVisible();
   await expect(page.getByText(`@${handle}`)).toBeVisible();
-  // Fair Open is preselected and not yet open: nothing goes forward until Instant launch is chosen.
+  // Fair Open is preselected; this spec launches an Instant launch (fair-open-scheduled.spec.ts schedules a Fair Open).
   await expect(page.getByRole("radio", { name: /Fair Open/ })).toBeChecked();
-  await expect(page.getByRole("button", { name: "Continue" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Continue" })).toBeEnabled();
   await snap(page, "2-launch-mode");
 
   await page.getByRole("radio", { name: /Instant launch/ }).check();

@@ -74,11 +74,14 @@ Fair Open is preselected.
 - Image.
 - Vamp Shield checks all three before anything is scheduled (section 6.2): an exact match to a Protected coin is refused, a near match launches with a "looks like X" label.
 - The ticker's strict key is reserved in the database for the life of the deposit window.
+  As built ([#47](https://github.com/imDev2023/top-pad/issues/47)): `launches.ticker_key` under a partial unique index, set when a Fair Open is prepared and cleared when its schedule fails or expires unsent, or once the launch has opened or failed and the keeper's Workflow is done; the strict key folds UTS #39 lookalikes, so GL0W holds GLOW's; a creator's own unsigned draft of the same ticker gives way to their next.
 
 **4. Schedule.**
 - The window's start, up to 7 days ahead; the window is a fixed 10 minutes ([Fair Open rules](https://github.com/imDev2023/top-pad/issues/19)).
 - An optional minimum raise.
 - A one-line teaser for the calendar: free text, at most 80 characters, plain text with no links or cashtags, refused if it names a Protected coin or holds the characters refused in names **(owner, 2026-10-27)**.
+- As built ([#47](https://github.com/imDev2023/top-pad/issues/47)): `teaserVerdict` in `@top-pad/vamp-shield/rules` refuses a link (a scheme, `www.`, or a word, a dot and two letters), a cashtag (`$` before a letter), control, hidden and unassigned characters, and a word that mixes scripts; the API then reads every run of up to four words as a name (strict and loose keys) and every word of three or more characters as a ticker (strict key) against the Protected coins.
+  Core keys are left out, since they strip words such as OFFICIAL from ordinary sentences.
 
 **5. Seal the identity.**
 - Our server prepares the coin's metadata JSON and image as Arweave data items and signs them at scheduling; a data item's id is fixed once signed and binds its content, so the metadata URI also commits to the image.
@@ -95,7 +98,13 @@ Fair Open is preselected.
 - Fallback for a wallet that cannot sign a batch: the creator signs once, online, at the open.
 - Signing 64 transactions in one prompt is **unproven** in Phantom, Solflare and Backpack.
 - As built ([#46](https://github.com/imDev2023/top-pad/issues/46)): `signLadder` in `@top-pad/chain` signs the 64 rungs on the launch's nonce, each by the creator, our keeper and the mint key, and every rung compresses its common accounts through Heat's shared address lookup table, frozen so no signed rung's lookups can change (devnet `B2XYd5qp7wyT5Dnvg3CJh6aZxoiiAAX4QRvLLMsgxMHT`, 19 addresses, made by `pnpm --filter @top-pad/chain lookup-table`).
-  Until the creator's flow exists ([#47](https://github.com/imDev2023/top-pad/issues/47)), `pnpm --filter @top-pad/chain fair-open` signs the ladder at scheduling with Heat's bank as the creator, into `~/.config/top-pad/<cluster>/ladders/<launch>.json`, and `fair-open-open` sends the rung the pot covers, pushes every seat and closes the nonce.
+  The scripts `pnpm --filter @top-pad/chain fair-open` and `fair-open-open` still schedule and open a Fair Open by hand, Heat's bank as the creator, for tests and tooling.
+- As built ([#47](https://github.com/imDev2023/top-pad/issues/47), 2026-10-31): the creator schedules from the launch flow, and the schedule and all 64 rungs are signed in one wallet request (`useSignTransactions`, 65 transactions).
+  For that, our keeper makes the launch's durable nonce first, paying its rent, so its value is known before the creator signs anything; the schedule pays the keeper that rent back, and it comes back to the creator when the keeper closes the nonce.
+  The schedule goes out only once every rung has come back signed, or once the creator chose to sign at the open, so no launch takes deposits without a way to open.
+  The launch service keeps each rung's message and its signatures in `fair_open_rungs`: the mint key's at preparing, the creator's at submitting, and our keeper's last, after it has checked them, as an Instant launch's launch key signs last.
+  A wallet that cannot sign the batch (one that throws on it) is offered the fallback in place: it signs the schedule alone, and at the open the Fair Open's page asks the Creator wallet for one signature, the stored rung the pot covers, which our keeper co-signs and sends; the mint key is still destroyed at scheduling, since it signed every rung then.
+  A schedule whose blockhash runs out while the wallet is open is renewed (`POST /launches/:id/renew`) and only it is signed again; the ladder holds.
 
 **7. Prepay the launch's rent.**
 About 0.03 SOL, all of it rent: the DBC pool accounts (about 0.02 SOL), the launch account (about 1,100 bytes, 0.0062 SOL) and the nonce account (0.00106 SOL).
@@ -589,6 +598,7 @@ The screens:
 3. **Coin page**: name, ticker, mint, price, market cap, holders; the flags strip and Fairness card; the tax band during the first minute; the chart (TradingView Lightweight Charts v5, 1 s, 15 s and coarser candles); the graduation bar to 85 SOL; quick buy showing the fee before signing; trades with the fee each paid, the labelled keeper's pot buy pinned; banners for a confirmed bundle, a Meteora-paused pool, or "Not launched through Heat".
    As built ([#42](https://github.com/imDev2023/top-pad/issues/42)): the chart plots the market cap in SOL, the price times the fixed supply, so its axis reads like the header; a trade's fee shows yellow inside the tax's minute and red above half the trade.
 4. **Launch flow**: link X; Fair Open (preselected) or Instant launch; the coin with live Vamp Shield verdicts (clear, "looks like X", refused with an appeal link); schedule (time up to 7 days ahead, minimum raise, teaser, about 0.03 SOL refundable rent); sign; done.
+   As built ([#47](https://github.com/imDev2023/top-pad/issues/47)): `/launch` walks a Fair Open through Link X, Launch mode, Coin, Schedule, Sign and Done; the schedule starts now or later (a local date and time, up to 7 days ahead), with the coin's open time beside it, the calendar entry previewed live, and refusals said as typed; signing is one button, "Sign your open in advance", with the 64 rungs behind a details link and the fallback beside them; Done says when the coin opens and, after the fallback, when to come back. The Fair Open's page shows the creator who signs at the open a panel that asks for that one signature once the window closes.
 5. **Creator record**: the facts in section 7, Creator wallet history, the verified-human and verified-creator marks, Creator Earnings from both sources with one claim, and for a barred Creator the banner, evidence pack and appeal history; the accused creator's private 72-hour view with a reply box.
    As built ([#44](https://github.com/imDev2023/top-pad/issues/44)): `/creator`, the Creator Earnings of the connected wallet, since earnings follow the creator role a wallet holds: what waits in each Heat coin whose role it holds, read from the chain to the lamport, a coin whose first minute is unclaimed saying so, and one claim of it all; the record's facts join it in [#55](https://github.com/imDev2023/top-pad/issues/55).
    A claim names five accounts of each pool, so one transaction holds two pools; a claim of more is as many transactions, signed in one wallet request, and an address lookup table of Heat's shared accounts would hold about four a transaction once LP fees join the claim ([#51](https://github.com/imDev2023/top-pad/issues/51)).
@@ -674,6 +684,14 @@ Sources: [Stack](https://github.com/imDev2023/top-pad/issues/17), [Backend desig
   Graduation is its own Workflow, started when the indexer sees a curve complete.
   Every step is safe to repeat on chain.
   If the build measures the open landing more than 2 s late, the open alone moves to a Durable Object alarm.
+
+  As built for Fair Opens ([#47](https://github.com/imDev2023/top-pad/issues/47), 2026-10-31): `FairOpenKeeper`, one Workflow per launch keyed by its launch account, started when the schedule lands and by the 5-minute cron's sweep for any launch within 5 minutes of its open whose work is not done.
+  - It sleeps until 15 s before the open and uploads the coin's two data items through Turbo, then until 3 s before and starts the open's step, which reads the chain's Clock sysvar every quarter second and sends the rung the pot covers once that clock reaches the open, with a preflight at `processed`: a durable-nonce transaction that fails on chain still advances its nonce, voiding the whole ladder, so a rung refused in preflight (most often `TooEarly`, the preflight's bank a slot behind) is never forced through, only tried again.
+  - A creator signing at the open is waited for until the open is late; a pot that cannot open ends the step at once.
+  - Then every seat is pushed, 7 to a transaction and 10 transactions at once, round after round until none is owed; or, if the launch has not opened, the step waits for the late time, marks it failed, refunds every seat (8 to a transaction) and closes the launch.
+  - Last, the nonce is closed to the creator and the ticker released.
+  - Every step reads the chain first and does only what is undone; the API's tests run each one twice against a faked chain that moves as the real one does, and the second run sends nothing.
+  - Measured on devnet (`launches.open_sent_at`, `open_landed_at`, `delivered_at`): under `wrangler dev`, the open went out 1.04 s after its time, as the chain's clock reached it, landed in a block stamped 1 s after it, and every seat had its coins and refund 4.9 s after it, so the open stays in the Workflow and no Durable Object alarm is needed.
 
   As built for Instant launches ([#44](https://github.com/imDev2023/top-pad/issues/44), 2026-10-29): `InstantLaunchKeeper`, one Workflow per launch keyed by its coin's mint, since a coin registered by another deployment has no launch here; it reads when the coin's Tax window ends, sleeps until then and sends the window claim, tried every second while the chain's clock trails the Worker's.
   It is started when a launch lands, when the indexer sees an Instant coin registered, and by the 5-minute cron's sweep, which settles every coin with no window claim recorded against the chain: one whose record says the claim ran has the claim's transaction indexed again, and any other has its keeper started, or started again if it failed.

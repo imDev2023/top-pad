@@ -565,3 +565,11 @@
     align-items: flex-start;
   }
 }
+
+/* The creator's own open, when it is signed at the open */
+.signOpen {
+  display: grid;
+  gap: 12px;
+  padding: 16px 18px 18px;
+  border-color: var(--caution);
+}

@@ -256,7 +256,13 @@ describe("scheduling a Fair Open", { timeout: 30_000 }, () => {
     const [row] = await db.select().from(launches).where(eq(launches.id, launch.id));
     await expect(db.insert(launches).values({ ...row!, id: crypto.randomUUID(), mint: "m", pool: "p", fairOpen: "f", nonce: "n", signature: null })).rejects.toThrow();
 
+    // The creator's own unsigned draft of the ticker gives way to a new one of theirs.
+    const redo = await prepared(await prepare(first, { ticker: "GLOW", wallet: (await testKeypair()).signer.address }));
+    expect((await db.select().from(launches).where(eq(launches.id, launch.id)))[0]).toMatchObject({ status: "expired", tickerKey: null });
+    expect(await refusal(await prepare(second, { ticker: "GLOW", wallet: other }))).toMatchObject({ status: 409, code: "ticker_reserved" });
+
     // A launch that fails releases its key.
+    await db.update(launches).set({ status: "failed", tickerKey: null }).where(eq(launches.id, redo.id));
     await db.update(launches).set({ status: "failed", tickerKey: null }).where(eq(launches.id, launch.id));
     expect((await prepare(second, { ticker: "GLOW", wallet: other })).status).toBe(201);
   });

@@ -149,6 +149,12 @@ export async function prepareFairOpen(c: Context<AppEnv>, creator: Creator, body
       error: `Another Fair Open of $${verdict.ticker} is scheduled, and its ticker is reserved until it opens. Choose another ticker, or wait for it.`,
       code: "ticker_reserved",
     });
+  // The creator's own draft of the same ticker, prepared and never signed, gives way to this one; its nonce goes back to
+  // our keeper with housekeeping.
+  await db
+    .update(launches)
+    .set({ status: "expired", tickerKey: null })
+    .where(and(eq(launches.tickerKey, tickerKey), eq(launches.creatorId, creator.id), eq(launches.status, "prepared")));
   const [holder] = await db.select({ id: launches.id }).from(launches).where(eq(launches.tickerKey, tickerKey));
   if (holder) return reserved();
 

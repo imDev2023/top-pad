@@ -262,6 +262,136 @@
   white-space: nowrap;
 }
 
+/* The schedule */
+.schedule {
+  display: grid;
+  gap: 16px;
+}
+
+.startChoice {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.startChoice > legend {
+  margin-bottom: 8px;
+  padding: 0;
+}
+
+.startOptions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+/* A start option is a native radio beside its words, the whole card its label. */
+.option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+  cursor: pointer;
+}
+
+.option > span {
+  display: grid;
+  gap: 2px;
+}
+
+.option input {
+  margin: 3px 0 0;
+  accent-color: var(--go);
+}
+
+.option:hover {
+  border-color: var(--line-strong);
+}
+
+.option:has(input:checked) {
+  border-color: var(--go);
+  box-shadow: inset 0 0 0 1px var(--go);
+}
+
+.option:has(input:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.startChoice input[type="datetime-local"] {
+  color-scheme: inherit;
+}
+
+.timeline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.timeline b {
+  color: var(--fg);
+  font-weight: 500;
+}
+
+/* The ladder behind its details link */
+.rungs {
+  display: grid;
+  gap: 10px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+}
+
+.rungs > summary {
+  color: var(--info);
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+
+.rungs[open] > summary {
+  margin-bottom: 8px;
+}
+
+.rungs > :global(.note),
+.rungs > .linkButton {
+  margin-bottom: 8px;
+}
+
+.rungList {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 2px 18px;
+  max-height: 240px;
+  margin: 0 0 10px;
+  padding: 0 4px 0 0;
+  overflow-y: auto;
+  list-style: none;
+  font-size: 0.82rem;
+}
+
+.rungList li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.teaserEmpty {
+  color: var(--faint);
+}
+
 /* Signing */
 .progress {
   display: grid;
@@ -382,11 +512,12 @@
 
 @media (max-width: 640px) {
   .modes,
-  .fields {
+  .fields,
+  .startOptions {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  /* A done step keeps only its check mark on a phone, so the five fit on one line; its name stays for screen readers. */
+  /* A done step keeps only its check mark on a phone, so the steps fit on one line; its name stays for screen readers. */
   .stepDone .stepLabel {
     position: absolute;
     width: 1px;
