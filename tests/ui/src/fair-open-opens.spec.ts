@@ -28,6 +28,8 @@ import { connectTestWallet, installTestWallet } from "./wallet";
 
 const SOL = 1_000_000_000n;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** SOL as the page writes it: as many places as the amount needs, at most `max`. */
+const sol = (lamports: bigint, max: number) => (Number(lamports) / 1e9).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: max });
 
 /** Waits until the chain's clock reaches `at` (Unix seconds). */
 async function untilChainTime(at: bigint) {
@@ -55,8 +57,8 @@ test("a Fair Open opens: the page reveals its coin and what the pot bought, and 
     await page.goto(`/fair-open/${launch.launch}`);
     await connectTestWallet(page, page.getByRole("main").getByRole("button", { name: "Connect wallet" }));
     await page.getByLabel("Amount (SOL, in steps of 0.01)").fill("0.1");
-    await page.getByRole("button", { name: "Deposit 0.10 SOL" }).click();
-    await expect(page.getByTestId("fair-open-done")).toContainText("Deposited 0.10 SOL", { timeout: 90_000 });
+    await page.getByRole("button", { name: "Deposit 0.1 SOL" }).click();
+    await expect(page.getByTestId("fair-open-done")).toContainText("Deposited 0.1 SOL", { timeout: 90_000 });
     await deposit(launch.launch, other, 40n * 10_000_000n, await admitted(launch.launch, other.address, newPerson(), Tier.Scored));
 
     // At its time, the rung the pot covers.
@@ -69,7 +71,7 @@ test("a Fair Open opens: the page reveals its coin and what the pot bought, and 
     // The page reveals the coin and what the pot bought.
     await expect(page.getByTestId("fair-open-phase")).toContainText("The coin is live", { timeout: 90_000 });
     await expect(page.getByTestId("fair-open-coin")).toContainText(launch.coin.ticker, { timeout: 60_000 });
-    await expect(page.getByTestId("fair-open-spent")).toContainText((Number(rung) / 1e9).toFixed(4));
+    await expect(page.getByTestId("fair-open-spent")).toHaveText(sol(rung, 4));
     await expect(page.getByRole("button", { name: "Claim my coins and refund" })).toBeVisible();
     await snap(page, "fair-open-opens-1-opened");
 

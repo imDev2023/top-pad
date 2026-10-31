@@ -268,7 +268,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export async function recoverDeposits(launch: Address, sender: KeyPairSigner, wallets: KeyPairSigner[]) {
   const seated: KeyPairSigner[] = [];
   for (const wallet of wallets) if (await seatOf(launch, wallet.address)) seated.push(wallet);
-  while (seated.length) {
+  // A launch with no seat left still holds its creator's rent, so it is failed and closed too.
+  for (;;) {
     const account = await fetchMaybeLaunch(rpc, launch);
     if (!account.exists) return;
     const now = await chainTime();
