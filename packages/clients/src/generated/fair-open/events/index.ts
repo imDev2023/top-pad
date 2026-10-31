@@ -6,10 +6,13 @@
  * @see https://github.com/codama-idl/codama
  */
 
+export * from "./coinDustBurnt";
 export * from "./deposited";
 export * from "./failedDepositReturned";
 export * from "./launchClosed";
 export * from "./launchCreated";
 export * from "./launchFailed";
+export * from "./launchOpened";
 export * from "./programConfigChanged";
+export * from "./seatDelivered";
 export * from "./withdrawn";

@@ -108,7 +108,26 @@ export type Launch = {
   counts: Array<number>;
   /** How many Unverified seats ask each deposit, up to the Unverified cap. */
   unverifiedCounts: Array<number>;
-  /** Room for what the open, the pushes and the Tax Share will record. */
+  /**
+   * What the open's accounts cost, prepaid by the creator at scheduling and held in the vault; after the open, what
+   * is left of it once our keeper has been paid back, which comes back to the creator.
+   */
+  openRent: bigint;
+  /** The coin, from the open on. */
+  mint: Address;
+  /** Our keeper's balance as the open began, inside the creation transaction alone. */
+  keeperLamports: bigint;
+  /** At the open, in the quote's raw units: what the fills added up to, and each level (spec 2.1 step 11). */
+  spend: bigint;
+  othersLevel: bigint;
+  unverifiedLevel: bigint;
+  /** The rung: what the pot spent, in the quote's raw units; and the coins it bought. */
+  spent: bigint;
+  coins: bigint;
+  /** The refunds pushes and claims have paid, and how many seats have had their coins and refund. */
+  refunded: bigint;
+  delivered: number;
+  /** Room for what the Creator lock and the Tax Share will record. */
   reserved: ReadonlyUint8Array;
   bump: number;
   vaultBump: number;
@@ -150,7 +169,26 @@ export type LaunchArgs = {
   counts: Array<number>;
   /** How many Unverified seats ask each deposit, up to the Unverified cap. */
   unverifiedCounts: Array<number>;
-  /** Room for what the open, the pushes and the Tax Share will record. */
+  /**
+   * What the open's accounts cost, prepaid by the creator at scheduling and held in the vault; after the open, what
+   * is left of it once our keeper has been paid back, which comes back to the creator.
+   */
+  openRent: number | bigint;
+  /** The coin, from the open on. */
+  mint: Address | HasAddress;
+  /** Our keeper's balance as the open began, inside the creation transaction alone. */
+  keeperLamports: number | bigint;
+  /** At the open, in the quote's raw units: what the fills added up to, and each level (spec 2.1 step 11). */
+  spend: number | bigint;
+  othersLevel: number | bigint;
+  unverifiedLevel: number | bigint;
+  /** The rung: what the pot spent, in the quote's raw units; and the coins it bought. */
+  spent: number | bigint;
+  coins: number | bigint;
+  /** The refunds pushes and claims have paid, and how many seats have had their coins and refund. */
+  refunded: number | bigint;
+  delivered: number;
+  /** Room for what the Creator lock and the Tax Share will record. */
   reserved: ReadonlyUint8Array;
   bump: number;
   vaultBump: number;
@@ -182,7 +220,17 @@ export function getLaunchEncoder(): Encoder<LaunchArgs> {
       ["coinRent", getU64Encoder()],
       ["counts", getArrayEncoder(getU32Encoder(), { size: 200 })],
       ["unverifiedCounts", getArrayEncoder(getU32Encoder(), { size: 10 })],
-      ["reserved", fixEncoderSize(getBytesEncoder(), 128)],
+      ["openRent", getU64Encoder()],
+      ["mint", getAddressEncoder()],
+      ["keeperLamports", getU64Encoder()],
+      ["spend", getU64Encoder()],
+      ["othersLevel", getU64Encoder()],
+      ["unverifiedLevel", getU64Encoder()],
+      ["spent", getU64Encoder()],
+      ["coins", getU64Encoder()],
+      ["refunded", getU64Encoder()],
+      ["delivered", getU32Encoder()],
+      ["reserved", fixEncoderSize(getBytesEncoder(), 28)],
       ["bump", getU8Encoder()],
       ["vaultBump", getU8Encoder()],
     ]),
@@ -215,7 +263,17 @@ export function getLaunchDecoder(): Decoder<Launch> {
     ["coinRent", getU64Decoder()],
     ["counts", getArrayDecoder(getU32Decoder(), { size: 200 })],
     ["unverifiedCounts", getArrayDecoder(getU32Decoder(), { size: 10 })],
-    ["reserved", fixDecoderSize(getBytesDecoder(), 128)],
+    ["openRent", getU64Decoder()],
+    ["mint", getAddressDecoder()],
+    ["keeperLamports", getU64Decoder()],
+    ["spend", getU64Decoder()],
+    ["othersLevel", getU64Decoder()],
+    ["unverifiedLevel", getU64Decoder()],
+    ["spent", getU64Decoder()],
+    ["coins", getU64Decoder()],
+    ["refunded", getU64Decoder()],
+    ["delivered", getU32Decoder()],
+    ["reserved", fixDecoderSize(getBytesDecoder(), 28)],
     ["bump", getU8Decoder()],
     ["vaultBump", getU8Decoder()],
   ]);

@@ -140,6 +140,19 @@ pub fn rung_at_or_below(cap: u64, spend: u64) -> Option<u64> {
     rungs(cap).find(|&rung| rung <= spend)
 }
 
+/// A seat's part of the open (spec 2.1 step 11): a seat whose fill is `fill`, in a pot whose fills add up to `spend` and
+/// which spent the rung `spent` for `coins`, spent that share of the rung, rounded up, and bought that share of the coins,
+/// rounded down, so every seat buys at the pot's one price. The lamports the rounding up gathers stay with depositors as
+/// part of the launch's Tax Share, and the coins the rounding down leaves are burnt (spec 12). A seat never spends more
+/// than its fill, since the rung is at most the spend.
+pub fn share(fill: u64, spend: u64, spent: u64, coins: u64) -> (u64, u64) {
+    if spend == 0 {
+        return (0, 0);
+    }
+    let (fill, spend) = (fill as u128, spend as u128);
+    ((fill * spent as u128).div_ceil(spend) as u64, (fill * coins as u128 / spend) as u64)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -242,6 +255,45 @@ mod tests {
         assert!(17 * SOL / lowest_rung(17 * SOL) >= 25);
         assert_eq!(rung_at_or_below(17 * SOL, 16_200_000_000), Some(16_150_000_000));
         assert_eq!(rung_at_or_below(17 * SOL, all[63] - 1), None);
+    }
+
+    #[test]
+    fn shares_the_rung_and_the_coins_at_one_price() {
+        // Spec 2.1 step 11's worked example opening on a rung: 15 SOL of fills spend a 14.25 SOL rung, so every fill is
+        // scaled by 0.95, and the coins go out in proportion to the fills.
+        let (spend, spent, coins) = (15 * SOL, 14_250_000_000, 300_000_000_000_000);
+        assert_eq!(share(240_000_000, spend, spent, coins), (228_000_000, 4_800_000_000_000));
+        assert_eq!(share(100_000_000, spend, spent, coins), (95_000_000, 2_000_000_000_000));
+        // A third of a lamport rounds the spend up and the coins down.
+        assert_eq!(share(1, 3, 2, 2), (1, 0));
+        assert_eq!(share(0, spend, spent, coins), (0, 0));
+        assert_eq!(share(5, 0, 0, 0), (0, 0));
+    }
+
+    #[test]
+    fn never_pays_out_more_coins_or_takes_less_than_the_rung() {
+        let mut rng = Rng(0xc01d);
+        for _ in 0..2_000 {
+            let cap = rng.next(20 * SOL) + 1;
+            let (others, unverified) = pot(&mut rng);
+            let a = allocate(&others, &unverified, STEP, cap);
+            let Some(rung) = rung_at_or_below(cap, a.spend) else { continue };
+            let coins = rng.next(400_000_000_000_000) + 1;
+            let (mut spent_sum, mut coins_sum) = (0u128, 0u128);
+            for (counts, level) in [(&others, a.others.level), (&unverified, a.unverified.level)] {
+                for (k, &n) in counts.iter().enumerate() {
+                    let fill = ((k as u64 + 1) * STEP).min(level);
+                    let (spent, bought) = share(fill, a.spend, rung, coins);
+                    assert!(spent <= fill);
+                    spent_sum += spent as u128 * n as u128;
+                    coins_sum += bought as u128 * n as u128;
+                }
+            }
+            let seats: u128 = others.iter().chain(&unverified).map(|&n| n as u128).sum();
+            // The seats spend the rung, and at most a lamport more each; they get the coins, at most one less each.
+            assert!(spent_sum >= rung as u128 && spent_sum < rung as u128 + seats.max(1), "{spent_sum} for {rung}");
+            assert!(coins_sum <= coins as u128 && coins_sum + seats >= coins as u128, "{coins_sum} of {coins}");
+        }
     }
 
     /// A small deterministic generator, so the property test below needs no crate.

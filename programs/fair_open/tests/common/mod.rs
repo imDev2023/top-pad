@@ -1,7 +1,8 @@
 //! What the Fair Open program's LiteSVM tests share: the built program (target/deploy/fair_open.so, from `pnpm programs`)
 //! with its `ProgramConfig`, Heat's Fair Open config written in DBC's layout and owner, a durable nonce held by the
-//! keeper, and admissions signed by a test admission key and verified by the real Ed25519 precompile. No other program
-//! runs here (spec 5.1).
+//! keeper, and admissions signed by a test admission key and verified by the real Ed25519 precompile. The open runs the
+//! fee program (target/deploy/fee.so) with its `FeeConfig`, and our stand-in for DBC's pool creation and swap
+//! (tests/dbc-stand-in) at DBC's address; Meteora's own binary is never loaded (spec 5.1).
 // LiteSVM's failed-transaction metadata is large by design; the helpers here only hand it back to the test.
 #![allow(clippy::result_large_err, dead_code)]
 use {
@@ -27,6 +28,12 @@ use {
 };
 
 pub const PROGRAM: &[u8] = include_bytes!(concat!(env!("CARGO_TARGET_TMPDIR"), "/../deploy/fair_open.so"));
+const FEE_PROGRAM: &[u8] = include_bytes!(concat!(env!("CARGO_TARGET_TMPDIR"), "/../deploy/fee.so"));
+const DBC_STAND_IN: &[u8] = include_bytes!(concat!(env!("CARGO_TARGET_TMPDIR"), "/../deploy/dbc_stand_in.so"));
+
+pub const TOKEN_PROGRAM: Pubkey = fair_open::TOKEN_PROGRAM;
+pub const ASSOCIATED_TOKEN_PROGRAM: Pubkey = fair_open::creation::ASSOCIATED_TOKEN_PROGRAM;
+pub const METADATA_PROGRAM: Pubkey = Pubkey::from_str_const("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
 
 pub const UPGRADEABLE_LOADER: Pubkey = anchor_lang::solana_program::bpf_loader_upgradeable::ID;
 pub const SOL: u64 = 1_000_000_000;
@@ -74,6 +81,81 @@ pub enum Code {
     NotFailed,
     SeatsLeft,
     NotTheCreator,
+    TooEarly,
+    TooLate,
+    CannotOpen,
+    WrongRung,
+    NotTheCreationTransaction,
+    IdentityMismatch,
+    NotOpening,
+    BuyNotSpent,
+    NotThePotsCoins,
+    NotThePool,
+    NotTheCoin,
+    NotTheFeeProgram,
+    NotATokenAccount,
+    NotOpened,
+    SeatAccounts,
+    AlreadyDelivered,
+    CreatorsSeat,
+    NotYourCoinAccount,
+}
+
+/// A launch's coin, as the creator seals it at scheduling.
+#[derive(Clone, Debug)]
+pub struct Coin {
+    pub name: String,
+    pub ticker: String,
+    pub uri: String,
+}
+
+impl Coin {
+    pub fn new(ticker: &str) -> Self {
+        Coin {
+            name: format!("Test {ticker}"),
+            ticker: ticker.into(),
+            uri: format!("https://turbo-gateway.com/{ticker}"),
+        }
+    }
+
+    /// DBC's `InitializePoolParameters` as the creation transaction serializes them.
+    pub fn params(&self) -> Vec<u8> {
+        let mut data = vec![];
+        for part in [&self.name, &self.ticker, &self.uri] {
+            data.extend_from_slice(&(part.len() as u32).to_le_bytes());
+            data.extend_from_slice(part.as_bytes());
+        }
+        data
+    }
+
+    /// The hash the coin is sealed behind (spec 2.1 step 5).
+    pub fn identity_hash(&self) -> [u8; 32] {
+        solana_sha256_hasher::hash(&self.params()).to_bytes()
+    }
+}
+
+/// A coin's accounts where DBC makes them, from its mint.
+#[derive(Clone, Copy, Debug)]
+pub struct CoinKeys {
+    pub mint: Pubkey,
+    pub pool: Pubkey,
+    pub base_vault: Pubkey,
+    pub quote_vault: Pubkey,
+}
+
+impl CoinKeys {
+    pub fn of(config: &Pubkey, mint: &Pubkey) -> Self {
+        let quote = fair_open::NATIVE_MINT;
+        let (larger, smaller) = if mint > &quote { (*mint, quote) } else { (quote, *mint) };
+        let dbc = |seeds: &[&[u8]]| Pubkey::find_program_address(seeds, &dbc::PROGRAM_ID).0;
+        let pool = dbc(&[b"pool", config.as_ref(), larger.as_ref(), smaller.as_ref()]);
+        CoinKeys {
+            mint: *mint,
+            pool,
+            base_vault: dbc(&[b"token_vault", mint.as_ref(), pool.as_ref()]),
+            quote_vault: dbc(&[b"token_vault", quote.as_ref(), pool.as_ref()]),
+        }
+    }
 }
 
 /// A launch's accounts.
@@ -121,6 +203,8 @@ impl Test {
     pub fn deployed() -> Self {
         let mut svm = LiteSVM::new();
         svm.add_program(fair_open::id(), PROGRAM).unwrap();
+        svm.add_program(fee::id(), FEE_PROGRAM).unwrap();
+        svm.add_program(dbc::PROGRAM_ID, DBC_STAND_IN).unwrap();
         let payer = Keypair::new();
         svm.airdrop(&payer.pubkey(), 100 * SOL).unwrap();
         let creator = Keypair::new();
@@ -137,6 +221,20 @@ impl Test {
         t.set_upgrade_authority(Some(t.upgrade_authority.pubkey()));
         let config = dbc_config_data(&fair_open::NATIVE_MINT, GRADUATION_TARGET);
         t.set_account(t.dbc_config, config, dbc::PROGRAM_ID);
+        t.set_account(fair_open::NATIVE_MINT, mint_data(9), TOKEN_PROGRAM);
+        // The fee program's settings, as `fee-config` sets them: its Fair Open program is this one.
+        let fee_config = fee::FeeConfig {
+            treasury: Pubkey::new_unique(),
+            launch_key: t.keeper.pubkey(),
+            fair_open_program: fair_open::id(),
+            bump: Pubkey::find_program_address(&[fee::FEE_CONFIG_SEED], &fee::id()).1,
+        };
+        let mut data = vec![];
+        anchor_lang::AccountSerialize::try_serialize(&fee_config, &mut data).unwrap();
+        t.set_account(fee_config_address(), data, fee::id());
+        // The keeper's float, which fronts the open's rent.
+        let keeper = t.keeper.pubkey();
+        t.svm.airdrop(&keeper, 10 * SOL).unwrap();
         t
     }
 
@@ -144,7 +242,7 @@ impl Test {
         ProgramSettings {
             admission_signer: self.admission_key.pubkey(),
             keeper: self.keeper.pubkey(),
-            fee_program: Pubkey::new_from_array([7; 32]),
+            fee_program: fee::id(),
             dbc_config: self.dbc_config,
         }
     }
@@ -214,9 +312,10 @@ impl Test {
         nonce
     }
 
-    /// A launch whose window opens at `WINDOW_OPENS`, with no minimum raise.
+    /// A launch whose window opens at `WINDOW_OPENS`, with no minimum raise, sealing `Coin::new("TEST")`.
     pub fn launch(&mut self) -> LaunchKeys {
-        self.launch_with(LaunchParams { deposits_open_at: WINDOW_OPENS, min_raise: 0, identity_hash: [5; 32] })
+        let identity_hash = Coin::new("TEST").identity_hash();
+        self.launch_with(LaunchParams { deposits_open_at: WINDOW_OPENS, min_raise: 0, identity_hash })
     }
 
     pub fn launch_with(&mut self, params: LaunchParams) -> LaunchKeys {
@@ -381,6 +480,209 @@ impl Test {
         self.send(&[ix], &[])
     }
 
+    /// The coin's creation transaction for `rung`, as a rung of the creator's ladder holds it (spec 2.1 step 10): the
+    /// open, DBC's pool creation, the pot's coin account, the pot's buy, and the settle.
+    pub fn creation_instructions(
+        &self,
+        launch: &LaunchKeys,
+        rung: u64,
+        mint: &Pubkey,
+        coin: &Coin,
+    ) -> Vec<Instruction> {
+        let keeper = self.keeper.pubkey();
+        let c = CoinKeys::of(&self.dbc_config, mint);
+        let pot = pot_address(&launch.launch);
+        let pot_coins = associated_address(&launch.launch, mint);
+        let dbc_pda = |seed: &[u8]| Pubkey::find_program_address(&[seed], &dbc::PROGRAM_ID).0;
+        let (pool_authority, dbc_events) = (dbc_pda(b"pool_authority"), dbc_pda(b"__event_authority"));
+        let metadata =
+            Pubkey::find_program_address(&[b"metadata", METADATA_PROGRAM.as_ref(), mint.as_ref()], &METADATA_PROGRAM).0;
+        let ro = AccountMeta::new_readonly;
+        let rw = AccountMeta::new;
+
+        let open = fair_open::accounts::Open {
+            program_config: program_config_address(),
+            launch: launch.launch,
+            vault: launch.vault,
+            pot,
+            keeper,
+            quote_mint: fair_open::NATIVE_MINT,
+            token_program: TOKEN_PROGRAM,
+            instructions: solana_instructions_sysvar_id(),
+            system_program: system_program::ID,
+        };
+        let open = instruction(open.to_account_metas(None), fair_open::instruction::Open { rung }.data());
+        let init = Instruction {
+            program_id: dbc::PROGRAM_ID,
+            accounts: vec![
+                ro(self.dbc_config, false),
+                ro(pool_authority, false),
+                ro(self.creator.pubkey(), true),
+                rw(*mint, true),
+                ro(fair_open::NATIVE_MINT, false),
+                rw(c.pool, false),
+                rw(c.base_vault, false),
+                rw(c.quote_vault, false),
+                rw(metadata, false),
+                ro(METADATA_PROGRAM, false),
+                rw(keeper, true),
+                ro(TOKEN_PROGRAM, false),
+                ro(TOKEN_PROGRAM, false),
+                ro(system_program::ID, false),
+                ro(dbc_events, false),
+                ro(dbc::PROGRAM_ID, false),
+            ],
+            data: [dbc::INITIALIZE_POOL_WITH_SPL_TOKEN.as_slice(), &coin.params()].concat(),
+        };
+        let coins = Instruction {
+            program_id: ASSOCIATED_TOKEN_PROGRAM,
+            accounts: vec![
+                rw(keeper, true),
+                rw(pot_coins, false),
+                ro(launch.launch, false),
+                ro(*mint, false),
+                ro(system_program::ID, false),
+                ro(TOKEN_PROGRAM, false),
+            ],
+            data: vec![1],
+        };
+        let mut data = dbc::SWAP2.to_vec();
+        data.extend(rung.to_le_bytes());
+        data.extend(1u64.to_le_bytes());
+        data.push(0);
+        let swap = Instruction {
+            program_id: dbc::PROGRAM_ID,
+            accounts: vec![
+                ro(pool_authority, false),
+                ro(self.dbc_config, false),
+                rw(c.pool, false),
+                rw(pot, false),
+                rw(pot_coins, false),
+                rw(c.base_vault, false),
+                rw(c.quote_vault, false),
+                ro(*mint, false),
+                ro(fair_open::NATIVE_MINT, false),
+                ro(keeper, true),
+                ro(TOKEN_PROGRAM, false),
+                ro(TOKEN_PROGRAM, false),
+                ro(dbc::PROGRAM_ID, false),
+                ro(dbc_events, false),
+                ro(dbc::PROGRAM_ID, false),
+                ro(solana_instructions_sysvar_id(), false),
+            ],
+            data,
+        };
+        let settle = fair_open::accounts::Settle {
+            program_config: program_config_address(),
+            launch: launch.launch,
+            vault: launch.vault,
+            pot,
+            pot_coins,
+            keeper,
+            mint: *mint,
+            pool: c.pool,
+            dbc_config: self.dbc_config,
+            coin_record: coin_record_address(mint),
+            coin_registrar: Pubkey::find_program_address(&[fair_open::COIN_REGISTRAR_SEED], &fair_open::id()).0,
+            fee_config: fee_config_address(),
+            fee_event_authority: Pubkey::find_program_address(&[b"__event_authority"], &fee::id()).0,
+            fee_program: fee::id(),
+            token_program: TOKEN_PROGRAM,
+            system_program: system_program::ID,
+            event_authority: event_authority(),
+            program: fair_open::id(),
+        };
+        let settle = instruction(settle.to_account_metas(None), fair_open::instruction::Settle {}.data());
+        vec![open, init, coins, swap, settle]
+    }
+
+    /// Sends a creation transaction, our keeper paying and signing with the creator and the coin's mint key.
+    pub fn send_creation(
+        &mut self,
+        ixs: &[Instruction],
+        mint: &Keypair,
+    ) -> Result<TransactionMetadata, FailedTransactionMetadata> {
+        let (keeper, creator) = (self.keeper.insecure_clone(), self.creator.insecure_clone());
+        send_as(&mut self.svm, ixs, &keeper, &[&creator, mint])
+    }
+
+    /// Opens `launch` on `rung` with its sealed coin, `Coin::new("TEST")`, at the clock's current time.
+    pub fn open(
+        &mut self,
+        launch: &LaunchKeys,
+        rung: u64,
+    ) -> Result<(TransactionMetadata, CoinKeys), FailedTransactionMetadata> {
+        let mint = Keypair::new();
+        let ixs = self.creation_instructions(launch, rung, &mint.pubkey(), &Coin::new("TEST"));
+        let done = self.send_creation(&ixs, &mint)?;
+        Ok((done, CoinKeys::of(&self.dbc_config, &mint.pubkey())))
+    }
+
+    /// A push of `seats`, each the seat, its wallet and the wallet's associated account of the coin, sent by a stranger.
+    pub fn push(
+        &mut self,
+        launch: &LaunchKeys,
+        mint: &Pubkey,
+        seats: &[&Depositor],
+    ) -> Result<TransactionMetadata, FailedTransactionMetadata> {
+        let wallets: Vec<(Pubkey, Pubkey)> = seats.iter().map(|d| (d.seat(launch), d.wallet.pubkey())).collect();
+        let ix = self.push_instruction(launch, mint, &wallets);
+        self.send(&[compute_unit_limit(1_400_000), ix], &[])
+    }
+
+    /// A push of seats given as (seat, wallet) pairs.
+    pub fn push_instruction(&self, launch: &LaunchKeys, mint: &Pubkey, seats: &[(Pubkey, Pubkey)]) -> Instruction {
+        let accounts = fair_open::accounts::Push {
+            launch: launch.launch,
+            vault: launch.vault,
+            pot_coins: associated_address(&launch.launch, mint),
+            mint: *mint,
+            payer: self.payer.pubkey(),
+            token_program: TOKEN_PROGRAM,
+            associated_token_program: ASSOCIATED_TOKEN_PROGRAM,
+            system_program: system_program::ID,
+            event_authority: event_authority(),
+            program: fair_open::id(),
+        };
+        let mut metas = accounts.to_account_metas(None);
+        for (seat, wallet) in seats {
+            metas.push(AccountMeta::new(*seat, false));
+            metas.push(AccountMeta::new(*wallet, false));
+            metas.push(AccountMeta::new(associated_address(wallet, mint), false));
+        }
+        instruction(metas, fair_open::instruction::Push {}.data())
+    }
+
+    /// The depositor's own claim, into `coin_account`.
+    pub fn claim(
+        &mut self,
+        launch: &LaunchKeys,
+        mint: &Pubkey,
+        d: &Depositor,
+        coin_account: &Pubkey,
+    ) -> Result<TransactionMetadata, FailedTransactionMetadata> {
+        let accounts = fair_open::accounts::Claim {
+            launch: launch.launch,
+            vault: launch.vault,
+            seat: d.seat(launch),
+            wallet: d.wallet.pubkey(),
+            coin_account: *coin_account,
+            pot_coins: associated_address(&launch.launch, mint),
+            mint: *mint,
+            token_program: TOKEN_PROGRAM,
+            event_authority: event_authority(),
+            program: fair_open::id(),
+        };
+        let ix = instruction(accounts.to_account_metas(None), fair_open::instruction::Claim {}.data());
+        send_as(&mut self.svm, &[ix], &d.wallet, &[])
+    }
+
+    /// The tokens a token account holds, or none if it does not exist.
+    pub fn tokens(&self, account: &Pubkey) -> Option<u64> {
+        let account = self.svm.get_account(account).filter(|a| a.owner == TOKEN_PROGRAM && a.data.len() == 165)?;
+        Some(u64::from_le_bytes(account.data[64..72].try_into().unwrap()))
+    }
+
     /// The chain's clock `seconds` after the tests' windows open.
     pub fn at(&mut self, seconds: i64) {
         let clock = Clock { unix_timestamp: WINDOW_OPENS + seconds, ..self.svm.get_sysvar::<Clock>() };
@@ -393,6 +695,11 @@ impl Test {
 
     pub fn rent(&self, len: usize) -> u64 {
         self.svm.get_sysvar::<Rent>().minimum_balance(len)
+    }
+
+    /// What the open's accounts cost, which the creator prepays at scheduling.
+    pub fn open_rent(&self) -> u64 {
+        fair_open::open_rent(&self.svm.get_sysvar::<Rent>())
     }
 
     pub fn lamports(&self, address: &Pubkey) -> u64 {
@@ -441,13 +748,40 @@ impl Test {
     }
 }
 
-/// A DBC `PoolConfig` as DBC lays it out, with only what the program reads filled in.
+/// A DBC `PoolConfig` as DBC lays it out, with only what our programs read filled in: its quote, its fee claimer, the
+/// fee program's PDA, and its Graduation Target.
 pub fn dbc_config_data(quote_mint: &Pubkey, graduation_target: u64) -> Vec<u8> {
     let mut data = vec![0u8; 1048];
     data[..8].copy_from_slice(&dbc::POOL_CONFIG_DISCRIMINATOR);
     data[dbc::CONFIG_QUOTE_MINT_OFFSET..][..32].copy_from_slice(quote_mint.as_ref());
+    data[40..72].copy_from_slice(fee::FEE_CLAIMER.as_ref());
     data[dbc::CONFIG_MIGRATION_QUOTE_THRESHOLD_OFFSET..][..8].copy_from_slice(&graduation_target.to_le_bytes());
     data
+}
+
+/// An SPL mint with no authorities, of `decimals`.
+pub fn mint_data(decimals: u8) -> Vec<u8> {
+    let mut data = vec![0u8; 82];
+    data[44] = decimals;
+    data[45] = 1;
+    data
+}
+
+/// A wallet's associated account of `mint`.
+pub fn associated_address(owner: &Pubkey, mint: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(&[owner.as_ref(), TOKEN_PROGRAM.as_ref(), mint.as_ref()], &ASSOCIATED_TOKEN_PROGRAM).0
+}
+
+pub fn fee_config_address() -> Pubkey {
+    Pubkey::find_program_address(&[fee::FEE_CONFIG_SEED], &fee::id()).0
+}
+
+pub fn coin_record_address(mint: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(&[fee::COIN_RECORD_SEED, mint.as_ref()], &fee::id()).0
+}
+
+pub fn pot_address(launch: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(&[fair_open::POT_SEED, launch.as_ref()], &fair_open::id()).0
 }
 
 /// The Ed25519 precompile's instruction as Solana's SDK builds one (`new_ed25519_instruction_with_signature`): one
@@ -475,6 +809,13 @@ pub fn withdraw_failed_instruction(launch: &LaunchKeys, seat: &Pubkey, wallet: &
         program: fair_open::id(),
     };
     instruction(accounts.to_account_metas(None), fair_open::instruction::WithdrawFailed {}.data())
+}
+
+/// The compute budget program's `SetComputeUnitLimit`.
+pub fn compute_unit_limit(units: u32) -> Instruction {
+    let mut data = vec![2];
+    data.extend_from_slice(&units.to_le_bytes());
+    Instruction { program_id: fair_open::creation::COMPUTE_BUDGET_PROGRAM, accounts: vec![], data }
 }
 
 pub fn instruction(accounts: Vec<AccountMeta>, data: Vec<u8>) -> Instruction {

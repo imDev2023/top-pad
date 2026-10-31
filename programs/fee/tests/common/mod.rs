@@ -55,6 +55,7 @@ pub enum FeeErrorCode {
     NotTheTreasurysAccount,
     NotTheFeeClaimersAccount,
     CreatorRoleHeldByFeeClaimer,
+    NotTheFairOpenProgram,
 }
 
 /// A pool and config written with DBC's layout and owner, as DBC would have left them.
@@ -184,6 +185,32 @@ impl Test {
         };
         let ix = instruction(accounts.to_account_metas(None), fee::instruction::RegisterCoin {}.data());
         self.send(&[ix], &[launch_key])
+    }
+
+    /// `register_fair_open_coin`, signed by `registrar`: only the Fair Open program's coin registrar may, by CPI from its
+    /// open, which the Fair Open program's own tests run.
+    pub fn register_fair_open(
+        &mut self,
+        coin: &DbcCoin,
+        registrar: &Keypair,
+        launch: Pubkey,
+        pot_fee: u64,
+    ) -> Result<TransactionMetadata, FailedTransactionMetadata> {
+        let accounts = fee::accounts::RegisterFairOpenCoin {
+            fee_config: fee_config_address(),
+            registrar: registrar.pubkey(),
+            payer: self.payer.pubkey(),
+            mint: coin.mint,
+            pool: coin.pool,
+            config: coin.config,
+            coin_record: coin_record_address(&coin.mint),
+            system_program: system_program::ID,
+            event_authority: event_authority(),
+            program: fee::id(),
+        };
+        let data = fee::instruction::RegisterFairOpenCoin { launch, pot_fee }.data();
+        let ix = instruction(accounts.to_account_metas(None), data);
+        self.send(&[ix], &[registrar])
     }
 
     /// A DBC config naming `fee_claimer`, and a pool on it trading a new mint.

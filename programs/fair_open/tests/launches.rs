@@ -42,9 +42,11 @@ fn schedules_a_window_with_its_terms() {
     assert_eq!(launch.seats, 0);
     assert_eq!(t.read::<Vault>(&keys.vault).launch, keys.launch);
 
-    // The creator prepays the rent of the launch and its vault, and the transaction's fee (spec 2.1 step 7).
+    // The creator prepays the rent of the launch and its vault and of what the open will make, and the transaction's
+    // fee (spec 2.1 step 7); the vault holds the open's rent.
     let rent = t.rent(8 + Launch::INIT_SPACE) + t.rent(8 + Vault::INIT_SPACE);
-    assert_eq!(before - t.lamports(&creator.pubkey()), rent + 10_000);
+    assert_eq!(before - t.lamports(&creator.pubkey()), rent + t.open_rent() + 10_000);
+    assert_eq!((launch.open_rent, t.vault_holds(&keys)), (t.open_rent(), t.open_rent()));
     let created = events::<LaunchCreated>(&done);
     assert_eq!(created.len(), 1);
     assert_eq!(created[0].launch, keys.launch);

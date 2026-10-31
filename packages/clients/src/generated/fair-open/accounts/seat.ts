@@ -17,6 +17,8 @@ import {
   fixEncoderSize,
   getAddressDecoder,
   getAddressEncoder,
+  getBooleanDecoder,
+  getBooleanEncoder,
   getBytesDecoder,
   getBytesEncoder,
   getStructDecoder,
@@ -70,7 +72,13 @@ export type Seat = {
   deposit: bigint;
   /** The coin account's rent the depositor prepaid, which the push spends or returns. */
   coinRent: bigint;
-  /** Room for the fill, coins, refund and Tax Share the open and the pushes will record. */
+  /** Once delivered (spec 2.1 step 12): what its deposit spent, the coins it bought, and its refund. */
+  spent: bigint;
+  coins: bigint;
+  refund: bigint;
+  /** Whether a push or its own claim has delivered its coins and refund. */
+  delivered: boolean;
+  /** Room for what the Tax Share will record. */
   reserved: ReadonlyUint8Array;
   bump: number;
 };
@@ -87,7 +95,13 @@ export type SeatArgs = {
   deposit: number | bigint;
   /** The coin account's rent the depositor prepaid, which the push spends or returns. */
   coinRent: number | bigint;
-  /** Room for the fill, coins, refund and Tax Share the open and the pushes will record. */
+  /** Once delivered (spec 2.1 step 12): what its deposit spent, the coins it bought, and its refund. */
+  spent: number | bigint;
+  coins: number | bigint;
+  refund: number | bigint;
+  /** Whether a push or its own claim has delivered its coins and refund. */
+  delivered: boolean;
+  /** Room for what the Tax Share will record. */
   reserved: ReadonlyUint8Array;
   bump: number;
 };
@@ -104,7 +118,11 @@ export function getSeatEncoder(): FixedSizeEncoder<SeatArgs> {
       ["cap", getU64Encoder()],
       ["deposit", getU64Encoder()],
       ["coinRent", getU64Encoder()],
-      ["reserved", fixEncoderSize(getBytesEncoder(), 48)],
+      ["spent", getU64Encoder()],
+      ["coins", getU64Encoder()],
+      ["refund", getU64Encoder()],
+      ["delivered", getBooleanEncoder()],
+      ["reserved", fixEncoderSize(getBytesEncoder(), 23)],
       ["bump", getU8Encoder()],
     ]),
     (value) => ({ ...value, discriminator: SEAT_DISCRIMINATOR }),
@@ -122,7 +140,11 @@ export function getSeatDecoder(): FixedSizeDecoder<Seat> {
     ["cap", getU64Decoder()],
     ["deposit", getU64Decoder()],
     ["coinRent", getU64Decoder()],
-    ["reserved", fixDecoderSize(getBytesDecoder(), 48)],
+    ["spent", getU64Decoder()],
+    ["coins", getU64Decoder()],
+    ["refund", getU64Decoder()],
+    ["delivered", getBooleanDecoder()],
+    ["reserved", fixDecoderSize(getBytesDecoder(), 23)],
     ["bump", getU8Decoder()],
   ]);
 }

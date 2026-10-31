@@ -1,15 +1,27 @@
 //! The Fair Open program (spec 5.3): holds a Fair Open's deposits as plain SOL through its 10-minute window, one seat per
-//! person admitted by our admission server, and lets a launch that cannot open fail on chain, after which every
-//! depositor takes back their deposit and both rents with no Heat server running (spec 2.1 steps 7, 9, 11 and 15). The
-//! open, the pushes, the Creator lock and the Tax Share come with later slices (spec 14); the launch and seat accounts
-//! keep room for what they will record, so a seat made now still reads after those upgrades.
+//! person admitted by our admission server; at the scheduled time opens it in the coin's creation transaction, where the
+//! pot's buy is the pool's first swap and every depositor buys at its one price; then delivers every seat its coins and
+//! refund. A launch that cannot open fails on chain, after which every depositor takes back their deposit and both rents
+//! with no Heat server running (spec 2.1 steps 7 and 9 to 12, and 15). The Creator lock and the Tax Share come with a
+//! later slice (spec 14); the launch and seat accounts keep room for what they will record.
 use {
-    anchor_lang::{prelude::*, solana_program::bpf_loader_upgradeable, system_program},
+    anchor_lang::{
+        prelude::*,
+        solana_program::{
+            bpf_loader_upgradeable,
+            instruction::{AccountMeta, Instruction},
+            program::invoke_signed,
+        },
+        system_program,
+    },
     solana_instructions_sysvar::{load_current_index_checked, load_instruction_at_checked},
+    token::TokenAccount,
 };
 
 pub mod admission;
 pub mod allocation;
+pub mod creation;
+pub mod token;
 
 pub use admission::Admission;
 
@@ -23,6 +35,12 @@ pub const LAUNCH_SEED: &[u8] = b"launch";
 pub const VAULT_SEED: &[u8] = b"vault";
 /// The seed of a `Seat`, followed by the launch and the person's pseudonym.
 pub const SEAT_SEED: &[u8] = b"seat";
+/// The seed of the pot's wrapped-SOL account, followed by the launch: made by the open holding exactly the buy, and
+/// closed once DBC's swap has spent it, in the same transaction.
+pub const POT_SEED: &[u8] = b"pot";
+/// The seed of the coin registrar, the PDA whose signature tells the fee program a coin's registration comes from the
+/// open (`fee::COIN_REGISTRAR_SEED`).
+pub const COIN_REGISTRAR_SEED: &[u8] = b"coin_registrar";
 
 /// The deposit window (spec 2.1 step 4): a fixed 10 minutes, ending at the scheduled open.
 #[constant]
@@ -53,6 +71,34 @@ pub const POT_CAP_PERCENT: u64 = 20;
 pub const TOKEN_ACCOUNT_LEN: usize = 165;
 /// Wrapped SOL: the only quote a Fair Open takes until a non-SOL quote's deposits are built (spec 5.1, 11.2).
 pub const NATIVE_MINT: Pubkey = pubkey!("So11111111111111111111111111111111111111112");
+/// SPL Token: Heat coins and wrapped SOL are classic SPL tokens (spec 3.1).
+pub const TOKEN_PROGRAM: Pubkey = pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+
+/// What the open's accounts cost, which the creator prepays at scheduling (spec 2.1 step 7) and our keeper fronts at
+/// the open, paid back from the prepayment exactly what they cost it: DBC's mint, pool and two vaults, the coin's
+/// Metaplex metadata with Metaplex's creation fee, the pot's coin account, and the coin's record in the fee program.
+/// Measured on devnet (2026-10-31): DBC's pool creation cost its payer the metadata's 607 bytes and 0.01 SOL fee on top of
+/// its own accounts' rent.
+pub mod open_rent {
+    pub const MINT_LEN: usize = 82;
+    /// DBC's `VirtualPool`, zero-copy: 416 bytes after its discriminator.
+    pub const POOL_LEN: usize = 8 + 416;
+    pub const METADATA_LEN: usize = 607;
+    pub const METAPLEX_CREATE_FEE: u64 = 10_000_000;
+    /// The fee program's `CoinRecord`.
+    pub const COIN_RECORD_LEN: usize = 157;
+}
+
+/// What the open's accounts cost at `rent`, prepaid by the creator (`open_rent`).
+pub fn open_rent(rent: &Rent) -> u64 {
+    use open_rent::*;
+    rent.minimum_balance(MINT_LEN)
+        + rent.minimum_balance(POOL_LEN)
+        + 3 * rent.minimum_balance(TOKEN_ACCOUNT_LEN)
+        + rent.minimum_balance(METADATA_LEN)
+        + METAPLEX_CREATE_FEE
+        + rent.minimum_balance(COIN_RECORD_LEN)
+}
 
 /// Meteora's DBC program and the parts of a config this program reads, from the IDL of release 0.2.2 that the generated
 /// clients use: a launch's quote and Graduation Target come from Heat's Fair Open config itself. `packages/chain` checks
@@ -65,6 +111,21 @@ pub mod dbc {
     /// `PoolConfig`: the discriminator, then `quote_mint`; the Graduation Target, `migration_quote_threshold`, further on.
     pub const CONFIG_QUOTE_MINT_OFFSET: usize = 8;
     pub const CONFIG_MIGRATION_QUOTE_THRESHOLD_OFFSET: usize = 264;
+    pub const VIRTUAL_POOL_DISCRIMINATOR: [u8; 8] = [213, 224, 5, 209, 98, 69, 119, 92];
+    /// `VirtualPool`: the discriminator, the 64-byte volatility tracker, then `config`, `creator` and `base_mint`; the
+    /// partner's accrued quote fee further on.
+    pub const POOL_CONFIG_OFFSET: usize = 72;
+    pub const POOL_BASE_MINT_OFFSET: usize = 136;
+    pub const POOL_PARTNER_QUOTE_FEE_OFFSET: usize = 272;
+    /// The instructions of the creation transaction (`creation`).
+    pub const INITIALIZE_POOL_WITH_SPL_TOKEN: [u8; 8] = [140, 85, 215, 176, 102, 54, 104, 79];
+    pub const SWAP2: [u8; 8] = [65, 75, 63, 76, 235, 91, 91, 136];
+}
+
+/// The fee program's `register_fair_open_coin(launch, pot_fee)`, which the open calls signed by the coin registrar;
+/// the tests check the discriminator against the fee program's own.
+pub mod fee {
+    pub const REGISTER_FAIR_OPEN_COIN_DISCRIMINATOR: [u8; 8] = [192, 62, 175, 159, 158, 240, 43, 24];
 }
 
 /// A durable nonce account as the system program keeps it (`nonce::state::Versions`): the version and state tags, each a
@@ -148,6 +209,10 @@ pub mod fair_open {
         );
         drop(nonce);
 
+        // The open's accounts are paid for now, so neither our keeper nor an empty Creator wallet at the open can stand
+        // between the depositors and their coins.
+        let open_rent = open_rent(&Rent::get()?);
+        transfer_in(&ctx.accounts.creator, &ctx.accounts.vault, &ctx.accounts.system_program, open_rent)?;
         ctx.accounts.vault.set_inner(Vault { launch: ctx.accounts.launch.key() });
         let launch = &mut ctx.accounts.launch;
         launch.set_inner(Launch {
@@ -172,7 +237,17 @@ pub mod fair_open {
             coin_rent: 0,
             counts: [0; 200],
             unverified_counts: [0; 10],
-            reserved: [0; 128],
+            open_rent,
+            mint: Pubkey::default(),
+            keeper_lamports: 0,
+            spend: 0,
+            others_level: 0,
+            unverified_level: 0,
+            spent: 0,
+            coins: 0,
+            refunded: 0,
+            delivered: 0,
+            reserved: [0; 28],
             bump: ctx.bumps.launch,
             vault_bump: ctx.bumps.vault,
         });
@@ -232,7 +307,11 @@ pub mod fair_open {
                 cap: admission.cap,
                 deposit: 0,
                 coin_rent,
-                reserved: [0; 48],
+                spent: 0,
+                coins: 0,
+                refund: 0,
+                delivered: false,
+                reserved: [0; 23],
                 bump: ctx.bumps.seat,
             });
             transfer_in(depositor, &ctx.accounts.vault, &ctx.accounts.system_program, coin_rent)?;
@@ -303,6 +382,230 @@ pub mod fair_open {
             seats: launch.seats,
         });
         Ok(())
+    }
+
+    /// The open (spec 2.1 step 10): the first of this program's two instructions in the coin's creation transaction, the
+    /// rung of the creator's ladder that our keeper sends at the scheduled time. It refuses before the scheduled time and
+    /// from 15 minutes after it, a pot that cannot open, any rung but the largest at or below what the pot should spend,
+    /// and any transaction but the creation transaction (`creation`). It then wraps exactly the rung into the pot's
+    /// wrapped-SOL account and lets our keeper spend exactly that, as the pot's delegate, in DBC's swap.
+    pub fn open(ctx: Context<Open>, rung: u64) -> Result<()> {
+        // Before anything costs our keeper, so `settle` pays it back exactly what the open's accounts cost it.
+        let keeper_lamports = ctx.accounts.keeper.lamports();
+        let now = Clock::get()?.unix_timestamp;
+        let launch = &mut ctx.accounts.launch;
+        require!(launch.status == LaunchStatus::Scheduled, FairOpenError::NotScheduled);
+        require_gte!(now, launch.opens_at, FairOpenError::TooEarly);
+        require_gt!(launch.opens_at + LATE_OPEN_SECONDS, now, FairOpenError::TooLate);
+        let allocation = launch.allocation();
+        require!(
+            allocation.spend >= launch.lowest_rung && allocation.spend >= launch.min_raise,
+            FairOpenError::CannotOpen
+        );
+        require!(
+            allocation::rung_at_or_below(launch.pot_cap, allocation.spend) == Some(rung),
+            FairOpenError::WrongRung
+        );
+
+        let launch_key = launch.key();
+        let pot = ctx.accounts.pot.to_account_info();
+        let instructions = ctx.accounts.instructions.to_account_info();
+        let open_at = load_current_index_checked(&instructions)? as usize;
+        let expect = creation::Expect {
+            launch: launch_key,
+            dbc_config: launch.dbc_config,
+            creator: launch.creator,
+            keeper: ctx.accounts.keeper.key(),
+            quote_mint: launch.quote_mint,
+            pot: pot.key(),
+            identity_hash: launch.identity_hash,
+            rung,
+        };
+        let found = creation::check_transaction(&instructions, open_at, &expect)?;
+
+        // The pot's wrapped-SOL account, made at its PDA, which only this program can sign for, and funded from the vault
+        // with its rent and the rung, so it holds exactly the rung as wrapped SOL. The vault rides along in the system
+        // program's `Allocate`, which ignores it, so the runtime sees both sides of the transfer at the first CPI after it.
+        let rent = Rent::get()?.minimum_balance(TOKEN_ACCOUNT_LEN);
+        let vault = ctx.accounts.vault.to_account_info();
+        pay(&ctx.accounts.vault, &pot, rent.saturating_sub(pot.lamports()) + rung)?;
+        let pot_seeds: &[&[u8]] = &[POT_SEED, launch_key.as_ref(), &[ctx.bumps.pot]];
+        let mut data = 8u32.to_le_bytes().to_vec();
+        data.extend_from_slice(&(TOKEN_ACCOUNT_LEN as u64).to_le_bytes());
+        let allocate = Instruction {
+            program_id: system_program::ID,
+            accounts: vec![AccountMeta::new(pot.key(), true), AccountMeta::new(vault.key(), false)],
+            data,
+        };
+        invoke_signed(&allocate, &[pot.clone(), vault], &[pot_seeds])?;
+        let system = ctx.accounts.system_program.key();
+        let assign = system_program::Assign { account_to_assign: pot.clone() };
+        system_program::assign(CpiContext::new_with_signer(system, assign, &[pot_seeds]), &TOKEN_PROGRAM)?;
+        token::initialize_account(&pot, &ctx.accounts.quote_mint, &launch_key)?;
+        let nonce = launch.nonce;
+        let launch_seeds: &[&[u8]] = &[LAUNCH_SEED, nonce.as_ref(), &[launch.bump]];
+        token::approve(&pot, &ctx.accounts.keeper, &launch.to_account_info(), rung, launch_seeds)?;
+
+        launch.status = LaunchStatus::Opening;
+        launch.mint = found.mint;
+        launch.keeper_lamports = keeper_lamports;
+        launch.spend = allocation.spend;
+        launch.others_level = allocation.others.level;
+        launch.unverified_level = allocation.unverified.level;
+        launch.spent = rung;
+        Ok(())
+    }
+
+    /// The last instruction of the creation transaction (spec 2.1 step 10). DBC's swap has spent exactly the rung, so the
+    /// pot's wrapped-SOL account closes back into the vault; the coins it bought are recorded; the pool's partner fee,
+    /// at this instant exactly the pot's own fee, is recorded with the coin's registration in the fee program; and our
+    /// keeper is paid back what the open's accounts cost it, out of the rent the creator prepaid.
+    pub fn settle(ctx: Context<Settle>) -> Result<()> {
+        let launch = &mut ctx.accounts.launch;
+        require!(launch.status == LaunchStatus::Opening, FairOpenError::NotOpening);
+        require_keys_eq!(ctx.accounts.mint.key(), launch.mint, FairOpenError::NotTheCoin);
+        require_keys_eq!(*ctx.accounts.pool.owner, dbc::PROGRAM_ID, FairOpenError::NotThePool);
+        let launch_key = launch.key();
+        // SPL Token clears a delegate once its allowance is spent: the swap spent exactly the rung.
+        require!(!TokenAccount::read(&ctx.accounts.pot)?.delegated, FairOpenError::BuyNotSpent);
+        let coins = TokenAccount::read(&ctx.accounts.pot_coins)?;
+        require!(coins.owner == launch_key && coins.mint == launch.mint, FairOpenError::NotThePotsCoins);
+        require_gt!(coins.amount, 0, FairOpenError::NotThePotsCoins);
+        let nonce = launch.nonce;
+        let launch_seeds: &[&[u8]] = &[LAUNCH_SEED, nonce.as_ref(), &[launch.bump]];
+        token::close(
+            &ctx.accounts.pot,
+            &ctx.accounts.vault.to_account_info(),
+            &launch.to_account_info(),
+            launch_seeds,
+        )?;
+
+        let pool = ctx.accounts.pool.try_borrow_data()?;
+        require!(pool.get(..8) == Some(&dbc::VIRTUAL_POOL_DISCRIMINATOR[..]), FairOpenError::NotThePool);
+        require!(
+            address_at(&pool, dbc::POOL_BASE_MINT_OFFSET) == Some(launch.mint)
+                && address_at(&pool, dbc::POOL_CONFIG_OFFSET) == Some(launch.dbc_config),
+            FairOpenError::NotThePool
+        );
+        let pot_fee = u64_at(&pool, dbc::POOL_PARTNER_QUOTE_FEE_OFFSET).ok_or(FairOpenError::NotThePool)?;
+        drop(pool);
+        register_coin(ctx.accounts, launch_key, pot_fee, ctx.bumps.coin_registrar)?;
+
+        let launch = &mut ctx.accounts.launch;
+        let cost = launch.keeper_lamports.saturating_sub(ctx.accounts.keeper.lamports());
+        let paid_back = cost.min(launch.open_rent);
+        pay(&ctx.accounts.vault, &ctx.accounts.keeper, paid_back)?;
+        launch.open_rent -= paid_back;
+        launch.keeper_lamports = 0;
+        launch.coins = coins.amount;
+        launch.status = LaunchStatus::Opened;
+        check_vault(&ctx.accounts.vault, launch)?;
+        emit_cpi!(LaunchOpened {
+            launch: launch_key,
+            creator: launch.creator,
+            mint: launch.mint,
+            pool: ctx.accounts.pool.key(),
+            spend: launch.spend,
+            spent: launch.spent,
+            coins: launch.coins,
+            others_level: launch.others_level,
+            unverified_level: launch.unverified_level,
+            pot_fee,
+            rent_paid_back: paid_back,
+            seats: launch.seats,
+        });
+        Ok(())
+    }
+
+    /// Delivers seats their coins and refund once the launch has opened (spec 2.1 step 12): anyone may send it, and our
+    /// keeper does at once. Each seat comes as three remaining accounts: the seat, its wallet, and the wallet's own
+    /// account of the coin, which the push makes from the rent the seat prepaid, or, if it exists already, returns that
+    /// rent with the refund. A seat already delivered is passed over, and so is the creator's, whose coins leave the pot
+    /// only into the Creator lock (spec 2.1 step 13), so a push sent twice delivers nothing twice.
+    pub fn push<'info>(ctx: Context<'info, Push<'info>>) -> Result<()> {
+        require!(ctx.accounts.launch.status == LaunchStatus::Opened, FairOpenError::NotOpened);
+        if ctx.accounts.launch.delivered == ctx.accounts.launch.seats {
+            msg!("Every seat has its coins");
+            return Ok(());
+        }
+        let decimals = check_pot_coins(&ctx.accounts.launch, &ctx.accounts.pot_coins, &ctx.accounts.mint)?;
+        // Lamports leave the vault by hand after the last CPI, so no CPI ever sees one side of a transfer and not the other.
+        let mut payments: Vec<(&AccountInfo<'info>, u64)> = vec![];
+        for accounts in ctx.remaining_accounts.chunks(3) {
+            let [seat, wallet, coin_account] = accounts else { return err!(FairOpenError::SeatAccounts) };
+            let mut seat: Account<'info, Seat> = Account::try_from(seat)?;
+            require_keys_eq!(seat.launch, ctx.accounts.launch.key(), FairOpenError::NotThisLaunchsSeat);
+            require_keys_eq!(seat.wallet, wallet.key(), FairOpenError::NotYourSeat);
+            if seat.delivered || seat.wallet == ctx.accounts.launch.creator {
+                continue;
+            }
+            // The wallet's own account of the coin: the Associated Token Account program checks its address, and makes it
+            // from the seat's prepaid rent when it does not exist yet.
+            let made = coin_account.data_is_empty();
+            if made {
+                pay(&ctx.accounts.vault, coin_account, seat.coin_rent)?;
+            }
+            create_associated_account(ctx.accounts, coin_account, wallet)?;
+            let coin_rent_back = if made { 0 } else { seat.coin_rent };
+            let delivered = deliver(
+                &mut ctx.accounts.launch,
+                &ctx.accounts.pot_coins,
+                &ctx.accounts.mint,
+                decimals,
+                &mut seat,
+                coin_account,
+                coin_rent_back,
+                true,
+            )?;
+            payments.push((wallet, delivered.refund + delivered.coin_rent));
+            seat.exit(&crate::ID)?;
+            emit_cpi!(delivered);
+        }
+        let burnt = finish(&mut ctx.accounts.launch, &ctx.accounts.vault, &ctx.accounts.pot_coins, &ctx.accounts.mint)?;
+        if let Some(event) = burnt {
+            emit_cpi!(event);
+        }
+        for (wallet, amount) in payments {
+            pay(&ctx.accounts.vault, wallet, amount)?;
+        }
+        check_vault(&ctx.accounts.vault, &ctx.accounts.launch)
+    }
+
+    /// A depositor takes their seat's coins and refund themselves, if no push has (spec 2.1 step 12), into any account of
+    /// the coin they own; the coin account's prepaid rent comes back with the refund. The creator's seat is the Creator
+    /// lock's alone.
+    pub fn claim(ctx: Context<Claim>) -> Result<()> {
+        let launch = &ctx.accounts.launch;
+        require!(launch.status == LaunchStatus::Opened, FairOpenError::NotOpened);
+        let seat = &ctx.accounts.seat;
+        require!(!seat.delivered, FairOpenError::AlreadyDelivered);
+        require_keys_neq!(seat.wallet, launch.creator, FairOpenError::CreatorsSeat);
+        let decimals = check_pot_coins(launch, &ctx.accounts.pot_coins, &ctx.accounts.mint)?;
+        let coin_account = TokenAccount::read(&ctx.accounts.coin_account)?;
+        require!(
+            coin_account.owner == seat.wallet && coin_account.mint == launch.mint,
+            FairOpenError::NotYourCoinAccount
+        );
+        let coin_rent_back = seat.coin_rent;
+        let delivered = deliver(
+            &mut ctx.accounts.launch,
+            &ctx.accounts.pot_coins,
+            &ctx.accounts.mint,
+            decimals,
+            &mut ctx.accounts.seat,
+            &ctx.accounts.coin_account,
+            coin_rent_back,
+            false,
+        )?;
+        let paid = delivered.refund + delivered.coin_rent;
+        emit_cpi!(delivered);
+        let burnt = finish(&mut ctx.accounts.launch, &ctx.accounts.vault, &ctx.accounts.pot_coins, &ctx.accounts.mint)?;
+        if let Some(event) = burnt {
+            emit_cpi!(event);
+        }
+        // After the last CPI, as in a push.
+        pay(&ctx.accounts.vault, &ctx.accounts.wallet, paid)?;
+        check_vault(&ctx.accounts.vault, &ctx.accounts.launch)
     }
 
     /// Marks a launch that cannot open as failed, so no coin is ever created and every deposit comes back (spec 2.1
@@ -408,6 +711,145 @@ fn check_vault(vault: &Account<Vault>, launch: &Launch) -> Result<()> {
     let held = vault.to_account_info().lamports().saturating_sub(own_rent);
     require_gte!(held, launch.owed(), FairOpenError::VaultShort);
     Ok(())
+}
+
+/// Registers the coin with the fee program, signed by the coin registrar: its record names the launch and the pot's own
+/// fee, and our keeper pays its rent, which `settle` pays back.
+fn register_coin(a: &Settle, launch: Pubkey, pot_fee: u64, registrar_bump: u8) -> Result<()> {
+    let mut data = fee::REGISTER_FAIR_OPEN_COIN_DISCRIMINATOR.to_vec();
+    data.extend_from_slice(launch.as_ref());
+    data.extend_from_slice(&pot_fee.to_le_bytes());
+    let accounts = [
+        (a.fee_config.to_account_info(), false, false),
+        (a.coin_registrar.to_account_info(), false, true),
+        (a.keeper.to_account_info(), true, true),
+        (a.mint.to_account_info(), false, false),
+        (a.pool.to_account_info(), false, false),
+        (a.dbc_config.to_account_info(), false, false),
+        (a.coin_record.to_account_info(), true, false),
+        (a.system_program.to_account_info(), false, false),
+        (a.fee_event_authority.to_account_info(), false, false),
+        (a.fee_program.to_account_info(), false, false),
+    ];
+    let metas = accounts
+        .iter()
+        .map(|(info, writable, signs)| match writable {
+            true => AccountMeta::new(info.key(), *signs),
+            false => AccountMeta::new_readonly(info.key(), *signs),
+        })
+        .collect();
+    let infos: Vec<AccountInfo> = accounts.into_iter().map(|(info, _, _)| info).collect();
+    let instruction = Instruction { program_id: a.fee_program.key(), accounts: metas, data };
+    invoke_signed(&instruction, &infos, &[&[COIN_REGISTRAR_SEED, &[registrar_bump]]])?;
+    Ok(())
+}
+
+/// Checks the pot's coin account is the launch's own account of its coin, and returns the coin's decimals.
+fn check_pot_coins(launch: &Account<Launch>, pot_coins: &AccountInfo, mint: &AccountInfo) -> Result<u8> {
+    let pot = TokenAccount::read(pot_coins)?;
+    require!(pot.owner == launch.key() && pot.mint == launch.mint, FairOpenError::NotThePotsCoins);
+    token::decimals(mint)
+}
+
+/// The Associated Token Account program's `CreateIdempotent`: makes `wallet`'s own account of the coin unless it exists,
+/// and fails if `account` is not that account. A push's seats prepaid the rent of each account it makes.
+fn create_associated_account<'info>(
+    a: &Push<'info>,
+    account: &AccountInfo<'info>,
+    wallet: &AccountInfo<'info>,
+) -> Result<()> {
+    let instruction = Instruction {
+        program_id: creation::ASSOCIATED_TOKEN_PROGRAM,
+        accounts: vec![
+            AccountMeta::new(a.payer.key(), true),
+            AccountMeta::new(account.key(), false),
+            AccountMeta::new_readonly(wallet.key(), false),
+            AccountMeta::new_readonly(a.mint.key(), false),
+            AccountMeta::new_readonly(system_program::ID, false),
+            AccountMeta::new_readonly(TOKEN_PROGRAM, false),
+            // Ignored by the program: the vault, which may have just paid this account's rent, rides along so the
+            // runtime sees both sides of that transfer.
+            AccountMeta::new(a.vault.key(), false),
+        ],
+        data: vec![1],
+    };
+    let infos = [
+        a.payer.to_account_info(),
+        account.clone(),
+        wallet.clone(),
+        a.mint.to_account_info(),
+        a.system_program.to_account_info(),
+        a.token_program.to_account_info(),
+        a.vault.to_account_info(),
+        a.associated_token_program.to_account_info(),
+    ];
+    anchor_lang::solana_program::program::invoke(&instruction, &infos)?;
+    Ok(())
+}
+
+/// Delivers a seat its part of the open (spec 2.1 steps 11 and 12): moves its coins from the pot's coin account to
+/// `coin_account` and records the seat delivered. Its refund, with `coin_rent_back` of its coin account's prepaid rent,
+/// is the caller's to pay from the vault to its wallet, once no CPI is left.
+#[allow(clippy::too_many_arguments)]
+fn deliver<'info>(
+    launch: &mut Account<'info, Launch>,
+    pot_coins: &AccountInfo<'info>,
+    mint: &AccountInfo<'info>,
+    decimals: u8,
+    seat: &mut Seat,
+    coin_account: &AccountInfo<'info>,
+    coin_rent_back: u64,
+    pushed: bool,
+) -> Result<SeatDelivered> {
+    let outcome = launch.outcome(seat.tier, seat.deposit);
+    if outcome.coins > 0 {
+        let nonce = launch.nonce;
+        let seeds: &[&[u8]] = &[LAUNCH_SEED, nonce.as_ref(), &[launch.bump]];
+        token::transfer(pot_coins, mint, coin_account, &launch.to_account_info(), outcome.coins, decimals, seeds)?;
+    }
+    launch.refunded += outcome.refund;
+    launch.coin_rent -= seat.coin_rent;
+    launch.delivered += 1;
+    seat.spent = outcome.spent;
+    seat.coins = outcome.coins;
+    seat.refund = outcome.refund;
+    seat.coin_rent = 0;
+    seat.delivered = true;
+    Ok(SeatDelivered {
+        launch: launch.key(),
+        wallet: seat.wallet,
+        person: seat.person,
+        coin_account: coin_account.key(),
+        deposit: seat.deposit,
+        fill: outcome.fill,
+        spent: outcome.spent,
+        coins: outcome.coins,
+        refund: outcome.refund,
+        coin_rent: coin_rent_back,
+        pushed,
+        delivered: launch.delivered,
+    })
+}
+
+/// Once every seat has its coins, burns the coins the rounding left in the pot (spec 12) and closes the pot's coin
+/// account into the vault, whose rent was the creator's.
+fn finish<'info>(
+    launch: &mut Account<'info, Launch>,
+    vault: &Account<'info, Vault>,
+    pot_coins: &AccountInfo<'info>,
+    mint: &AccountInfo<'info>,
+) -> Result<Option<CoinDustBurnt>> {
+    if launch.delivered < launch.seats {
+        return Ok(None);
+    }
+    let nonce = launch.nonce;
+    let seeds: &[&[u8]] = &[LAUNCH_SEED, nonce.as_ref(), &[launch.bump]];
+    let dust = TokenAccount::read(pot_coins)?.amount;
+    if dust > 0 {
+        token::burn(pot_coins, mint, &launch.to_account_info(), dust, seeds)?;
+    }
+    token::close(pot_coins, &vault.to_account_info(), &launch.to_account_info(), seeds)?;
+    Ok(Some(CoinDustBurnt { launch: launch.key(), mint: launch.mint, amount: dust }))
 }
 
 /// A person's Depositor tier (spec 2.1 step 9, 6.3): how strongly they have shown they are one person.
@@ -524,8 +966,25 @@ pub struct Launch {
     pub counts: [u32; 200],
     /// How many Unverified seats ask each deposit, up to the Unverified cap.
     pub unverified_counts: [u32; 10],
-    /// Room for what the open, the pushes and the Tax Share will record.
-    pub reserved: [u8; 128],
+    /// What the open's accounts cost, prepaid by the creator at scheduling and held in the vault; after the open, what
+    /// is left of it once our keeper has been paid back, which comes back to the creator.
+    pub open_rent: u64,
+    /// The coin, from the open on.
+    pub mint: Pubkey,
+    /// Our keeper's balance as the open began, inside the creation transaction alone.
+    pub keeper_lamports: u64,
+    /// At the open, in the quote's raw units: what the fills added up to, and each level (spec 2.1 step 11).
+    pub spend: u64,
+    pub others_level: u64,
+    pub unverified_level: u64,
+    /// The rung: what the pot spent, in the quote's raw units; and the coins it bought.
+    pub spent: u64,
+    pub coins: u64,
+    /// The refunds pushes and claims have paid, and how many seats have had their coins and refund.
+    pub refunded: u64,
+    pub delivered: u32,
+    /// Room for what the Creator lock and the Tax Share will record.
+    pub reserved: [u8; 28],
     pub bump: u8,
     pub vault_bump: u8,
 }
@@ -577,15 +1036,42 @@ impl Launch {
         self.unverified_deposits + self.scored_deposits + self.verified_deposits
     }
 
-    /// What the vault owes: every deposit, and the coin-account rent the seats prepaid.
+    /// What the vault owes: every deposit, the coin-account rent the seats prepaid, and what is left of the open's rent.
+    /// After the open the pot has spent the rung, and the refunds paid out are gone; what the deposits still owe is then
+    /// every refund not yet paid and the lamports the rounding gathered for the Tax Share.
     pub fn owed(&self) -> u64 {
-        self.pot() + self.coin_rent
+        let deposits = match self.status {
+            LaunchStatus::Opened => self.pot() - self.spent - self.refunded,
+            _ => self.pot(),
+        };
+        deposits + self.coin_rent + self.open_rent
     }
 
     /// How the pot would buy if its window closed now.
     pub fn allocation(&self) -> allocation::Allocation {
         allocation::allocate(&self.counts, &self.unverified_counts, self.step, self.pot_cap)
     }
+
+    /// A seat's part of the open (spec 2.1 step 11): its fill at its tier's level, what it spent of the rung, the coins
+    /// it bought at the pot's one price, and its refund.
+    pub fn outcome(&self, tier: Tier, deposit: u64) -> Outcome {
+        let level = match tier {
+            Tier::Unverified => self.unverified_level,
+            Tier::Scored | Tier::Verified => self.others_level,
+        };
+        let fill = deposit.min(level);
+        let (spent, coins) = allocation::share(fill, self.spend, self.spent, self.coins);
+        Outcome { fill, spent, coins, refund: deposit - spent }
+    }
+}
+
+/// A seat's part of the open, in the quote's raw units and the coin's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Outcome {
+    pub fill: u64,
+    pub spent: u64,
+    pub coins: u64,
+    pub refund: u64,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, InitSpace, Clone, Copy, Debug, PartialEq, Eq)]
@@ -594,6 +1080,10 @@ pub enum LaunchStatus {
     Scheduled,
     /// No coin was or will be created; every deposit comes back.
     Failed,
+    /// Between `open` and `settle`, inside the creation transaction alone.
+    Opening,
+    /// The coin and its pool exist, and the pot bought; its seats get their coins and refund.
+    Opened,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, InitSpace, Clone, Copy, Debug, PartialEq, Eq)]
@@ -629,8 +1119,14 @@ pub struct Seat {
     pub deposit: u64,
     /// The coin account's rent the depositor prepaid, which the push spends or returns.
     pub coin_rent: u64,
-    /// Room for the fill, coins, refund and Tax Share the open and the pushes will record.
-    pub reserved: [u8; 48],
+    /// Once delivered (spec 2.1 step 12): what its deposit spent, the coins it bought, and its refund.
+    pub spent: u64,
+    pub coins: u64,
+    pub refund: u64,
+    /// Whether a push or its own claim has delivered its coins and refund.
+    pub delivered: bool,
+    /// Room for what the Tax Share will record.
+    pub reserved: [u8; 23],
     pub bump: u8,
 }
 
@@ -741,6 +1237,135 @@ pub struct Withdraw<'info> {
     pub seat: Account<'info, Seat>,
     #[account(mut)]
     pub wallet: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct Open<'info> {
+    #[account(seeds = [PROGRAM_CONFIG_SEED], bump = program_config.bump, has_one = keeper @ FairOpenError::NotTheKeeper)]
+    pub program_config: Account<'info, ProgramConfig>,
+    #[account(mut, seeds = [LAUNCH_SEED, launch.nonce.as_ref()], bump = launch.bump)]
+    pub launch: Box<Account<'info, Launch>>,
+    #[account(mut, seeds = [VAULT_SEED, launch.key().as_ref()], bump = launch.vault_bump)]
+    pub vault: Account<'info, Vault>,
+    /// CHECK: the pot's wrapped-SOL account, at its PDA, made in the handler.
+    #[account(mut, seeds = [POT_SEED, launch.key().as_ref()], bump)]
+    pub pot: UncheckedAccount<'info>,
+    /// Our keeper, which sends the open, fronts its accounts' rent and spends exactly the buy as the pot's delegate.
+    pub keeper: Signer<'info>,
+    /// CHECK: the launch's quote.
+    #[account(address = launch.quote_mint @ FairOpenError::QuoteNotSupported)]
+    pub quote_mint: UncheckedAccount<'info>,
+    /// CHECK: SPL Token.
+    #[account(address = TOKEN_PROGRAM)]
+    pub token_program: UncheckedAccount<'info>,
+    /// CHECK: the instructions sysvar, from which the transaction's shape is read.
+    #[account(address = solana_instructions_sysvar::ID)]
+    pub instructions: UncheckedAccount<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[event_cpi]
+#[derive(Accounts)]
+pub struct Settle<'info> {
+    #[account(
+        seeds = [PROGRAM_CONFIG_SEED],
+        bump = program_config.bump,
+        has_one = keeper @ FairOpenError::NotTheKeeper,
+        has_one = fee_program @ FairOpenError::NotTheFeeProgram,
+    )]
+    pub program_config: Account<'info, ProgramConfig>,
+    #[account(mut, seeds = [LAUNCH_SEED, launch.nonce.as_ref()], bump = launch.bump)]
+    pub launch: Box<Account<'info, Launch>>,
+    #[account(mut, seeds = [VAULT_SEED, launch.key().as_ref()], bump = launch.vault_bump)]
+    pub vault: Account<'info, Vault>,
+    /// CHECK: the pot's wrapped-SOL account, at its PDA; read and closed in the handler.
+    #[account(mut, seeds = [POT_SEED, launch.key().as_ref()], bump)]
+    pub pot: UncheckedAccount<'info>,
+    /// CHECK: the pot's coin account, the launch's own account of its coin; read in the handler.
+    pub pot_coins: UncheckedAccount<'info>,
+    /// Our keeper, which is paid back the rent of the open's accounts.
+    #[account(mut)]
+    pub keeper: Signer<'info>,
+    /// CHECK: the coin, the launch's since the open; checked in the handler.
+    pub mint: UncheckedAccount<'info>,
+    /// CHECK: the coin's pool: its owner, discriminator, config and base mint are checked in the handler.
+    pub pool: UncheckedAccount<'info>,
+    /// CHECK: Heat's Fair Open config, the launch's.
+    #[account(address = launch.dbc_config @ FairOpenError::NotTheFairOpenConfig)]
+    pub dbc_config: UncheckedAccount<'info>,
+    /// CHECK: the coin's record, which the fee program makes and checks.
+    #[account(mut)]
+    pub coin_record: UncheckedAccount<'info>,
+    /// CHECK: the coin registrar, this program's PDA, which signs the coin's registration.
+    #[account(seeds = [COIN_REGISTRAR_SEED], bump)]
+    pub coin_registrar: UncheckedAccount<'info>,
+    /// CHECK: the fee program's `FeeConfig`, which the fee program checks.
+    pub fee_config: UncheckedAccount<'info>,
+    /// CHECK: the fee program's event authority, which the fee program checks.
+    pub fee_event_authority: UncheckedAccount<'info>,
+    /// CHECK: the fee program, by the program config.
+    pub fee_program: UncheckedAccount<'info>,
+    /// CHECK: SPL Token.
+    #[account(address = TOKEN_PROGRAM)]
+    pub token_program: UncheckedAccount<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[event_cpi]
+#[derive(Accounts)]
+pub struct Push<'info> {
+    #[account(mut, seeds = [LAUNCH_SEED, launch.nonce.as_ref()], bump = launch.bump)]
+    pub launch: Box<Account<'info, Launch>>,
+    #[account(mut, seeds = [VAULT_SEED, launch.key().as_ref()], bump = launch.vault_bump)]
+    pub vault: Account<'info, Vault>,
+    /// CHECK: the pot's coin account, the launch's own account of its coin; checked in the handler.
+    #[account(mut)]
+    pub pot_coins: UncheckedAccount<'info>,
+    /// CHECK: the coin, the launch's.
+    #[account(mut, address = launch.mint @ FairOpenError::NotTheCoin)]
+    pub mint: UncheckedAccount<'info>,
+    /// Whoever sends the push: the Associated Token Account program's payer, though the seats' prepaid rent funds every
+    /// account it makes.
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    /// CHECK: SPL Token.
+    #[account(address = TOKEN_PROGRAM)]
+    pub token_program: UncheckedAccount<'info>,
+    /// CHECK: the Associated Token Account program.
+    #[account(address = creation::ASSOCIATED_TOKEN_PROGRAM)]
+    pub associated_token_program: UncheckedAccount<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[event_cpi]
+#[derive(Accounts)]
+pub struct Claim<'info> {
+    #[account(mut, seeds = [LAUNCH_SEED, launch.nonce.as_ref()], bump = launch.bump)]
+    pub launch: Box<Account<'info, Launch>>,
+    #[account(mut, seeds = [VAULT_SEED, launch.key().as_ref()], bump = launch.vault_bump)]
+    pub vault: Account<'info, Vault>,
+    #[account(
+        mut,
+        seeds = [SEAT_SEED, launch.key().as_ref(), seat.person.as_ref()],
+        bump = seat.bump,
+        has_one = launch @ FairOpenError::NotThisLaunchsSeat,
+        has_one = wallet @ FairOpenError::NotYourSeat,
+    )]
+    pub seat: Account<'info, Seat>,
+    #[account(mut)]
+    pub wallet: Signer<'info>,
+    /// CHECK: an account of the coin the wallet owns; read in the handler.
+    #[account(mut)]
+    pub coin_account: UncheckedAccount<'info>,
+    /// CHECK: the pot's coin account, the launch's own account of its coin; checked in the handler.
+    #[account(mut)]
+    pub pot_coins: UncheckedAccount<'info>,
+    /// CHECK: the coin, the launch's.
+    #[account(mut, address = launch.mint @ FairOpenError::NotTheCoin)]
+    pub mint: UncheckedAccount<'info>,
+    /// CHECK: SPL Token.
+    #[account(address = TOKEN_PROGRAM)]
+    pub token_program: UncheckedAccount<'info>,
 }
 
 #[event_cpi]
@@ -884,6 +1509,56 @@ pub struct LaunchClosed {
     pub rent: u64,
 }
 
+/// A Fair Open opened (spec 2.1 step 10): its coin and pool created and the pot's buy their first swap. Amounts are in the
+/// quote's raw units, coins in the coin's.
+#[event]
+pub struct LaunchOpened {
+    pub launch: Pubkey,
+    pub creator: Pubkey,
+    pub mint: Pubkey,
+    pub pool: Pubkey,
+    /// What the fills added up to, and the rung, what the pot spent.
+    pub spend: u64,
+    pub spent: u64,
+    pub coins: u64,
+    pub others_level: u64,
+    pub unverified_level: u64,
+    /// The pot's own fee, recorded with the fee program for its 50/50 split.
+    pub pot_fee: u64,
+    /// What the open's accounts cost our keeper, paid back from the creator's prepaid rent.
+    pub rent_paid_back: u64,
+    pub seats: u32,
+}
+
+/// A seat's coins and refund delivered, by a push or its own claim (spec 2.1 step 12).
+#[event]
+pub struct SeatDelivered {
+    pub launch: Pubkey,
+    pub wallet: Pubkey,
+    pub person: [u8; 32],
+    /// Where its coins went.
+    pub coin_account: Pubkey,
+    pub deposit: u64,
+    pub fill: u64,
+    pub spent: u64,
+    pub coins: u64,
+    pub refund: u64,
+    /// The coin account's prepaid rent paid back with the refund: none when the push made the account with it.
+    pub coin_rent: u64,
+    /// Whether a push delivered it, or the depositor's own claim.
+    pub pushed: bool,
+    /// Seats delivered so far.
+    pub delivered: u32,
+}
+
+/// Every seat delivered: the coins the rounding left in the pot burnt (spec 12).
+#[event]
+pub struct CoinDustBurnt {
+    pub launch: Pubkey,
+    pub mint: Pubkey,
+    pub amount: u64,
+}
+
 #[error_code]
 pub enum FairOpenError {
     #[msg("Only the program's upgrade authority can change its settings")]
@@ -952,4 +1627,40 @@ pub enum FairOpenError {
     SeatsLeft,
     #[msg("That is not the launch's creator")]
     NotTheCreator,
+    #[msg("The pot opens at its scheduled time")]
+    TooEarly,
+    #[msg("The open is refused from 15 minutes after the scheduled time")]
+    TooLate,
+    #[msg("The pot would spend less than the ladder's lowest rung or the minimum raise")]
+    CannotOpen,
+    #[msg("The rung is not the largest at or below what the pot should spend")]
+    WrongRung,
+    #[msg("The open runs only in the coin's creation transaction")]
+    NotTheCreationTransaction,
+    #[msg("The coin's name, ticker or metadata URI is not the one sealed at scheduling")]
+    IdentityMismatch,
+    #[msg("Settling runs only right after the open, in the creation transaction")]
+    NotOpening,
+    #[msg("The pot's buy did not spend exactly the rung")]
+    BuyNotSpent,
+    #[msg("That is not the pot's coin account")]
+    NotThePotsCoins,
+    #[msg("That is not the coin's DBC pool")]
+    NotThePool,
+    #[msg("That is not the launch's coin")]
+    NotTheCoin,
+    #[msg("That is not the fee program the program config names")]
+    NotTheFeeProgram,
+    #[msg("That is not an SPL Token account")]
+    NotATokenAccount,
+    #[msg("The launch has not opened")]
+    NotOpened,
+    #[msg("A push takes each seat as three accounts: the seat, its wallet and the wallet's account of the coin")]
+    SeatAccounts,
+    #[msg("The seat's coins and refund were delivered already")]
+    AlreadyDelivered,
+    #[msg("The creator's coins leave the pot only into the Creator lock")]
+    CreatorsSeat,
+    #[msg("The coins go to an account of the coin the seat's wallet owns")]
+    NotYourCoinAccount,
 }

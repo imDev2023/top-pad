@@ -50,40 +50,62 @@ import {
   type VaultArgs,
 } from "../accounts";
 import {
+  getClaimInstructionAsync,
   getCloseLaunchInstructionAsync,
   getCreateLaunchInstructionAsync,
   getDepositInstructionAsync,
   getInitializeInstructionAsync,
   getMarkFailedInstruction,
+  getOpenInstructionAsync,
+  getPushInstructionAsync,
+  getSettleInstructionAsync,
   getUpdateProgramConfigInstructionAsync,
   getWithdrawFailedInstructionAsync,
   getWithdrawInstructionAsync,
+  parseClaimInstruction,
   parseCloseLaunchInstruction,
   parseCreateLaunchInstruction,
   parseDepositInstruction,
   parseInitializeInstruction,
   parseMarkFailedInstruction,
+  parseOpenInstruction,
+  parsePushInstruction,
+  parseSettleInstruction,
   parseUpdateProgramConfigInstruction,
   parseWithdrawFailedInstruction,
   parseWithdrawInstruction,
+  type ClaimAsyncInput,
   type CloseLaunchAsyncInput,
   type CreateLaunchAsyncInput,
   type DepositAsyncInput,
   type InitializeAsyncInput,
   type MarkFailedInput,
+  type OpenAsyncInput,
+  type ParsedClaimInstruction,
   type ParsedCloseLaunchInstruction,
   type ParsedCreateLaunchInstruction,
   type ParsedDepositInstruction,
   type ParsedInitializeInstruction,
   type ParsedMarkFailedInstruction,
+  type ParsedOpenInstruction,
+  type ParsedPushInstruction,
+  type ParsedSettleInstruction,
   type ParsedUpdateProgramConfigInstruction,
   type ParsedWithdrawFailedInstruction,
   type ParsedWithdrawInstruction,
+  type PushAsyncInput,
+  type SettleAsyncInput,
   type UpdateProgramConfigAsyncInput,
   type WithdrawAsyncInput,
   type WithdrawFailedAsyncInput,
 } from "../instructions";
-import { findLaunchPda, findProgramConfigPda, findVaultPda } from "../pdas";
+import {
+  findCoinRegistrarPda,
+  findLaunchPda,
+  findPotPda,
+  findProgramConfigPda,
+  findVaultPda,
+} from "../pdas";
 
 export const FAIR_OPEN_PROGRAM_ADDRESS =
   "HeatPiBAgiwq6VJr8eqyagQiQ2gvaK2y85q26bbBu4bo" as Address<"HeatPiBAgiwq6VJr8eqyagQiQ2gvaK2y85q26bbBu4bo">;
@@ -150,12 +172,15 @@ export function identifyFairOpenAccount(
 }
 
 export enum FairOpenEvent {
+  CoinDustBurnt,
   Deposited,
   FailedDepositReturned,
   LaunchClosed,
   LaunchCreated,
   LaunchFailed,
+  LaunchOpened,
   ProgramConfigChanged,
+  SeatDelivered,
   Withdrawn,
 }
 
@@ -163,6 +188,17 @@ export function identifyFairOpenEvent(
   event: { data: ReadonlyUint8Array } | ReadonlyUint8Array,
 ): FairOpenEvent {
   const data = "data" in event ? event.data : event;
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([155, 210, 239, 193, 77, 40, 191, 31]),
+      ),
+      0,
+    )
+  ) {
+    return FairOpenEvent.CoinDustBurnt;
+  }
   if (
     containsBytes(
       data,
@@ -222,12 +258,34 @@ export function identifyFairOpenEvent(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([136, 24, 115, 132, 210, 174, 226, 71]),
+      ),
+      0,
+    )
+  ) {
+    return FairOpenEvent.LaunchOpened;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
         new Uint8Array([126, 10, 248, 111, 53, 234, 162, 103]),
       ),
       0,
     )
   ) {
     return FairOpenEvent.ProgramConfigChanged;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([172, 192, 98, 20, 171, 107, 87, 50]),
+      ),
+      0,
+    )
+  ) {
+    return FairOpenEvent.SeatDelivered;
   }
   if (
     containsBytes(
@@ -246,11 +304,15 @@ export function identifyFairOpenEvent(
 }
 
 export enum FairOpenInstruction {
+  Claim,
   CloseLaunch,
   CreateLaunch,
   Deposit,
   Initialize,
   MarkFailed,
+  Open,
+  Push,
+  Settle,
   UpdateProgramConfig,
   Withdraw,
   WithdrawFailed,
@@ -260,6 +322,17 @@ export function identifyFairOpenInstruction(
   instruction: { data: ReadonlyUint8Array } | ReadonlyUint8Array,
 ): FairOpenInstruction {
   const data = "data" in instruction ? instruction.data : instruction;
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([62, 198, 214, 193, 213, 159, 108, 210]),
+      ),
+      0,
+    )
+  ) {
+    return FairOpenInstruction.Claim;
+  }
   if (
     containsBytes(
       data,
@@ -319,6 +392,39 @@ export function identifyFairOpenInstruction(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([228, 220, 155, 71, 199, 189, 60, 45]),
+      ),
+      0,
+    )
+  ) {
+    return FairOpenInstruction.Open;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([143, 34, 101, 78, 188, 184, 199, 63]),
+      ),
+      0,
+    )
+  ) {
+    return FairOpenInstruction.Push;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([175, 42, 185, 87, 144, 131, 102, 212]),
+      ),
+      0,
+    )
+  ) {
+    return FairOpenInstruction.Settle;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
         new Uint8Array([214, 3, 187, 98, 170, 106, 33, 45]),
       ),
       0,
@@ -358,6 +464,9 @@ export type ParsedFairOpenInstruction<
   TProgram extends string = "HeatPiBAgiwq6VJr8eqyagQiQ2gvaK2y85q26bbBu4bo",
 > =
   | ({
+      instructionType: FairOpenInstruction.Claim;
+    } & ParsedClaimInstruction<TProgram>)
+  | ({
       instructionType: FairOpenInstruction.CloseLaunch;
     } & ParsedCloseLaunchInstruction<TProgram>)
   | ({
@@ -373,6 +482,15 @@ export type ParsedFairOpenInstruction<
       instructionType: FairOpenInstruction.MarkFailed;
     } & ParsedMarkFailedInstruction<TProgram>)
   | ({
+      instructionType: FairOpenInstruction.Open;
+    } & ParsedOpenInstruction<TProgram>)
+  | ({
+      instructionType: FairOpenInstruction.Push;
+    } & ParsedPushInstruction<TProgram>)
+  | ({
+      instructionType: FairOpenInstruction.Settle;
+    } & ParsedSettleInstruction<TProgram>)
+  | ({
       instructionType: FairOpenInstruction.UpdateProgramConfig;
     } & ParsedUpdateProgramConfigInstruction<TProgram>)
   | ({
@@ -387,6 +505,13 @@ export function parseFairOpenInstruction<TProgram extends string>(
 ): ParsedFairOpenInstruction<TProgram> {
   const instructionType = identifyFairOpenInstruction(instruction);
   switch (instructionType) {
+    case FairOpenInstruction.Claim: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: FairOpenInstruction.Claim,
+        ...parseClaimInstruction(instruction),
+      };
+    }
     case FairOpenInstruction.CloseLaunch: {
       assertIsInstructionWithAccounts(instruction);
       return {
@@ -420,6 +545,27 @@ export function parseFairOpenInstruction<TProgram extends string>(
       return {
         instructionType: FairOpenInstruction.MarkFailed,
         ...parseMarkFailedInstruction(instruction),
+      };
+    }
+    case FairOpenInstruction.Open: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: FairOpenInstruction.Open,
+        ...parseOpenInstruction(instruction),
+      };
+    }
+    case FairOpenInstruction.Push: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: FairOpenInstruction.Push,
+        ...parsePushInstruction(instruction),
+      };
+    }
+    case FairOpenInstruction.Settle: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: FairOpenInstruction.Settle,
+        ...parseSettleInstruction(instruction),
       };
     }
     case FairOpenInstruction.UpdateProgramConfig: {
@@ -471,6 +617,10 @@ export type FairOpenPluginAccounts = {
 };
 
 export type FairOpenPluginInstructions = {
+  claim: (
+    input: ClaimAsyncInput,
+    config?: { programAddress?: Address | HasAddress },
+  ) => ReturnType<typeof getClaimInstructionAsync> & SelfPlanAndSendFunctions;
   closeLaunch: (
     input: CloseLaunchAsyncInput,
     config?: { programAddress?: Address | HasAddress },
@@ -494,6 +644,18 @@ export type FairOpenPluginInstructions = {
     input: MarkFailedInput,
     config?: { programAddress?: Address | HasAddress },
   ) => ReturnType<typeof getMarkFailedInstruction> & SelfPlanAndSendFunctions;
+  open: (
+    input: OpenAsyncInput,
+    config?: { programAddress?: Address | HasAddress },
+  ) => ReturnType<typeof getOpenInstructionAsync> & SelfPlanAndSendFunctions;
+  push: (
+    input: MakeOptional<PushAsyncInput, "payer">,
+    config?: { programAddress?: Address | HasAddress },
+  ) => ReturnType<typeof getPushInstructionAsync> & SelfPlanAndSendFunctions;
+  settle: (
+    input: SettleAsyncInput,
+    config?: { programAddress?: Address | HasAddress },
+  ) => ReturnType<typeof getSettleInstructionAsync> & SelfPlanAndSendFunctions;
   updateProgramConfig: (
     input: UpdateProgramConfigAsyncInput,
     config?: { programAddress?: Address | HasAddress },
@@ -515,6 +677,8 @@ export type FairOpenPluginPdas = {
   vault: typeof findVaultPda;
   programConfig: typeof findProgramConfigPda;
   launch: typeof findLaunchPda;
+  pot: typeof findPotPda;
+  coinRegistrar: typeof findCoinRegistrarPda;
 };
 
 export type FairOpenPluginRequirements = ClientWithRpc<
@@ -539,6 +703,14 @@ export function fairOpenProgram(
           vault: addSelfFetchFunctions(client, getVaultCodec()),
         },
         instructions: {
+          claim: (input, instructionConfig) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getClaimInstructionAsync(input, {
+                programAddress:
+                  instructionConfig?.programAddress ?? config.programAddress,
+              }),
+            ),
           closeLaunch: (input, instructionConfig) =>
             addSelfPlanAndSendFunctions(
               client,
@@ -582,6 +754,33 @@ export function fairOpenProgram(
                   instructionConfig?.programAddress ?? config.programAddress,
               }),
             ),
+          open: (input, instructionConfig) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getOpenInstructionAsync(input, {
+                programAddress:
+                  instructionConfig?.programAddress ?? config.programAddress,
+              }),
+            ),
+          push: (input, instructionConfig) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getPushInstructionAsync(
+                { ...input, payer: input.payer ?? client.payer },
+                {
+                  programAddress:
+                    instructionConfig?.programAddress ?? config.programAddress,
+                },
+              ),
+            ),
+          settle: (input, instructionConfig) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getSettleInstructionAsync(input, {
+                programAddress:
+                  instructionConfig?.programAddress ?? config.programAddress,
+              }),
+            ),
           updateProgramConfig: (input, instructionConfig) =>
             addSelfPlanAndSendFunctions(
               client,
@@ -620,6 +819,16 @@ export function fairOpenProgram(
             }),
           launch: (seeds, pdaConfig) =>
             findLaunchPda(seeds, {
+              programAddress:
+                pdaConfig?.programAddress ?? config.programAddress,
+            }),
+          pot: (seeds, pdaConfig) =>
+            findPotPda(seeds, {
+              programAddress:
+                pdaConfig?.programAddress ?? config.programAddress,
+            }),
+          coinRegistrar: (pdaConfig) =>
+            findCoinRegistrarPda({
               programAddress:
                 pdaConfig?.programAddress ?? config.programAddress,
             }),

@@ -1,6 +1,6 @@
 //! The vault always holds at least what it owes (spec 5.3): after every instruction of a long, random window, and through
 //! the failure path to the last refund, it holds every seat's deposit and prepaid coin-account rent, counted from the
-//! seats themselves rather than from the launch's own totals.
+//! seats themselves rather than from the launch's own totals, and the creator's prepaid rent for the open.
 #![allow(clippy::result_large_err)]
 mod common;
 
@@ -25,7 +25,7 @@ impl Rng {
 /// Checks the vault against the seats on chain, and the launch's counts against the same seats.
 fn check(t: &Test, launch: &LaunchKeys) {
     let seats: Vec<Seat> = t.seats_of(launch);
-    let owed: u64 = seats.iter().map(|s| s.deposit + s.coin_rent).sum();
+    let owed: u64 = seats.iter().map(|s| s.deposit + s.coin_rent).sum::<u64>() + t.open_rent();
     assert!(t.vault_holds(launch) >= owed, "the vault holds {} and owes {owed}", t.vault_holds(launch));
     // Nothing else is ever paid in, so it holds exactly that.
     assert_eq!(t.vault_holds(launch), owed);
@@ -92,5 +92,6 @@ fn holds_what_it_owes_after_every_instruction() {
             check(&t, &launch);
         }
     }
-    assert_eq!(t.vault_holds(&launch), 0);
+    // What is left is the open's rent, which comes back to the creator with the launch's own.
+    assert_eq!(t.vault_holds(&launch), t.open_rent());
 }

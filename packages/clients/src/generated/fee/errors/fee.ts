@@ -49,6 +49,8 @@ export const FEE_ERROR__NOT_THE_TREASURYS_ACCOUNT = 0x177e; // 6014
 export const FEE_ERROR__NOT_THE_FEE_CLAIMERS_ACCOUNT = 0x177f; // 6015
 /** CreatorRoleHeldByFeeClaimer: The fee claimer holds the pool's creator role, so its creator's half has nowhere to go */
 export const FEE_ERROR__CREATOR_ROLE_HELD_BY_FEE_CLAIMER = 0x1780; // 6016
+/** NotTheFairOpenProgram: Only the Fair Open program's open registers a Fair Open's coin */
+export const FEE_ERROR__NOT_THE_FAIR_OPEN_PROGRAM = 0x1781; // 6017
 
 export type FeeError =
   | typeof FEE_ERROR__CREATOR_ROLE_HELD_BY_FEE_CLAIMER
@@ -57,6 +59,7 @@ export type FeeError =
   | typeof FEE_ERROR__NOT_A_DBC_POOL
   | typeof FEE_ERROR__NOT_A_HEAT_CONFIG
   | typeof FEE_ERROR__NOT_THE_CREATORS_ACCOUNT
+  | typeof FEE_ERROR__NOT_THE_FAIR_OPEN_PROGRAM
   | typeof FEE_ERROR__NOT_THE_FEE_CLAIMERS_ACCOUNT
   | typeof FEE_ERROR__NOT_THE_LAUNCH_KEY
   | typeof FEE_ERROR__NOT_THE_TREASURYS_ACCOUNT
@@ -78,6 +81,7 @@ if (process.env["NODE_ENV"] !== "production") {
     [FEE_ERROR__NOT_A_DBC_POOL]: `The pool is not a DBC pool`,
     [FEE_ERROR__NOT_A_HEAT_CONFIG]: `The config does not name the fee program's fee claimer`,
     [FEE_ERROR__NOT_THE_CREATORS_ACCOUNT]: `The creator's half goes to the creator role holder's associated quote account`,
+    [FEE_ERROR__NOT_THE_FAIR_OPEN_PROGRAM]: `Only the Fair Open program's open registers a Fair Open's coin`,
     [FEE_ERROR__NOT_THE_FEE_CLAIMERS_ACCOUNT]: `DBC's coin fee slot takes the fee claimer's associated quote account`,
     [FEE_ERROR__NOT_THE_LAUNCH_KEY]: `The launch key did not sign`,
     [FEE_ERROR__NOT_THE_TREASURYS_ACCOUNT]: `The treasury's share goes to the treasury's associated quote account`,

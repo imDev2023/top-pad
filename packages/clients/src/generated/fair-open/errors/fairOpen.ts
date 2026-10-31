@@ -81,78 +81,150 @@ export const FAIR_OPEN_ERROR__NOT_FAILED = 0x178e; // 6030
 export const FAIR_OPEN_ERROR__SEATS_LEFT = 0x178f; // 6031
 /** NotTheCreator: That is not the launch's creator */
 export const FAIR_OPEN_ERROR__NOT_THE_CREATOR = 0x1790; // 6032
+/** TooEarly: The pot opens at its scheduled time */
+export const FAIR_OPEN_ERROR__TOO_EARLY = 0x1791; // 6033
+/** TooLate: The open is refused from 15 minutes after the scheduled time */
+export const FAIR_OPEN_ERROR__TOO_LATE = 0x1792; // 6034
+/** CannotOpen: The pot would spend less than the ladder's lowest rung or the minimum raise */
+export const FAIR_OPEN_ERROR__CANNOT_OPEN = 0x1793; // 6035
+/** WrongRung: The rung is not the largest at or below what the pot should spend */
+export const FAIR_OPEN_ERROR__WRONG_RUNG = 0x1794; // 6036
+/** NotTheCreationTransaction: The open runs only in the coin's creation transaction */
+export const FAIR_OPEN_ERROR__NOT_THE_CREATION_TRANSACTION = 0x1795; // 6037
+/** IdentityMismatch: The coin's name, ticker or metadata URI is not the one sealed at scheduling */
+export const FAIR_OPEN_ERROR__IDENTITY_MISMATCH = 0x1796; // 6038
+/** NotOpening: Settling runs only right after the open, in the creation transaction */
+export const FAIR_OPEN_ERROR__NOT_OPENING = 0x1797; // 6039
+/** BuyNotSpent: The pot's buy did not spend exactly the rung */
+export const FAIR_OPEN_ERROR__BUY_NOT_SPENT = 0x1798; // 6040
+/** NotThePotsCoins: That is not the pot's coin account */
+export const FAIR_OPEN_ERROR__NOT_THE_POTS_COINS = 0x1799; // 6041
+/** NotThePool: That is not the coin's DBC pool */
+export const FAIR_OPEN_ERROR__NOT_THE_POOL = 0x179a; // 6042
+/** NotTheCoin: That is not the launch's coin */
+export const FAIR_OPEN_ERROR__NOT_THE_COIN = 0x179b; // 6043
+/** NotTheFeeProgram: That is not the fee program the program config names */
+export const FAIR_OPEN_ERROR__NOT_THE_FEE_PROGRAM = 0x179c; // 6044
+/** NotATokenAccount: That is not an SPL Token account */
+export const FAIR_OPEN_ERROR__NOT_A_TOKEN_ACCOUNT = 0x179d; // 6045
+/** NotOpened: The launch has not opened */
+export const FAIR_OPEN_ERROR__NOT_OPENED = 0x179e; // 6046
+/** SeatAccounts: A push takes each seat as three accounts: the seat, its wallet and the wallet's account of the coin */
+export const FAIR_OPEN_ERROR__SEAT_ACCOUNTS = 0x179f; // 6047
+/** AlreadyDelivered: The seat's coins and refund were delivered already */
+export const FAIR_OPEN_ERROR__ALREADY_DELIVERED = 0x17a0; // 6048
+/** CreatorsSeat: The creator's coins leave the pot only into the Creator lock */
+export const FAIR_OPEN_ERROR__CREATORS_SEAT = 0x17a1; // 6049
+/** NotYourCoinAccount: The coins go to an account of the coin the seat's wallet owns */
+export const FAIR_OPEN_ERROR__NOT_YOUR_COIN_ACCOUNT = 0x17a2; // 6050
 
 export type FairOpenError =
   | typeof FAIR_OPEN_ERROR__ADMISSION_EXPIRED
+  | typeof FAIR_OPEN_ERROR__ALREADY_DELIVERED
+  | typeof FAIR_OPEN_ERROR__BUY_NOT_SPENT
+  | typeof FAIR_OPEN_ERROR__CANNOT_OPEN
   | typeof FAIR_OPEN_ERROR__CAN_STILL_OPEN
   | typeof FAIR_OPEN_ERROR__CAP_OVER_TIER
+  | typeof FAIR_OPEN_ERROR__CREATORS_SEAT
+  | typeof FAIR_OPEN_ERROR__IDENTITY_MISMATCH
   | typeof FAIR_OPEN_ERROR__MIN_RAISE_ABOVE_CAP
   | typeof FAIR_OPEN_ERROR__MISSING_SETTING
   | typeof FAIR_OPEN_ERROR__NO_ADMISSION
   | typeof FAIR_OPEN_ERROR__NO_IDENTITY
   | typeof FAIR_OPEN_ERROR__NOT_A_DBC_CONFIG
+  | typeof FAIR_OPEN_ERROR__NOT_A_TOKEN_ACCOUNT
   | typeof FAIR_OPEN_ERROR__NOT_FAILED
+  | typeof FAIR_OPEN_ERROR__NOT_OPENED
+  | typeof FAIR_OPEN_ERROR__NOT_OPENING
   | typeof FAIR_OPEN_ERROR__NOT_OUR_ADMISSION
   | typeof FAIR_OPEN_ERROR__NOT_OUR_NONCE
   | typeof FAIR_OPEN_ERROR__NOT_SCHEDULED
+  | typeof FAIR_OPEN_ERROR__NOT_THE_COIN
+  | typeof FAIR_OPEN_ERROR__NOT_THE_CREATION_TRANSACTION
   | typeof FAIR_OPEN_ERROR__NOT_THE_CREATOR
   | typeof FAIR_OPEN_ERROR__NOT_THE_FAIR_OPEN_CONFIG
+  | typeof FAIR_OPEN_ERROR__NOT_THE_FEE_PROGRAM
   | typeof FAIR_OPEN_ERROR__NOT_THE_KEEPER
+  | typeof FAIR_OPEN_ERROR__NOT_THE_POOL
+  | typeof FAIR_OPEN_ERROR__NOT_THE_POTS_COINS
   | typeof FAIR_OPEN_ERROR__NOT_THIS_ADMISSION
   | typeof FAIR_OPEN_ERROR__NOT_THIS_LAUNCHS_SEAT
   | typeof FAIR_OPEN_ERROR__NOT_UPGRADE_AUTHORITY
+  | typeof FAIR_OPEN_ERROR__NOT_YOUR_COIN_ACCOUNT
   | typeof FAIR_OPEN_ERROR__NOT_YOUR_SEAT
   | typeof FAIR_OPEN_ERROR__OFF_STEP
   | typeof FAIR_OPEN_ERROR__OVER_CAP
   | typeof FAIR_OPEN_ERROR__OVER_DEPOSIT
   | typeof FAIR_OPEN_ERROR__QUOTE_NOT_SUPPORTED
+  | typeof FAIR_OPEN_ERROR__SEAT_ACCOUNTS
   | typeof FAIR_OPEN_ERROR__SEAT_HELD_BY_ANOTHER_WALLET
   | typeof FAIR_OPEN_ERROR__SEAT_NOT_COUNTED
   | typeof FAIR_OPEN_ERROR__SEATS_LEFT
+  | typeof FAIR_OPEN_ERROR__TOO_EARLY
   | typeof FAIR_OPEN_ERROR__TOO_FAR_AHEAD
+  | typeof FAIR_OPEN_ERROR__TOO_LATE
   | typeof FAIR_OPEN_ERROR__TOO_MANY_SEATS
   | typeof FAIR_OPEN_ERROR__VAULT_SHORT
   | typeof FAIR_OPEN_ERROR__WINDOW_CLOSED
   | typeof FAIR_OPEN_ERROR__WINDOW_NOT_CLOSED
   | typeof FAIR_OPEN_ERROR__WINDOW_NOT_STARTED
-  | typeof FAIR_OPEN_ERROR__WINDOW_OVER;
+  | typeof FAIR_OPEN_ERROR__WINDOW_OVER
+  | typeof FAIR_OPEN_ERROR__WRONG_RUNG;
 
 let fairOpenErrorMessages: Record<FairOpenError, string> | undefined;
 if (process.env["NODE_ENV"] !== "production") {
   fairOpenErrorMessages = {
     [FAIR_OPEN_ERROR__ADMISSION_EXPIRED]: `The admission has expired`,
+    [FAIR_OPEN_ERROR__ALREADY_DELIVERED]: `The seat's coins and refund were delivered already`,
+    [FAIR_OPEN_ERROR__BUY_NOT_SPENT]: `The pot's buy did not spend exactly the rung`,
+    [FAIR_OPEN_ERROR__CANNOT_OPEN]: `The pot would spend less than the ladder's lowest rung or the minimum raise`,
     [FAIR_OPEN_ERROR__CAN_STILL_OPEN]: `The pot can still open: it may fail only 15 minutes after the scheduled open`,
     [FAIR_OPEN_ERROR__CAP_OVER_TIER]: `The admission's cap is above its tier's or off the step`,
+    [FAIR_OPEN_ERROR__CREATORS_SEAT]: `The creator's coins leave the pot only into the Creator lock`,
+    [FAIR_OPEN_ERROR__IDENTITY_MISMATCH]: `The coin's name, ticker or metadata URI is not the one sealed at scheduling`,
     [FAIR_OPEN_ERROR__MIN_RAISE_ABOVE_CAP]: `The minimum raise is more than the pot can spend`,
     [FAIR_OPEN_ERROR__MISSING_SETTING]: `A setting is the default address`,
     [FAIR_OPEN_ERROR__NO_ADMISSION]: `A deposit needs our admission server's signature, verified right before it`,
     [FAIR_OPEN_ERROR__NO_IDENTITY]: `The coin's identity hash is missing`,
     [FAIR_OPEN_ERROR__NOT_A_DBC_CONFIG]: `The config is not a DBC config`,
+    [FAIR_OPEN_ERROR__NOT_A_TOKEN_ACCOUNT]: `That is not an SPL Token account`,
     [FAIR_OPEN_ERROR__NOT_FAILED]: `The launch has not failed`,
+    [FAIR_OPEN_ERROR__NOT_OPENED]: `The launch has not opened`,
+    [FAIR_OPEN_ERROR__NOT_OPENING]: `Settling runs only right after the open, in the creation transaction`,
     [FAIR_OPEN_ERROR__NOT_OUR_ADMISSION]: `The admission is not signed by our admission server`,
     [FAIR_OPEN_ERROR__NOT_OUR_NONCE]: `The nonce is not a durable nonce account held by the keeper`,
     [FAIR_OPEN_ERROR__NOT_SCHEDULED]: `The launch is not taking deposits: it failed or opened`,
+    [FAIR_OPEN_ERROR__NOT_THE_COIN]: `That is not the launch's coin`,
+    [FAIR_OPEN_ERROR__NOT_THE_CREATION_TRANSACTION]: `The open runs only in the coin's creation transaction`,
     [FAIR_OPEN_ERROR__NOT_THE_CREATOR]: `That is not the launch's creator`,
     [FAIR_OPEN_ERROR__NOT_THE_FAIR_OPEN_CONFIG]: `A Fair Open runs on Heat's Fair Open config`,
+    [FAIR_OPEN_ERROR__NOT_THE_FEE_PROGRAM]: `That is not the fee program the program config names`,
     [FAIR_OPEN_ERROR__NOT_THE_KEEPER]: `The keeper did not sign`,
+    [FAIR_OPEN_ERROR__NOT_THE_POOL]: `That is not the coin's DBC pool`,
+    [FAIR_OPEN_ERROR__NOT_THE_POTS_COINS]: `That is not the pot's coin account`,
     [FAIR_OPEN_ERROR__NOT_THIS_ADMISSION]: `The admission is for another wallet, launch, person, tier, cap or expiry`,
     [FAIR_OPEN_ERROR__NOT_THIS_LAUNCHS_SEAT]: `The seat is another launch's`,
     [FAIR_OPEN_ERROR__NOT_UPGRADE_AUTHORITY]: `Only the program's upgrade authority can change its settings`,
+    [FAIR_OPEN_ERROR__NOT_YOUR_COIN_ACCOUNT]: `The coins go to an account of the coin the seat's wallet owns`,
     [FAIR_OPEN_ERROR__NOT_YOUR_SEAT]: `The seat is another wallet's`,
     [FAIR_OPEN_ERROR__OFF_STEP]: `Deposits and withdrawals move in whole steps of 0.01 SOL`,
     [FAIR_OPEN_ERROR__OVER_CAP]: `The deposit would be over the seat's cap`,
     [FAIR_OPEN_ERROR__OVER_DEPOSIT]: `That is more than the seat holds`,
     [FAIR_OPEN_ERROR__QUOTE_NOT_SUPPORTED]: `A Fair Open takes SOL only, until another quote's deposits are built`,
+    [FAIR_OPEN_ERROR__SEAT_ACCOUNTS]: `A push takes each seat as three accounts: the seat, its wallet and the wallet's account of the coin`,
     [FAIR_OPEN_ERROR__SEAT_HELD_BY_ANOTHER_WALLET]: `This person's seat is held by another wallet`,
     [FAIR_OPEN_ERROR__SEAT_NOT_COUNTED]: `The seat is not counted in the launch`,
     [FAIR_OPEN_ERROR__SEATS_LEFT]: `Seats still hold deposits`,
+    [FAIR_OPEN_ERROR__TOO_EARLY]: `The pot opens at its scheduled time`,
     [FAIR_OPEN_ERROR__TOO_FAR_AHEAD]: `A window starts at most 7 days ahead`,
+    [FAIR_OPEN_ERROR__TOO_LATE]: `The open is refused from 15 minutes after the scheduled time`,
     [FAIR_OPEN_ERROR__TOO_MANY_SEATS]: `Too many seats ask the same deposit`,
     [FAIR_OPEN_ERROR__VAULT_SHORT]: `The vault would hold less than it owes`,
     [FAIR_OPEN_ERROR__WINDOW_CLOSED]: `The deposit window has closed`,
     [FAIR_OPEN_ERROR__WINDOW_NOT_CLOSED]: `The deposit window has not closed`,
     [FAIR_OPEN_ERROR__WINDOW_NOT_STARTED]: `The deposit window has not started`,
     [FAIR_OPEN_ERROR__WINDOW_OVER]: `The window would already be over`,
+    [FAIR_OPEN_ERROR__WRONG_RUNG]: `The rung is not the largest at or below what the pot should spend`,
   };
 }
 

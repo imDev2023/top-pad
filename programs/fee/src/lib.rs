@@ -1,8 +1,9 @@
 //! The fee program (spec 5.2): the partner and fee claimer on every config, forever, so it should rarely change.
 //! It holds Heat's settings (`FeeConfig`) and the on-chain list of Heat coins: one `CoinRecord` per coin our launch key
-//! co-signed. It pays out every curve fee by ADR 0003's rules: the window claim sends a pool's Tax window fees to the
-//! treasury, and every later claim splits the pool's partner fees 50/50 between whoever holds its DBC creator role and the
-//! treasury. DBC pays each share straight from the pool to its owner's quote account, so no fee ever rests here.
+//! co-signed or a Fair Open opened. It pays out every curve fee by ADR 0003's rules: the window claim sends a pool's Tax
+//! window fees to the treasury, and every later claim splits the pool's partner fees 50/50 between whoever holds its DBC
+//! creator role and the treasury. DBC pays each share straight from the pool to its owner's quote account, so no fee
+//! ever rests here.
 use anchor_lang::{
     prelude::*,
     solana_program::{
@@ -27,6 +28,9 @@ pub const FEE_CONFIG_SEED: &[u8] = b"fee_config";
 pub const COIN_RECORD_SEED: &[u8] = b"coin_record";
 /// The seed of a `WindowClaim`, followed by its pool.
 pub const WINDOW_CLAIM_SEED: &[u8] = b"window_claim";
+/// The seed of the Fair Open program's coin registrar, a PDA of that program alone: its signature is how a CPI proves it
+/// comes from the Fair Open program's open.
+pub const COIN_REGISTRAR_SEED: &[u8] = b"coin_registrar";
 /// The Tax window (spec 3.2, 12): Heat's configs charge the sniper tax for 60 one-second periods from a pool's activation
 /// point, so the window's fees are those of its first 60 seconds. `@top-pad/chain` checks it against the configs' tax.
 #[constant]
@@ -143,23 +147,12 @@ pub mod fee {
     }
 
     /// Puts a coin on the list of Heat coins (spec 8): creates its `CoinRecord`, with the launch key's signature, in the
-    /// Instant launch's creation transaction (spec 2.2). The Fair Open program's `settle` registers its coins by CPI
-    /// once it exists. The pool must be a DBC pool on a config that names our `fee_claimer`, so a record can only ever
-    /// describe a pool whose fees this program splits.
+    /// Instant launch's creation transaction (spec 2.2). The pool must be a DBC pool on a config that names our
+    /// `fee_claimer`, so a record can only ever describe a pool whose fees this program splits.
     pub fn register_coin(ctx: Context<RegisterCoin>) -> Result<()> {
-        let pool = dbc::Pool::read(&ctx.accounts.pool)?;
-        require_keys_eq!(pool.config, ctx.accounts.config.key(), FeeError::PoolConfigMismatch);
-        require_keys_eq!(pool.base_mint, ctx.accounts.mint.key(), FeeError::PoolMintMismatch);
-
-        let config_data = ctx.accounts.config.try_borrow_data()?;
-        require!(config_data.get(..8) == Some(&dbc::POOL_CONFIG_DISCRIMINATOR[..]), FeeError::NotADbcConfig);
-        let fee_claimer =
-            dbc::address_at(&config_data, dbc::CONFIG_FEE_CLAIMER_OFFSET).ok_or(FeeError::NotADbcConfig)?;
-        drop(config_data);
-        require_keys_eq!(fee_claimer, FEE_CLAIMER, FeeError::NotAHeatConfig);
-
-        let record = &mut ctx.accounts.coin_record;
-        record.set_inner(CoinRecord {
+        let a = &ctx.accounts;
+        let pool = heat_pool(&a.pool, &a.config, &a.mint)?;
+        ctx.accounts.coin_record.set_inner(CoinRecord {
             mint: pool.base_mint,
             pool: ctx.accounts.pool.key(),
             launch_mode: LaunchMode::Instant,
@@ -172,10 +165,40 @@ pub mod fee {
         });
         emit_cpi!(CoinRegistered {
             mint: pool.base_mint,
-            pool: record.pool,
+            pool: ctx.accounts.pool.key(),
             config: pool.config,
             creator: pool.creator,
             launch_mode: LaunchMode::Instant,
+        });
+        Ok(())
+    }
+
+    /// Puts a Fair Open's coin on the list of Heat coins, by CPI from the Fair Open program's open, the last instruction of
+    /// the coin's creation transaction (spec 2.1 step 10): its record names the launch the coin opened from and the pot's
+    /// own fee, which is split 50/50 like any trade's rather than joining the launch's Tax Share (spec 4). Only the Fair
+    /// Open program can sign for its coin registrar, so no one else can register a coin as a Fair Open's.
+    pub fn register_fair_open_coin(ctx: Context<RegisterFairOpenCoin>, launch: Pubkey, pot_fee: u64) -> Result<()> {
+        let a = &ctx.accounts;
+        let (registrar, _) = Pubkey::find_program_address(&[COIN_REGISTRAR_SEED], &a.fee_config.fair_open_program);
+        require_keys_eq!(a.registrar.key(), registrar, FeeError::NotTheFairOpenProgram);
+        let pool = heat_pool(&a.pool, &a.config, &a.mint)?;
+        ctx.accounts.coin_record.set_inner(CoinRecord {
+            mint: pool.base_mint,
+            pool: ctx.accounts.pool.key(),
+            launch_mode: LaunchMode::FairOpen,
+            fair_open_launch: Some(launch),
+            pot_fee,
+            window_claimed: false,
+            earnings_recipient: None,
+            registered_at: Clock::get()?.unix_timestamp,
+            bump: ctx.bumps.coin_record,
+        });
+        emit_cpi!(CoinRegistered {
+            mint: pool.base_mint,
+            pool: ctx.accounts.pool.key(),
+            config: pool.config,
+            creator: pool.creator,
+            launch_mode: LaunchMode::FairOpen,
         });
         Ok(())
     }
@@ -289,6 +312,19 @@ pub mod fee {
         });
         Ok(())
     }
+}
+
+/// The pool a coin's record describes: a DBC pool of the mint, on a config that names our `fee_claimer`, so a record
+/// can only ever describe a pool whose fees this program splits.
+fn heat_pool(pool: &AccountInfo, config: &AccountInfo, mint: &AccountInfo) -> Result<dbc::Pool> {
+    let read = dbc::Pool::read(pool)?;
+    require_keys_eq!(read.config, config.key(), FeeError::PoolConfigMismatch);
+    require_keys_eq!(read.base_mint, mint.key(), FeeError::PoolMintMismatch);
+    let config_data = config.try_borrow_data()?;
+    require!(config_data.get(..8) == Some(&dbc::POOL_CONFIG_DISCRIMINATOR[..]), FeeError::NotADbcConfig);
+    let fee_claimer = dbc::address_at(&config_data, dbc::CONFIG_FEE_CLAIMER_OFFSET).ok_or(FeeError::NotADbcConfig)?;
+    require_keys_eq!(fee_claimer, FEE_CLAIMER, FeeError::NotAHeatConfig);
+    Ok(read)
 }
 
 /// Whether a pool's window claim has run, by the account that remembers it: the pool's `CoinRecord`, or its
@@ -585,6 +621,29 @@ pub struct RegisterCoin<'info> {
 
 #[event_cpi]
 #[derive(Accounts)]
+pub struct RegisterFairOpenCoin<'info> {
+    #[account(seeds = [FEE_CONFIG_SEED], bump = fee_config.bump)]
+    pub fee_config: Account<'info, FeeConfig>,
+    /// The Fair Open program's coin registrar, checked in the handler against the program the `FeeConfig` names.
+    pub registrar: Signer<'info>,
+    /// Pays the record's rent: our keeper, which the open pays back from the creator's prepaid rent.
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    /// CHECK: the coin; it must be the pool's base mint, checked in the handler.
+    pub mint: UncheckedAccount<'info>,
+    /// CHECK: owned by DBC; its discriminator, config and base mint are checked in the handler.
+    #[account(owner = dbc::PROGRAM_ID @ FeeError::NotADbcPool)]
+    pub pool: UncheckedAccount<'info>,
+    /// CHECK: owned by DBC; its discriminator and fee claimer are checked in the handler.
+    #[account(owner = dbc::PROGRAM_ID @ FeeError::NotADbcConfig)]
+    pub config: UncheckedAccount<'info>,
+    #[account(init, payer = payer, space = 8 + CoinRecord::INIT_SPACE, seeds = [COIN_RECORD_SEED, mint.key().as_ref()], bump)]
+    pub coin_record: Account<'info, CoinRecord>,
+    pub system_program: Program<'info, System>,
+}
+
+#[event_cpi]
+#[derive(Accounts)]
 pub struct ClaimWindowFees<'info> {
     #[account(seeds = [FEE_CONFIG_SEED], bump = fee_config.bump)]
     pub fee_config: Account<'info, FeeConfig>,
@@ -826,4 +885,6 @@ pub enum FeeError {
     NotTheFeeClaimersAccount,
     #[msg("The fee claimer holds the pool's creator role, so its creator's half has nowhere to go")]
     CreatorRoleHeldByFeeClaimer,
+    #[msg("Only the Fair Open program's open registers a Fair Open's coin")]
+    NotTheFairOpenProgram,
 }

@@ -583,9 +583,8 @@
       "name": "register_coin",
       "docs": [
         "Puts a coin on the list of Heat coins (spec 8): creates its `CoinRecord`, with the launch key's signature, in the",
-        "Instant launch's creation transaction (spec 2.2). The Fair Open program's `settle` registers its coins by CPI",
-        "once it exists. The pool must be a DBC pool on a config that names our `fee_claimer`, so a record can only ever",
-        "describe a pool whose fees this program splits."
+        "Instant launch's creation transaction (spec 2.2). The pool must be a DBC pool on a config that names our",
+        "`fee_claimer`, so a record can only ever describe a pool whose fees this program splits."
       ],
       "discriminator": [
         79,
@@ -684,6 +683,121 @@
         }
       ],
       "args": []
+    },
+    {
+      "name": "register_fair_open_coin",
+      "docs": [
+        "Puts a Fair Open's coin on the list of Heat coins, by CPI from the Fair Open program's open, the last instruction of",
+        "the coin's creation transaction (spec 2.1 step 10): its record names the launch the coin opened from and the pot's",
+        "own fee, which is split 50/50 like any trade's rather than joining the launch's Tax Share (spec 4). Only the Fair",
+        "Open program can sign for its coin registrar, so no one else can register a coin as a Fair Open's."
+      ],
+      "discriminator": [
+        192,
+        62,
+        175,
+        159,
+        158,
+        240,
+        43,
+        24
+      ],
+      "accounts": [
+        {
+          "name": "fee_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "registrar",
+          "docs": [
+            "The Fair Open program's coin registrar, checked in the handler against the program the `FeeConfig` names."
+          ],
+          "signer": true
+        },
+        {
+          "name": "payer",
+          "docs": [
+            "Pays the record's rent: our keeper, which the open pays back from the creator's prepaid rent."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "pool"
+        },
+        {
+          "name": "config"
+        },
+        {
+          "name": "coin_record",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  105,
+                  110,
+                  95,
+                  114,
+                  101,
+                  99,
+                  111,
+                  114,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "launch",
+          "type": "pubkey"
+        },
+        {
+          "name": "pot_fee",
+          "type": "u64"
+        }
+      ]
     },
     {
       "name": "update_fee_config",
@@ -1011,6 +1125,11 @@
       "code": 6016,
       "name": "CreatorRoleHeldByFeeClaimer",
       "msg": "The fee claimer holds the pool's creator role, so its creator's half has nowhere to go"
+    },
+    {
+      "code": 6017,
+      "name": "NotTheFairOpenProgram",
+      "msg": "Only the Fair Open program's open registers a Fair Open's coin"
     }
   ],
   "types": [

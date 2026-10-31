@@ -6,6 +6,8 @@
  * @see https://github.com/codama-idl/codama
  */
 
+export * from "./coinRegistrar";
 export * from "./launch";
+export * from "./pot";
 export * from "./programConfig";
 export * from "./vault";

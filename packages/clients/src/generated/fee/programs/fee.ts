@@ -52,12 +52,14 @@ import {
   getClaimWindowFeesInstructionAsync,
   getInitializeInstructionAsync,
   getRegisterCoinInstructionAsync,
+  getRegisterFairOpenCoinInstructionAsync,
   getUpdateFeeConfigInstructionAsync,
   parseClaimFeesInstruction,
   parseClaimUnlistedWindowFeesInstruction,
   parseClaimWindowFeesInstruction,
   parseInitializeInstruction,
   parseRegisterCoinInstruction,
+  parseRegisterFairOpenCoinInstruction,
   parseUpdateFeeConfigInstruction,
   type ClaimFeesAsyncInput,
   type ClaimUnlistedWindowFeesAsyncInput,
@@ -68,8 +70,10 @@ import {
   type ParsedClaimWindowFeesInstruction,
   type ParsedInitializeInstruction,
   type ParsedRegisterCoinInstruction,
+  type ParsedRegisterFairOpenCoinInstruction,
   type ParsedUpdateFeeConfigInstruction,
   type RegisterCoinAsyncInput,
+  type RegisterFairOpenCoinAsyncInput,
   type UpdateFeeConfigAsyncInput,
 } from "../instructions";
 import {
@@ -194,6 +198,7 @@ export enum FeeInstruction {
   ClaimWindowFees,
   Initialize,
   RegisterCoin,
+  RegisterFairOpenCoin,
   UpdateFeeConfig,
 }
 
@@ -260,6 +265,17 @@ export function identifyFeeInstruction(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([192, 62, 175, 159, 158, 240, 43, 24]),
+      ),
+      0,
+    )
+  ) {
+    return FeeInstruction.RegisterFairOpenCoin;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
         new Uint8Array([104, 184, 103, 242, 88, 151, 107, 20]),
       ),
       0,
@@ -291,6 +307,9 @@ export type ParsedFeeInstruction<
   | ({
       instructionType: FeeInstruction.RegisterCoin;
     } & ParsedRegisterCoinInstruction<TProgram>)
+  | ({
+      instructionType: FeeInstruction.RegisterFairOpenCoin;
+    } & ParsedRegisterFairOpenCoinInstruction<TProgram>)
   | ({
       instructionType: FeeInstruction.UpdateFeeConfig;
     } & ParsedUpdateFeeConfigInstruction<TProgram>);
@@ -333,6 +352,13 @@ export function parseFeeInstruction<TProgram extends string>(
       return {
         instructionType: FeeInstruction.RegisterCoin,
         ...parseRegisterCoinInstruction(instruction),
+      };
+    }
+    case FeeInstruction.RegisterFairOpenCoin: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: FeeInstruction.RegisterFairOpenCoin,
+        ...parseRegisterFairOpenCoinInstruction(instruction),
       };
     }
     case FeeInstruction.UpdateFeeConfig: {
@@ -393,6 +419,11 @@ export type FeePluginInstructions = {
     input: MakeOptional<RegisterCoinAsyncInput, "payer">,
     config?: { programAddress?: Address | HasAddress },
   ) => ReturnType<typeof getRegisterCoinInstructionAsync> &
+    SelfPlanAndSendFunctions;
+  registerFairOpenCoin: (
+    input: MakeOptional<RegisterFairOpenCoinAsyncInput, "payer">,
+    config?: { programAddress?: Address | HasAddress },
+  ) => ReturnType<typeof getRegisterFairOpenCoinInstructionAsync> &
     SelfPlanAndSendFunctions;
   updateFeeConfig: (
     input: UpdateFeeConfigAsyncInput,
@@ -470,6 +501,17 @@ export function feeProgram(
             addSelfPlanAndSendFunctions(
               client,
               getRegisterCoinInstructionAsync(
+                { ...input, payer: input.payer ?? client.payer },
+                {
+                  programAddress:
+                    instructionConfig?.programAddress ?? config.programAddress,
+                },
+              ),
+            ),
+          registerFairOpenCoin: (input, instructionConfig) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getRegisterFairOpenCoinInstructionAsync(
                 { ...input, payer: input.payer ?? client.payer },
                 {
                   programAddress:

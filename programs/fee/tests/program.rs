@@ -260,3 +260,16 @@ fn a_rotated_launch_key_takes_over_and_the_old_one_stops_working() {
     assert_eq!(custom_error(&err), Some(FeeErrorCode::NotTheLaunchKey as u32), "{:?}", err.meta.logs);
     t.register(&coin, &rotated).unwrap();
 }
+
+#[test]
+fn registers_a_fair_open_coin_only_through_the_fair_open_programs_registrar() {
+    let mut t = Test::initialized();
+    let coin = t.dbc_coin(fee::FEE_CLAIMER);
+    // A plain key cannot stand in for the registrar, a PDA only the Fair Open program the FeeConfig names signs for.
+    let impostor = Keypair::new();
+    let err = t.register_fair_open(&coin, &impostor, Pubkey::new_unique(), 1_000).unwrap_err();
+    assert_eq!(custom_error(&err), Some(FeeErrorCode::NotTheFairOpenProgram as u32), "{:?}", err.meta.logs);
+    let (registrar, _) = Pubkey::find_program_address(&[fee::COIN_REGISTRAR_SEED], &t.settings().fair_open_program);
+    assert_ne!(registrar, impostor.pubkey());
+    assert!(t.svm.get_account(&coin_record_address(&coin.mint)).is_none_or(|a| a.lamports == 0));
+}

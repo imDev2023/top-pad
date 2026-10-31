@@ -6,11 +6,15 @@
  * @see https://github.com/codama-idl/codama
  */
 
+export * from "./claim";
 export * from "./closeLaunch";
 export * from "./createLaunch";
 export * from "./deposit";
 export * from "./initialize";
 export * from "./markFailed";
+export * from "./open";
+export * from "./push";
+export * from "./settle";
 export * from "./updateProgramConfig";
 export * from "./withdraw";
 export * from "./withdrawFailed";

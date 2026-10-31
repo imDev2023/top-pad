@@ -1353,6 +1353,8 @@ name = "fair_open"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",
+ "dbc_stand_in",
+ "fee",
  "litesvm",
  "serde_json",
  "solana-account",
@@ -1360,6 +1362,7 @@ dependencies = [
  "solana-keypair",
  "solana-message",
  "solana-security-txt",
+ "solana-sha256-hasher",
  "solana-signer",
  "solana-transaction",
 ]

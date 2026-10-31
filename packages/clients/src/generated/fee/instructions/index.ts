@@ -11,4 +11,5 @@ export * from "./claimUnlistedWindowFees";
 export * from "./claimWindowFees";
 export * from "./initialize";
 export * from "./registerCoin";
+export * from "./registerFairOpenCoin";
 export * from "./updateFeeConfig";

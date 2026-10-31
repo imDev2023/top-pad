@@ -18,6 +18,8 @@ import {
 export enum LaunchStatus {
   Scheduled,
   Failed,
+  Opening,
+  Opened,
 }
 
 export type LaunchStatusArgs = LaunchStatus;

@@ -29,7 +29,8 @@ fn seats_a_depositor_who_prepays_both_rents() {
     assert_eq!(seat.coin_rent, coin_rent);
     // The deposit, both rents, and a fee for two signatures: the wallet's and the admission's (spec 5.3).
     assert_eq!(before - t.lamports(&d.wallet.pubkey()), 30 * STEP + coin_rent + seat_rent + 10_000);
-    assert_eq!(t.vault_holds(&launch), 30 * STEP + coin_rent);
+    // Beside the creator's prepaid rent for the open.
+    assert_eq!(t.vault_holds(&launch), 30 * STEP + coin_rent + t.open_rent());
 
     let l: Launch = t.read(&launch.launch);
     assert_eq!((l.seats, l.scored_deposits, l.coin_rent), (1, 30 * STEP, coin_rent));
@@ -229,7 +230,7 @@ fn takes_back_everything_and_both_rents() {
     assert!(!t.exists(&d.seat(&launch)));
     let l: Launch = t.read(&launch.launch);
     assert_eq!((l.seats, l.scored_deposits, l.coin_rent, l.counts[39]), (0, 0, 0, 0));
-    assert_eq!(t.vault_holds(&launch), 0);
+    assert_eq!(t.vault_holds(&launch), t.open_rent());
     assert!(events::<Withdrawn>(&done)[0].closed);
     println!("withdraw: {} compute units for everything, closing the seat", done.compute_units_consumed);
 

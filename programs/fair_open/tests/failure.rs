@@ -110,7 +110,8 @@ fn returns_every_deposit_and_both_rents_with_no_server() {
     }
     let l: Launch = t.read(&launch.launch);
     assert_eq!((l.seats, l.pot(), l.coin_rent), (0, 0, 0));
-    assert_eq!(t.vault_holds(&launch), 0);
+    // Only the creator's prepaid rent for the open is left, which `close_launch` returns.
+    assert_eq!(t.vault_holds(&launch), t.open_rent());
 }
 
 #[test]
@@ -159,7 +160,8 @@ fn returns_the_creators_rent_once_every_seat_is_back() {
     let creator = t.creator.pubkey();
     let before = t.lamports(&creator);
     let done = t.close_launch(&launch).unwrap();
-    let rent = t.rent(8 + Launch::INIT_SPACE) + t.rent(8 + Vault::INIT_SPACE);
+    // The launch's and the vault's rent, and the open's, which was never spent.
+    let rent = t.rent(8 + Launch::INIT_SPACE) + t.rent(8 + Vault::INIT_SPACE) + t.open_rent();
     assert_eq!(t.lamports(&creator) - before, rent);
     assert!(!t.exists(&launch.launch) && !t.exists(&launch.vault));
     assert_eq!(events::<LaunchClosed>(&done)[0].rent, rent);

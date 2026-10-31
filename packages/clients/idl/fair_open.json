@@ -8,6 +8,132 @@
   },
   "instructions": [
     {
+      "name": "claim",
+      "docs": [
+        "A depositor takes their seat's coins and refund themselves, if no push has (spec 2.1 step 12), into any account of",
+        "the coin they own; the coin account's prepaid rent comes back with the refund. The creator's seat is the Creator",
+        "lock's alone."
+      ],
+      "discriminator": [
+        62,
+        198,
+        214,
+        193,
+        213,
+        159,
+        108,
+        210
+      ],
+      "accounts": [
+        {
+          "name": "launch",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  97,
+                  117,
+                  110,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "launch.nonce",
+                "account": "Launch"
+              }
+            ]
+          },
+          "relations": [
+            "seat"
+          ]
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "launch"
+              }
+            ]
+          }
+        },
+        {
+          "name": "seat",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  97,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "launch"
+              },
+              {
+                "kind": "account",
+                "path": "seat.person",
+                "account": "Seat"
+              }
+            ]
+          }
+        },
+        {
+          "name": "wallet",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "seat"
+          ]
+        },
+        {
+          "name": "coin_account",
+          "writable": true
+        },
+        {
+          "name": "pot_coins",
+          "writable": true
+        },
+        {
+          "name": "mint",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "close_launch",
       "docs": [
         "Closes a failed launch once every seat has been returned, giving the creator back the rent of the launch and its",
@@ -592,6 +718,448 @@
       "args": []
     },
     {
+      "name": "open",
+      "docs": [
+        "The open (spec 2.1 step 10): the first of this program's two instructions in the coin's creation transaction, the",
+        "rung of the creator's ladder that our keeper sends at the scheduled time. It refuses before the scheduled time and",
+        "from 15 minutes after it, a pot that cannot open, any rung but the largest at or below what the pot should spend,",
+        "and any transaction but the creation transaction (`creation`). It then wraps exactly the rung into the pot's",
+        "wrapped-SOL account and lets our keeper spend exactly that, as the pot's delegate, in DBC's swap."
+      ],
+      "discriminator": [
+        228,
+        220,
+        155,
+        71,
+        199,
+        189,
+        60,
+        45
+      ],
+      "accounts": [
+        {
+          "name": "program_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  103,
+                  114,
+                  97,
+                  109,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "launch",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  97,
+                  117,
+                  110,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "launch.nonce",
+                "account": "Launch"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "launch"
+              }
+            ]
+          }
+        },
+        {
+          "name": "pot",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "launch"
+              }
+            ]
+          }
+        },
+        {
+          "name": "keeper",
+          "docs": [
+            "Our keeper, which sends the open, fronts its accounts' rent and spends exactly the buy as the pot's delegate."
+          ],
+          "signer": true,
+          "relations": [
+            "program_config"
+          ]
+        },
+        {
+          "name": "quote_mint"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "instructions",
+          "address": "Sysvar1nstructions1111111111111111111111111"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "rung",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "push",
+      "docs": [
+        "Delivers seats their coins and refund once the launch has opened (spec 2.1 step 12): anyone may send it, and our",
+        "keeper does at once. Each seat comes as three remaining accounts: the seat, its wallet, and the wallet's own",
+        "account of the coin, which the push makes from the rent the seat prepaid, or, if it exists already, returns that",
+        "rent with the refund. A seat already delivered is passed over, and so is the creator's, whose coins leave the pot",
+        "only into the Creator lock (spec 2.1 step 13), so a push sent twice delivers nothing twice."
+      ],
+      "discriminator": [
+        143,
+        34,
+        101,
+        78,
+        188,
+        184,
+        199,
+        63
+      ],
+      "accounts": [
+        {
+          "name": "launch",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  97,
+                  117,
+                  110,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "launch.nonce",
+                "account": "Launch"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "launch"
+              }
+            ]
+          }
+        },
+        {
+          "name": "pot_coins",
+          "writable": true
+        },
+        {
+          "name": "mint",
+          "writable": true
+        },
+        {
+          "name": "payer",
+          "docs": [
+            "Whoever sends the push: the Associated Token Account program's payer, though the seats' prepaid rent funds every",
+            "account it makes."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "settle",
+      "docs": [
+        "The last instruction of the creation transaction (spec 2.1 step 10). DBC's swap has spent exactly the rung, so the",
+        "pot's wrapped-SOL account closes back into the vault; the coins it bought are recorded; the pool's partner fee,",
+        "at this instant exactly the pot's own fee, is recorded with the coin's registration in the fee program; and our",
+        "keeper is paid back what the open's accounts cost it, out of the rent the creator prepaid."
+      ],
+      "discriminator": [
+        175,
+        42,
+        185,
+        87,
+        144,
+        131,
+        102,
+        212
+      ],
+      "accounts": [
+        {
+          "name": "program_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  103,
+                  114,
+                  97,
+                  109,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "launch",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  97,
+                  117,
+                  110,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "launch.nonce",
+                "account": "Launch"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "launch"
+              }
+            ]
+          }
+        },
+        {
+          "name": "pot",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "launch"
+              }
+            ]
+          }
+        },
+        {
+          "name": "pot_coins"
+        },
+        {
+          "name": "keeper",
+          "docs": [
+            "Our keeper, which is paid back the rent of the open's accounts."
+          ],
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "program_config"
+          ]
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "pool"
+        },
+        {
+          "name": "dbc_config"
+        },
+        {
+          "name": "coin_record",
+          "writable": true
+        },
+        {
+          "name": "coin_registrar",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  105,
+                  110,
+                  95,
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  97,
+                  114
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "fee_config"
+        },
+        {
+          "name": "fee_event_authority"
+        },
+        {
+          "name": "fee_program",
+          "relations": [
+            "program_config"
+          ]
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "update_program_config",
       "docs": [
         "Replaces the settings, again only by the upgrade authority: how a leaked admission or keeper key is rotated."
@@ -1022,6 +1590,19 @@
   ],
   "events": [
     {
+      "name": "CoinDustBurnt",
+      "discriminator": [
+        155,
+        210,
+        239,
+        193,
+        77,
+        40,
+        191,
+        31
+      ]
+    },
+    {
       "name": "Deposited",
       "discriminator": [
         111,
@@ -1087,6 +1668,19 @@
       ]
     },
     {
+      "name": "LaunchOpened",
+      "discriminator": [
+        136,
+        24,
+        115,
+        132,
+        210,
+        174,
+        226,
+        71
+      ]
+    },
+    {
       "name": "ProgramConfigChanged",
       "discriminator": [
         126,
@@ -1097,6 +1691,19 @@
         234,
         162,
         103
+      ]
+    },
+    {
+      "name": "SeatDelivered",
+      "discriminator": [
+        172,
+        192,
+        98,
+        20,
+        171,
+        107,
+        87,
+        50
       ]
     },
     {
@@ -1278,6 +1885,96 @@
       "code": 6032,
       "name": "NotTheCreator",
       "msg": "That is not the launch's creator"
+    },
+    {
+      "code": 6033,
+      "name": "TooEarly",
+      "msg": "The pot opens at its scheduled time"
+    },
+    {
+      "code": 6034,
+      "name": "TooLate",
+      "msg": "The open is refused from 15 minutes after the scheduled time"
+    },
+    {
+      "code": 6035,
+      "name": "CannotOpen",
+      "msg": "The pot would spend less than the ladder's lowest rung or the minimum raise"
+    },
+    {
+      "code": 6036,
+      "name": "WrongRung",
+      "msg": "The rung is not the largest at or below what the pot should spend"
+    },
+    {
+      "code": 6037,
+      "name": "NotTheCreationTransaction",
+      "msg": "The open runs only in the coin's creation transaction"
+    },
+    {
+      "code": 6038,
+      "name": "IdentityMismatch",
+      "msg": "The coin's name, ticker or metadata URI is not the one sealed at scheduling"
+    },
+    {
+      "code": 6039,
+      "name": "NotOpening",
+      "msg": "Settling runs only right after the open, in the creation transaction"
+    },
+    {
+      "code": 6040,
+      "name": "BuyNotSpent",
+      "msg": "The pot's buy did not spend exactly the rung"
+    },
+    {
+      "code": 6041,
+      "name": "NotThePotsCoins",
+      "msg": "That is not the pot's coin account"
+    },
+    {
+      "code": 6042,
+      "name": "NotThePool",
+      "msg": "That is not the coin's DBC pool"
+    },
+    {
+      "code": 6043,
+      "name": "NotTheCoin",
+      "msg": "That is not the launch's coin"
+    },
+    {
+      "code": 6044,
+      "name": "NotTheFeeProgram",
+      "msg": "That is not the fee program the program config names"
+    },
+    {
+      "code": 6045,
+      "name": "NotATokenAccount",
+      "msg": "That is not an SPL Token account"
+    },
+    {
+      "code": 6046,
+      "name": "NotOpened",
+      "msg": "The launch has not opened"
+    },
+    {
+      "code": 6047,
+      "name": "SeatAccounts",
+      "msg": "A push takes each seat as three accounts: the seat, its wallet and the wallet's account of the coin"
+    },
+    {
+      "code": 6048,
+      "name": "AlreadyDelivered",
+      "msg": "The seat's coins and refund were delivered already"
+    },
+    {
+      "code": 6049,
+      "name": "CreatorsSeat",
+      "msg": "The creator's coins leave the pot only into the Creator lock"
+    },
+    {
+      "code": 6050,
+      "name": "NotYourCoinAccount",
+      "msg": "The coins go to an account of the coin the seat's wallet owns"
     }
   ],
   "types": [
@@ -1323,6 +2020,29 @@
               "When the admission lapses, a Unix timestamp."
             ],
             "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CoinDustBurnt",
+      "docs": [
+        "Every seat delivered: the coins the rounding left in the pot burnt (spec 12)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "launch",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
           }
         ]
       }
@@ -1607,14 +2327,73 @@
             }
           },
           {
+            "name": "open_rent",
+            "docs": [
+              "What the open's accounts cost, prepaid by the creator at scheduling and held in the vault; after the open, what",
+              "is left of it once our keeper has been paid back, which comes back to the creator."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "mint",
+            "docs": [
+              "The coin, from the open on."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "keeper_lamports",
+            "docs": [
+              "Our keeper's balance as the open began, inside the creation transaction alone."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "spend",
+            "docs": [
+              "At the open, in the quote's raw units: what the fills added up to, and each level (spec 2.1 step 11)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "others_level",
+            "type": "u64"
+          },
+          {
+            "name": "unverified_level",
+            "type": "u64"
+          },
+          {
+            "name": "spent",
+            "docs": [
+              "The rung: what the pot spent, in the quote's raw units; and the coins it bought."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "coins",
+            "type": "u64"
+          },
+          {
+            "name": "refunded",
+            "docs": [
+              "The refunds pushes and claims have paid, and how many seats have had their coins and refund."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "delivered",
+            "type": "u32"
+          },
+          {
             "name": "reserved",
             "docs": [
-              "Room for what the open, the pushes and the Tax Share will record."
+              "Room for what the Creator lock and the Tax Share will record."
             ],
             "type": {
               "array": [
                 "u8",
-                128
+                28
               ]
             }
           },
@@ -1752,6 +2531,75 @@
       }
     },
     {
+      "name": "LaunchOpened",
+      "docs": [
+        "A Fair Open opened (spec 2.1 step 10): its coin and pool created and the pot's buy their first swap. Amounts are in the",
+        "quote's raw units, coins in the coin's."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "launch",
+            "type": "pubkey"
+          },
+          {
+            "name": "creator",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "spend",
+            "docs": [
+              "What the fills added up to, and the rung, what the pot spent."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "spent",
+            "type": "u64"
+          },
+          {
+            "name": "coins",
+            "type": "u64"
+          },
+          {
+            "name": "others_level",
+            "type": "u64"
+          },
+          {
+            "name": "unverified_level",
+            "type": "u64"
+          },
+          {
+            "name": "pot_fee",
+            "docs": [
+              "The pot's own fee, recorded with the fee program for its 50/50 split."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "rent_paid_back",
+            "docs": [
+              "What the open's accounts cost our keeper, paid back from the creator's prepaid rent."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "seats",
+            "type": "u32"
+          }
+        ]
+      }
+    },
+    {
       "name": "LaunchParams",
       "docs": [
         "What the creator chooses when scheduling (spec 2.1 steps 4 and 5)."
@@ -1799,6 +2647,12 @@
           },
           {
             "name": "Failed"
+          },
+          {
+            "name": "Opening"
+          },
+          {
+            "name": "Opened"
           }
         ]
       }
@@ -1954,20 +2808,118 @@
             "type": "u64"
           },
           {
+            "name": "spent",
+            "docs": [
+              "Once delivered (spec 2.1 step 12): what its deposit spent, the coins it bought, and its refund."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "coins",
+            "type": "u64"
+          },
+          {
+            "name": "refund",
+            "type": "u64"
+          },
+          {
+            "name": "delivered",
+            "docs": [
+              "Whether a push or its own claim has delivered its coins and refund."
+            ],
+            "type": "bool"
+          },
+          {
             "name": "reserved",
             "docs": [
-              "Room for the fill, coins, refund and Tax Share the open and the pushes will record."
+              "Room for what the Tax Share will record."
             ],
             "type": {
               "array": [
                 "u8",
-                48
+                23
               ]
             }
           },
           {
             "name": "bump",
             "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SeatDelivered",
+      "docs": [
+        "A seat's coins and refund delivered, by a push or its own claim (spec 2.1 step 12)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "launch",
+            "type": "pubkey"
+          },
+          {
+            "name": "wallet",
+            "type": "pubkey"
+          },
+          {
+            "name": "person",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "coin_account",
+            "docs": [
+              "Where its coins went."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "deposit",
+            "type": "u64"
+          },
+          {
+            "name": "fill",
+            "type": "u64"
+          },
+          {
+            "name": "spent",
+            "type": "u64"
+          },
+          {
+            "name": "coins",
+            "type": "u64"
+          },
+          {
+            "name": "refund",
+            "type": "u64"
+          },
+          {
+            "name": "coin_rent",
+            "docs": [
+              "The coin account's prepaid rent paid back with the refund: none when the push made the account with it."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "pushed",
+            "docs": [
+              "Whether a push delivered it, or the depositor's own claim."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "delivered",
+            "docs": [
+              "Seats delivered so far."
+            ],
+            "type": "u32"
           }
         ]
       }

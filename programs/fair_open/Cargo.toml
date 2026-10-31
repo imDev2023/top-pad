@@ -25,8 +25,13 @@ custom-panic = []
 anchor-lang = { workspace = true, features = ["event-cpi", "init-if-needed"] }
 solana-security-txt.workspace = true
 solana-instructions-sysvar.workspace = true
+solana-sha256-hasher.workspace = true
 
 [dev-dependencies]
+# The fee program, whose `register_fair_open_coin` the open calls: its types and its built binary.
+fee = { path = "../fee", features = ["no-entrypoint"] }
+# Our stand-in for DBC, whose made-up price and fees the open's tests check against.
+dbc_stand_in = { path = "../../tests/dbc-stand-in", features = ["no-entrypoint"] }
 # The precompiles, so a deposit's admission is verified by the real Ed25519 precompile.
 litesvm = { workspace = true, features = ["precompiles"] }
 solana-message.workspace = true
