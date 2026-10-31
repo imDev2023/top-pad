@@ -36,6 +36,30 @@
   font-weight: 700;
 }
 
+/* The coin revealed at the open, in place of the sealed tile */
+.revealed {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border: 1px solid var(--go);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+  color: var(--go);
+  font-family: var(--font-display);
+  font-size: 1.7rem;
+  font-weight: 700;
+}
+
+.ticker {
+  margin-left: 10px;
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: var(--muted);
+  vertical-align: middle;
+}
+
 .title {
   display: grid;
   gap: 3px;
@@ -143,6 +167,25 @@
 
 .due {
   border-left: 4px solid var(--caution);
+}
+
+.opened {
+  border-left: 4px solid var(--go);
+}
+
+.opened .big {
+  color: var(--go);
+}
+
+/* The way on to the coin's own page, after the open */
+.trade {
+  justify-self: start;
+}
+
+@media (max-width: 640px) {
+  .trade {
+    justify-self: stretch;
+  }
 }
 
 .failing,

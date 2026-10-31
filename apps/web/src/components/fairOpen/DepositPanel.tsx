@@ -169,7 +169,7 @@ function Seated({ view, account, chain, onChanged }: { view: FairOpen; account: 
       {seat ? (
         <dl className={styles.holding}>
           <div>
-            <dt className="eyebrow">Your seat holds</dt>
+            <dt className="eyebrow">{view.phase === "opened" ? "You deposited" : "Your seat holds"}</dt>
             <dd className={styles.held} data-testid="fair-open-held">
               <span className="num">{sol(seat.deposit, 2)}</span> SOL
             </dd>
@@ -265,7 +265,7 @@ function Seated({ view, account, chain, onChanged }: { view: FairOpen; account: 
         seat &&
         (seat.delivered ? (
           <p className="note" data-testid="fair-open-in-wallet">
-            In your wallet: Heat&apos;s keeper sent them right after the open.
+            Delivered to your wallet.
           </p>
         ) : you.wallet === view.creator.wallet ? (
           <p className="note">As the creator, your coins go into the Creator lock, which comes in Heat&apos;s next build.</p>

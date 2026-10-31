@@ -314,7 +314,9 @@ function AfterOpen({ view }: { view: FairOpen }) {
         </li>
         <li>
           <b data-testid="fair-open-delivered">
-            {open.delivered >= seats ? "Every seat has its coins and refund." : `${open.delivered} of ${seats} seats have their coins and refund.`}
+            {open.delivered >= seats
+              ? "Every seat has its coins and refund."
+              : `${open.delivered} of ${seats} seats ${open.delivered === 1 ? "has its" : "have their"} coins and refund.`}
           </b>{" "}
           <span className="muted">Heat&apos;s keeper sends them to each depositor&apos;s wallet; anyone can, and a depositor can claim their own here.</span>
         </li>
@@ -361,8 +363,12 @@ function AfterFailure({ view }: { view: FairOpen }) {
   );
 }
 
-/** "If the window closed now" (spec 2.1 step 11): each person's share, and the visitor's fill and refund. */
+/**
+ * "If the window closed now" (spec 2.1 step 11): each person's share, and the visitor's fill and refund; once the window
+ * has closed, the same figures at the open.
+ */
 function IfClosedNow({ view }: { view: FairOpen }) {
+  const opened = view.phase === "opened";
   const { others, unverified, spend, rung } = view.allocation;
   const twoLevels = unverified.level !== others.level && unverified.limited;
   const seat = view.you?.seat ?? null;
@@ -371,7 +377,7 @@ function IfClosedNow({ view }: { view: FairOpen }) {
   return (
     <section className={`panel ${styles.ifClosed}`} aria-labelledby="if-closed">
       <h2 id="if-closed" className={styles.sectionTitle}>
-        {view.phase === "due" ? "At the open" : "If the window closed now"}
+        {opened || view.phase === "due" ? "At the open" : "If the window closed now"}
       </h2>
       <dl className={styles.facts}>
         <div>
@@ -387,11 +393,11 @@ function IfClosedNow({ view }: { view: FairOpen }) {
           </div>
         )}
         <div>
-          <dt>The pot would buy with</dt>
+          <dt>The pot {opened ? "bought" : "would buy"} with</dt>
           <dd data-testid="fair-open-rung">{rung === null ? "Nothing: too little" : <Sol lamports={rung} />}</dd>
         </div>
         <div>
-          <dt>Your deposit buys with</dt>
+          <dt>Your deposit {opened ? "bought" : "buys"} with</dt>
           <dd data-testid="fair-open-fill">{seat ? <Sol lamports={seat.fill} /> : "No deposit yet"}</dd>
         </div>
         <div>
@@ -410,8 +416,17 @@ function IfClosedNow({ view }: { view: FairOpen }) {
       ) : (
         BigInt(rung) < BigInt(spend) && (
           <p className="note">
-            The open buys in 5% steps down from the pot&apos;s cap, so it would spend <span className="num">{sol(rung, 9)}</span> of the{" "}
-            <span className="num">{sol(spend, 9)}</span> SOL the shares add up to: every share is scaled down alike, and the rest is refunded.
+            {opened ? (
+              <>
+                The open buys in 5% steps down from the pot&apos;s cap, so it spent <span className="num">{sol(rung, 9)}</span> of the{" "}
+                <span className="num">{sol(spend, 9)}</span> SOL the shares added up to: every share was scaled down alike, and the rest refunded.
+              </>
+            ) : (
+              <>
+                The open buys in 5% steps down from the pot&apos;s cap, so it would spend <span className="num">{sol(rung, 9)}</span> of the{" "}
+                <span className="num">{sol(spend, 9)}</span> SOL the shares add up to: every share is scaled down alike, and the rest is refunded.
+              </>
+            )}
           </p>
         )
       )}
