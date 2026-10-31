@@ -48,7 +48,9 @@ fn matches_the_reference_calculation_to_the_lamport() {
         assert_eq!(rung, number(&open["rung"]), "{name}: rung");
         let coins = number(&open["coins"]);
         let (mut spent, mut bought) = (0u128, 0u128);
-        for (pairs, len, level) in [(&c["counts"], 200, a.others.level), (&c["unverifiedCounts"], 10, a.unverified.level)] {
+        for (pairs, len, level) in
+            [(&c["counts"], 200, a.others.level), (&c["unverifiedCounts"], 10, a.unverified.level)]
+        {
             for (k, n) in counts(pairs, len).into_iter().enumerate() {
                 let fill = ((k as u64 + 1) * number(&c["step"])).min(level);
                 let (s, b) = share(fill, a.spend, rung, coins);
