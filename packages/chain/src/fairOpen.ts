@@ -30,6 +30,7 @@ import {
   getWithdrawFailedInstructionAsync,
   getWithdrawInstructionAsync,
   LATE_OPEN_SECONDS,
+  LaunchStatus,
   SCORED_CAP_STEPS,
   Tier,
   UNVERIFIED_CAP_STEPS,
@@ -274,6 +275,8 @@ export const rungAtOrBelow = (cap: bigint, spend: bigint) => rungs(cap).find((ru
 export type FairOpenPhase =
   | { phase: "scheduled" }
   | { phase: "window" }
+  /** The coin and its pool exist and the pot bought; seats get their coins and refund. */
+  | { phase: "opened" }
   /** The window has closed and the pot can open; it fails if the open has not run by `lateAt`. */
   | { phase: "due"; lateAt: bigint }
   /** Anyone may mark it failed now, for this reason. */
@@ -284,6 +287,7 @@ const FAILURES = ["below_lowest_rung", "min_raise_missed", "late"] as const;
 
 /** A launch's phase at `now` (Unix seconds), from its account. */
 export function fairOpenPhase(launch: Launch, now: bigint): FairOpenPhase {
+  if (launch.status === LaunchStatus.Opened) return { phase: "opened" };
   if (launch.failure.__option === "Some") return { phase: "failed", failure: FAILURES[launch.failure.value]! };
   if (now < launch.depositsOpenAt) return { phase: "scheduled" };
   if (now < launch.opensAt) return { phase: "window" };

@@ -11,9 +11,12 @@
     "fee-config": "tsx scripts/fee-config.ts",
     "allocation-cases": "tsx scripts/allocation-cases.ts",
     "fair-open-config": "tsx scripts/fair-open-config.ts",
-    "fair-open": "tsx scripts/fair-open.ts"
+    "fair-open": "tsx scripts/fair-open.ts",
+    "fair-open-open": "tsx scripts/fair-open-open.ts",
+    "lookup-table": "tsx scripts/lookup-table.ts"
   },
   "dependencies": {
+    "@solana-program/address-lookup-table": "^0.15.0",
     "@solana-program/compute-budget": "^0.20.0",
     "@solana-program/system": "^0.16.0",
     "@solana-program/token": "^0.18.0",

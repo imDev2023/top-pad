@@ -37,6 +37,11 @@ export type HeatCluster = {
    * `fair-open-config`: the admission signer, which signs each deposit's admission and holds no funds.
    */
   keys: { treasury: Address; keeper: Address; admission: Address } | null;
+  /**
+   * Heat's shared address lookup table, which every open's creation transaction and every push compresses its common
+   * accounts through (spec 2.1 step 10), made and frozen by `pnpm --filter @top-pad/chain lookup-table <cluster>`.
+   */
+  lookupTable: Address | null;
 };
 
 /**
@@ -61,6 +66,7 @@ export const CLUSTERS: Record<Cluster, HeatCluster | null> = {
       keeper: address("GpDvDUpEC9ynHTJBt3XaZcTvBUw1HaMnU9Wwox18xfNi"),
       admission: address("2LH1VzF3rbCKdfSZDBXkbbwXbZZsbYkP8qkVRP9rgzuJ"),
     },
+    lookupTable: null,
   },
   mainnet: {
     quote: { mint: WSOL_MINT, symbol: "SOL", decimals: 9 },
@@ -68,6 +74,7 @@ export const CLUSTERS: Record<Cluster, HeatCluster | null> = {
     sqrtStartPrice: 112_339_987_482_345_485n,
     configs: null,
     keys: null,
+    lookupTable: null,
   },
 };
 
@@ -76,4 +83,5 @@ export * from "./coin";
 export * from "./dbc";
 export * from "./fairOpen";
 export * from "./launch";
+export * from "./open";
 export * from "./swap";

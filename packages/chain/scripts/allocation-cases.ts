@@ -1,11 +1,13 @@
 // `pnpm --filter @top-pad/chain allocation-cases`: writes src/fixtures/allocations.json, pots and the allocation this
-// package's reference calculation gives each (spec 2.1 step 11). The Fair Open program's tests read the same file
-// (`programs/fair_open/tests/allocation.rs`), so the program's allocation must equal the reference to the lamport.
-// Regenerate it only when the rules change, and the program with them.
+// package's reference calculation gives each (spec 2.1 step 11), and for a pot that can open, the rung it opens on and
+// what its seats spend of it and buy, all added up, for a made-up number of coins. The Fair Open program's tests read the
+// same file (`programs/fair_open/tests/allocation.rs`), so the program's allocation and shares must equal the reference
+// to the lamport. Regenerate it only when the rules change, and the program with them.
 import { writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { allocate, DEPOSIT_STEP } from "../src/fairOpen";
+import { allocate, DEPOSIT_STEP, rungAtOrBelow } from "../src/fairOpen";
+import { shareOf } from "../src/open";
 
 const SOL = 1_000_000_000n;
 
@@ -53,6 +55,24 @@ for (let i = 0; i < 400; i++) {
 const sparse = (counts: number[]) => counts.flatMap((n, k) => (n ? [[k, n]] : []));
 const level = (l: { level: bigint; filled: bigint; limited: boolean }) => ({ level: `${l.level}`, filled: `${l.filled}`, limited: l.limited });
 
+/** What every seat of a pot spends of the rung and buys of `coins`, added up (spec 2.1 step 11). */
+function opened(c: Case, a: ReturnType<typeof allocate>) {
+  const rung = rungAtOrBelow(c.cap, a.spend);
+  if (rung === null || a.spend === 0n) return null;
+  // About what a pot's buy gets at curve A's start, and odd, so the shares round.
+  const coins = rung * 215_917n + 7n;
+  let [spent, bought] = [0n, 0n];
+  for (const [counts, l] of [[c.counts, a.others.level], [c.unverifiedCounts, a.unverified.level]] as const) {
+    counts.forEach((n, k) => {
+      const ask = BigInt(k + 1) * DEPOSIT_STEP;
+      const share = shareOf(ask < l ? ask : l, a.spend, rung, coins);
+      spent += share.spent * BigInt(n);
+      bought += share.coins * BigInt(n);
+    });
+  }
+  return { rung: `${rung}`, coins: `${coins}`, spent: `${spent}`, bought: `${bought}` };
+}
+
 const out = cases.map((c) => {
   const a = allocate(c.counts, c.unverifiedCounts, DEPOSIT_STEP, c.cap);
   return {
@@ -64,6 +84,7 @@ const out = cases.map((c) => {
     spend: `${a.spend}`,
     others: level(a.others),
     unverified: level(a.unverified),
+    open: opened(c, a),
   };
 });
 const path = join(dirname(fileURLToPath(import.meta.url)), "../src/fixtures/allocations.json");

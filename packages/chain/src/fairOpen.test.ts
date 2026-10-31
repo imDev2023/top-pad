@@ -239,7 +239,17 @@ describe("a launch's phase", () => {
         coinRent: 0n,
         counts: new Array(200).fill(0),
         unverifiedCounts: new Array(10).fill(0),
-        reserved: new Uint8Array(128),
+        openRent: 23_517_880n,
+        mint: random(),
+        keeperLamports: 0n,
+        spend: 0n,
+        othersLevel: 0n,
+        unverifiedLevel: 0n,
+        spent: 0n,
+        coins: 0n,
+        refunded: 0n,
+        delivered: 0,
+        reserved: new Uint8Array(28),
         bump: 255,
         vaultBump: 255,
         ...over,
@@ -263,6 +273,10 @@ describe("a launch's phase", () => {
   it("can fail at once when the pot misses its minimum raise or the lowest rung", () => {
     expect(fairOpenPhase(withAsks([[49, 4]], { minRaise: 3n * SOL }), 1_600n)).toEqual({ phase: "failing", failure: "min_raise_missed" });
     expect(fairOpenPhase(withAsks([[4, 1]]), 1_600n)).toEqual({ phase: "failing", failure: "below_lowest_rung" });
+  });
+
+  it("is opened once the pot has bought, whatever the clock says", () => {
+    expect(fairOpenPhase(withAsks([[49, 4]], { status: LaunchStatus.Opened }), 2_500n)).toEqual({ phase: "opened" });
   });
 
   it("stays failed once marked", () => {

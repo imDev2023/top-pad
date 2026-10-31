@@ -3,9 +3,11 @@
 // seconds from now (60 by default; down to -599, a window already running) and runs 10 minutes, with an optional minimum
 // raise. Its coin is a made-up test coin sealed behind its hash. Heat's bank is the creator, signing and paying the rent
 // (BANK_KEYPAIR, or ~/.config/top-pad/<cluster>/bank.json); our keeper co-signs and holds the nonce (KEEPER_KEYPAIR, or
-// ~/.config/top-pad/<cluster>/keeper.json). It simulates first and sends only with --send; the RPC is DEVNET_RPC_URL, or
-// the public endpoint.
-import { readFileSync } from "node:fs";
+// ~/.config/top-pad/<cluster>/keeper.json). Once scheduled, the creator signs the open in advance (ADR 0005): the 64-rung
+// ladder, each rung also signed by our keeper and a new mint key that is then dropped, written to
+// ~/.config/top-pad/<cluster>/ladders/<launch>.json for `fair-open-open` to send. It simulates first and sends only with
+// --send; the RPC is DEVNET_RPC_URL, or the public endpoint.
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
@@ -23,8 +25,11 @@ import {
   setTransactionMessageFeePayerSigner,
   setTransactionMessageLifetimeUsingBlockhash,
   signTransactionMessageWithSigners,
+  type Nonce,
 } from "@solana/kit";
-import { CLUSTERS, createLaunchInstructions, fairOpenAccounts, identityHash, NONCE_ACCOUNT_SPACE } from "../src/index";
+import { fetchAddressLookupTable } from "@solana-program/address-lookup-table";
+import { fetchNonce } from "@solana-program/system";
+import { CLUSTERS, createLaunchInstructions, fairOpenAccounts, identityHash, NONCE_ACCOUNT_SPACE, potCapOf, signLadder } from "../src/index";
 
 const [cluster, ...args] = process.argv.slice(2);
 const flag = (name: string) => {
@@ -93,4 +98,29 @@ assertIsTransactionWithBlockhashLifetime(transaction);
 const sendAndConfirm = sendAndConfirmTransactionFactory({ rpc, rpcSubscriptions: createSolanaRpcSubscriptions(rpcUrl.replace(/^http/, "ws")) });
 await sendAndConfirm(transaction, { commitment: "confirmed" });
 console.log(`Scheduled in ${getSignatureFromTransaction(transaction)}.`);
+
+// The open, signed in advance on the nonce, whose value only our keeper can now move.
+if (!heat.lookupTable) throw new Error(`${cluster} has no lookup table yet: run lookup-table first`);
+const { data: nonceAccount } = await fetchNonce(rpc, nonce.address, { commitment: "confirmed" });
+const { data: table } = await fetchAddressLookupTable(rpc, heat.lookupTable, { commitment: "confirmed" });
+const ladder = await signLadder({
+  launch,
+  dbcConfig: heat.configs.fairOpen,
+  quoteMint: heat.quote.mint,
+  creator,
+  keeper,
+  mint: await generateKeyPairSigner(),
+  coin,
+  computeUnitPrice: 0n,
+  potCap: potCapOf(heat.graduationTarget),
+  nonce: nonce.address,
+  nonceValue: nonceAccount.blockhash as string as Nonce,
+  table: { address: heat.lookupTable, addresses: table.addresses },
+});
+const ladders = join(homedir(), ".config/top-pad", cluster!, "ladders");
+mkdirSync(ladders, { recursive: true });
+const file = join(ladders, `${launch}.json`);
+writeFileSync(file, JSON.stringify({ launch, nonce: nonce.address, rungs: ladder.map((r) => ({ rung: `${r.rung}`, transaction: r.transaction })) }, null, 1));
+const sizes = ladder.map((r) => r.bytes);
+console.log(`Ladder of ${ladder.length} rungs signed (${Math.min(...sizes)} to ${Math.max(...sizes)} bytes each), in ${file}.`);
 console.log(`Its page: https://top-pad-web-devnet.imdev2023.workers.dev/fair-open/${launch}`);
