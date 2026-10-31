@@ -43,6 +43,13 @@
       "when": 1793421200247,
       "tag": "0005_fair_open_open",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793468673006,
+      "tag": "0006_fair_open_scheduling",
+      "breakpoints": true
     }
   ]
 }

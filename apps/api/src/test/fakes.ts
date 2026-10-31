@@ -4,11 +4,13 @@
 // (tests/devnet).
 import {
   createKeyPairSignerFromPrivateKeyBytes,
+  getAddressDecoder,
   getAddressEncoder,
   getBase58Decoder,
   getBase58Encoder,
   getBase64Decoder,
   getBase64Encoder,
+  getCompiledTransactionMessageDecoder,
   getTransactionDecoder,
   none,
   type Address,
@@ -77,8 +79,14 @@ export class Fakes {
   failedWith = 6005;
   sent: Transaction[] = [];
   simulated: Transaction[] = [];
+  /** Called with each transaction sent, after it is recorded, so a test can move the chain as it would land. */
+  onSend: ((tx: Transaction) => void) | null = null;
+  /** The chain's clock, Unix seconds, as the Clock sysvar holds it; now, unless a test sets it. */
+  clock: bigint | null = null;
+  /** The block time `getBlockTime` answers, Unix seconds. */
+  blockTime: bigint | null = null;
   /** The chain's accounts, by address: what `getAccountInfo`, `getMultipleAccounts` and `getProgramAccounts` read. */
-  accounts = new Map<string, { owner: string; data: Uint8Array }>();
+  accounts = new Map<string, { owner: string; data: Uint8Array; lamports?: bigint }>();
   /** Landed transactions, by signature, as `getTransaction` serves them. */
   transactions = new Map<string, RawTransaction>();
   /** Each address's transactions, newest first, as `getSignaturesForAddress` lists them. */
@@ -121,8 +129,10 @@ export class Fakes {
     switch (method) {
       case "getLatestBlockhash":
         return ok({ context, value: { blockhash: getBase58Decoder().decode(crypto.getRandomValues(new Uint8Array(32))), lastValidBlockHeight: Number(this.lastValidBlockHeight) } });
-      case "getBalance":
-        return ok({ context, value: Number(this.balance) });
+      case "getBalance": {
+        const account = this.accounts.get(params[0] as string);
+        return ok({ context, value: Number(account ? (account.lamports ?? 2_000_000n) : this.balance) });
+      }
       case "getBlockHeight":
         return ok(Number(this.blockHeight));
       case "getMinimumBalanceForRentExemption":
@@ -137,6 +147,8 @@ export class Fakes {
       case "sendTransaction": {
         const tx = decode(params[0] as string);
         this.sent.push(tx);
+        this.makeNonces(tx);
+        this.onSend?.(tx);
         return ok(getBase58Decoder().decode(Object.values(tx.signatures)[0]!));
       }
       case "getSignatureStatuses": {
@@ -155,6 +167,8 @@ export class Fakes {
         const found = [...this.accounts].filter(([, a]) => a.owner === program && filters.every((f) => passes(f, a.data)));
         return ok(found.map(([pubkey]) => ({ pubkey, account: this.rpcAccount(pubkey) })));
       }
+      case "getBlockTime":
+        return ok(Number(this.blockTime ?? BigInt(Math.floor(Date.now() / 1000))));
       case "getTransaction":
         return ok(this.transactions.get(params[0] as string) ?? null);
       case "getSignaturesForAddress":
@@ -166,10 +180,30 @@ export class Fakes {
     }
   }
 
+  /** A sent transaction's `InitializeNonceAccount` makes its nonce account, as the System program would. */
+  private makeNonces(tx: Transaction) {
+    const message = getCompiledTransactionMessageDecoder().decode(tx.messageBytes) as unknown as {
+      staticAccounts: Address[];
+      instructions: { programAddressIndex: number; accountIndices?: number[]; data?: Uint8Array }[];
+    };
+    for (const ix of message.instructions) {
+      const program = message.staticAccounts[ix.programAddressIndex];
+      const data = ix.data ?? new Uint8Array();
+      if (program !== SYSTEM_PROGRAM || data.length < 36 || new DataView(data.buffer, data.byteOffset).getUint32(0, true) !== 6) continue;
+      const nonce = message.staticAccounts[ix.accountIndices![0]!]!;
+      this.accounts.set(nonce, nonceAccount(getAddressDecoder().decode(data.slice(4, 36))));
+    }
+  }
+
   private rpcAccount(address: string) {
+    if (address === CLOCK_SYSVAR && !this.accounts.has(address)) {
+      const data = new Uint8Array(40);
+      new DataView(data.buffer).setBigInt64(32, this.clock ?? BigInt(Math.floor(Date.now() / 1000)), true);
+      return { lamports: 1_169_280, data: [getBase64Decoder().decode(data), "base64"], owner: "Sysvar1111111111111111111111111111111111111", executable: false, rentEpoch: 0, space: 40 };
+    }
     const account = this.accounts.get(address);
     if (!account) return null;
-    return { lamports: 2_000_000, data: [getBase64Decoder().decode(account.data), "base64"], owner: account.owner, executable: false, rentEpoch: 0, space: account.data.length };
+    return { lamports: Number(account.lamports ?? 2_000_000n), data: [getBase64Decoder().decode(account.data), "base64"], owner: account.owner, executable: false, rentEpoch: 0, space: account.data.length };
   }
 
   private async turbo(url: URL, request: Request) {
@@ -180,6 +214,31 @@ export class Fakes {
     this.uploads.push(item.id);
     return json({ id: item.id, winc: "0", timestamp: Date.now(), version: "0.2.0", deadlineHeight: 1, owner: "keeper", dataCaches: ["arweave.net"], fastFinalityIndexes: [] });
   }
+}
+
+const SYSTEM_PROGRAM = "11111111111111111111111111111111";
+const CLOCK_SYSVAR = "SysvarC1ock11111111111111111111111111111111";
+
+/** A durable nonce account, initialized, whose value only `authority` can advance. */
+export function nonceAccount(authority: Address, value: Address = "6ZnF6fe4NUdVRtfjrnW38N7Lk6uTkFJBc9NjqxsN4Ffz" as Address) {
+  const data = new Uint8Array(80);
+  const view = new DataView(data.buffer);
+  view.setUint32(0, 1, true);
+  view.setUint32(4, 1, true);
+  data.set(getAddressEncoder().encode(authority), 8);
+  data.set(getAddressEncoder().encode(value), 40);
+  view.setBigUint64(72, 5_000n, true);
+  return { owner: SYSTEM_PROGRAM, data };
+}
+
+/** An address lookup table holding `addresses`, frozen, as the program lays one out. */
+export function lookupTableAccount(addresses: Address[]) {
+  const data = new Uint8Array(56 + 32 * addresses.length);
+  const view = new DataView(data.buffer);
+  view.setUint32(0, 1, true);
+  view.setBigUint64(4, 0xffffffffffffffffn, true);
+  addresses.forEach((a, i) => data.set(getAddressEncoder().encode(a), 56 + 32 * i));
+  return { owner: "AddressLookupTab1e1111111111111111111111111", data };
 }
 
 export const decode = (wire: string) => getTransactionDecoder().decode(getBase64Encoder().encode(wire)) as Transaction;

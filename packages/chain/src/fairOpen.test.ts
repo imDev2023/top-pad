@@ -10,7 +10,7 @@ import {
   verifySignature,
   type SignatureBytes,
 } from "@solana/kit";
-import { SYSTEM_PROGRAM_ADDRESS } from "@solana-program/system";
+import { parseTransferSolInstruction, SYSTEM_PROGRAM_ADDRESS } from "@solana-program/system";
 import { getLaunchDecoder, getLaunchEncoder, LaunchStatus, type LaunchArgs } from "@top-pad/clients/fair-open";
 import { describe, expect, it } from "vitest";
 import cases from "./fixtures/allocations.json";
@@ -18,6 +18,8 @@ import {
   admissionMessage,
   allocate,
   createLaunchInstructions,
+  nonceAccountInstructions,
+  scheduleInstructions,
   DEPOSIT_STEP,
   depositInstructions,
   ED25519_PROGRAM_ADDRESS,
@@ -211,6 +213,39 @@ describe("scheduling", () => {
     expect(create.programAddress).toBe(FAIR_OPEN_PROGRAM_ADDRESS);
     const { launch, vault } = await fairOpenAccounts(nonce.address);
     expect(create.accounts!.map((a) => a.address)).toEqual(expect.arrayContaining([launch, vault, nonce.address, keeper.address, creator.address]));
+  });
+});
+
+describe("scheduling on a nonce our keeper made", () => {
+  it("pays the keeper back the nonce's rent, then creates the launch at the nonce's PDA", async () => {
+    const [creator, keeper] = await Promise.all([generateKeyPairSigner(), generateKeyPairSigner()]);
+    const nonce = random();
+    const ixs = await scheduleInstructions({
+      creator,
+      keeper,
+      nonce,
+      nonceRent: 1_447_680n,
+      dbcConfig: random(),
+      depositsOpenAt: 1_800_000_000n,
+      minRaise: 0n,
+      identityHash: new Uint8Array(32).fill(1),
+      computeUnitPrice: 0n,
+    });
+    const [transfer, ...rest] = ixs.filter((ix) => ix.programAddress === SYSTEM_PROGRAM_ADDRESS);
+    expect(rest).toHaveLength(0);
+    expect(parseTransferSolInstruction(transfer as Parameters<typeof parseTransferSolInstruction>[0])).toMatchObject({
+      accounts: { source: { address: creator.address }, destination: { address: keeper.address } },
+      data: { amount: 1_447_680n },
+    });
+    const { launch } = await fairOpenAccounts(nonce);
+    expect(ixs.at(-1)!.accounts!.map((a) => a.address)).toEqual(expect.arrayContaining([launch, nonce, keeper.address, creator.address]));
+  });
+
+  it("makes the nonce with the keeper as its authority", async () => {
+    const [keeper, nonce] = await Promise.all([generateKeyPairSigner(), generateKeyPairSigner()]);
+    const [create, initialize] = nonceAccountInstructions({ payer: keeper, nonce, authority: keeper.address, rent: 1_447_680n });
+    expect(create!.accounts!.map((a) => a.address)).toEqual([keeper.address, nonce.address]);
+    expect(initialize!.accounts!.map((a) => a.address)[0]).toBe(nonce.address);
   });
 });
 

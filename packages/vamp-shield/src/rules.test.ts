@@ -5,6 +5,8 @@ import {
   NAME_MAX_BYTES,
   nameVerdict,
   restrictionLevel,
+  TEASER_MAX_LENGTH,
+  teaserVerdict,
   TICKER_MAX_LENGTH,
   TICKER_MIN_LENGTH,
   tickerVerdict,
@@ -184,5 +186,46 @@ describe("restriction levels (UTS #39 section 5.2)", () => {
     // The documented change: these two lone marks share only Syriac, so the standard calls them single-script, while
     // Latin and Arabic cover them first. Both levels accept.
     expect(restrictionLevel("\u{308}\u{64B}")).toBe("moderately-restrictive");
+  });
+});
+
+describe("teasers", () => {
+  const reason = (input: string) => {
+    const verdict = teaserVerdict(input);
+    return verdict.ok ? undefined : verdict.reason;
+  };
+
+  it("takes one plain line of up to 80 characters, its spaces made one", () => {
+    expect(teaserVerdict("  The   first   coin with a  heartbeat ")).toEqual({ ok: true, teaser: "The first coin with a heartbeat" });
+    expect(teaserVerdict("")).toEqual({ ok: true, teaser: "" });
+    expect(teaserVerdict("x".repeat(TEASER_MAX_LENGTH)).ok).toBe(true);
+    expect(reason("x".repeat(TEASER_MAX_LENGTH + 1))).toMatch(/81 characters/);
+    // Characters, not bytes: 80 emoji fit.
+    expect(teaserVerdict("\u{1F525}".repeat(TEASER_MAX_LENGTH)).ok).toBe(true);
+    expect(teaserVerdict("Caf\u{0065}\u{0301} at noon")).toEqual({ ok: true, teaser: "Caf\u{E9} at noon" });
+  });
+
+  it("refuses links and web addresses", () => {
+    for (const link of ["see https://heat.ag", "join t.me/heatcoin", "www.heat", "visit heat.fun now", "ipfs://bafy"]) {
+      expect(reason(link), link).toMatch(/links/);
+    }
+    expect(teaserVerdict("v2.0 lands at 5.30, e.g. soon").ok).toBe(true);
+  });
+
+  it("refuses cashtags", () => {
+    expect(reason("bigger than $PEPE")).toMatch(/cashtags/);
+    expect(reason("bigger than $ wif")).toMatch(/cashtags/);
+    expect(teaserVerdict("costs $5 to watch").ok).toBe(true);
+  });
+
+  it("refuses the characters refused in names", () => {
+    expect(reason("two\nlines")).toMatch(/one line/);
+    expect(reason("zero\u{200B}width")).toMatch(/invisible/);
+    expect(reason("bidi \u{202E}gnirts")).toMatch(/invisible/);
+    expect(reason("private \u{E000}")).toMatch(/private-use/);
+    // A Cyrillic "а" inside a Latin word.
+    expect(reason("the r\u{0430}ce is on")).toMatch(/mixes letters/);
+    // Whole words in different alphabets are fine, and so are emoji joined into one.
+    expect(teaserVerdict("Heat \u{043C}\u{0438}\u{0440} \u{1F468}\u{200D}\u{1F4BB}").ok).toBe(true);
   });
 });

@@ -186,6 +186,8 @@ export function heatHandler({ heat, blockIndexOf, onIndexed }: HeatHandlerOption
             potCap: f.potCap,
             lowestRung: f.lowestRung,
             step: f.step,
+            // The calendar's teaser, from the launch service's schedule (spec 2.1 step 4), if Heat scheduled it here.
+            teaser: sql`(select ${launches.teaser} from ${launches} where ${launches.fairOpen} = ${f.launch})`,
             createdSignature: signature,
             createdSlot: tx.slot,
             createdAt: blockTime,

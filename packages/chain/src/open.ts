@@ -14,7 +14,7 @@ import {
   setTransactionMessageFeePayerSigner,
   setTransactionMessageLifetimeUsingBlockhash,
   setTransactionMessageLifetimeUsingDurableNonce,
-  signTransactionMessageWithSigners,
+  partiallySignTransactionMessageWithSigners,
   type Address,
   type Blockhash,
   type Instruction,
@@ -215,13 +215,15 @@ export async function creationMessage(c: Creation, lifetime: CreationLifetime, t
   });
 }
 
-/** A signed rung: what the pot spends, and the transaction ready to send, base64. */
+/** A signed rung: what the pot spends, and the transaction, base64. */
 export type SignedRung = { rung: bigint; transaction: string; bytes: number };
 
 /**
  * The creator's ladder (ADR 0005): one creation transaction per rung, all 64 on the launch's durable nonce, each signed
  * by the creator, our keeper and the coin's mint key, so at the open our keeper only broadcasts the rung the pot covers
- * and the nonce advancing voids every other. The caller destroys the mint key afterwards.
+ * and the nonce advancing voids every other. A signer that cannot sign here (a no-op signer standing in for the creator's
+ * wallet, or for our keeper until it co-signs last) leaves its signature empty, for the caller to fill. The caller
+ * destroys the mint key afterwards.
  */
 export async function signLadder(
   l: Omit<Creation, "rung"> & { potCap: bigint; nonce: Address; nonceValue: Nonce; table: LookupTable },
@@ -229,7 +231,7 @@ export async function signLadder(
   const lifetime: CreationLifetime = { nonce: l.nonce, value: l.nonceValue, authority: l.keeper.address };
   const signed: SignedRung[] = [];
   for (const rung of rungs(l.potCap)) {
-    const transaction = await signTransactionMessageWithSigners(await creationMessage({ ...l, rung }, lifetime, l.table));
+    const transaction = await partiallySignTransactionMessageWithSigners(await creationMessage({ ...l, rung }, lifetime, l.table));
     signed.push({ rung, transaction: getBase64EncodedWireTransaction(transaction), bytes: getTransactionEncoder().encode(transaction).length });
   }
   return signed;

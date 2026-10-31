@@ -13,8 +13,21 @@ export const Platform = z.object({
   cluster: Cluster,
   /** Whether a creator can link X here: the X app's client is configured. */
   xLinking: z.boolean(),
-  /** Whether a coin can be launched here now, by mode: Fair Open arrives with its own tickets (spec 14). */
+  /** Whether a coin can be launched here now, by mode. */
   launchModes: z.object({ instant: z.boolean(), fairOpen: z.boolean() }),
+  /** A Fair Open's fixed terms here (spec 2.1 step 4, 12), or null where Heat runs none. */
+  fairOpen: z
+    .object({
+      /** The most a pot spends, in lamports: 20% of the Graduation Target. */
+      potCap: RawAmount,
+      /** The ladder's rungs, largest first, in lamports (spec 2.1 step 6). */
+      rungs: z.array(RawAmount),
+      windowSeconds: z.number().int().positive(),
+      /** How far ahead a window may start. */
+      maxAheadSeconds: z.number().int().positive(),
+      teaserMaxLength: z.number().int().positive(),
+    })
+    .nullable(),
   /** The largest coin image the launch service takes, in bytes. */
   maxImageBytes: z.number().int().positive(),
   /** The image types it takes. */
@@ -80,43 +93,87 @@ export const LaunchRefusal = ApiError.extend({
     "expired",
     "send_failed",
     "metadata_upload_failed",
+    "ticker_reserved",
+    "teaser",
+    "schedule",
   ]),
   verdict: VampShieldVerdict.optional(),
 });
 export type LaunchRefusal = z.infer<typeof LaunchRefusal>;
 
+/** Unix seconds, as a decimal string. */
+export const UnixSeconds = z.string().regex(/^\d{1,12}$/);
+
 /**
- * `POST /launches`, a multipart form with `mode`, `name`, `ticker`, `wallet` and the `image` file: an Instant launch's
- * creation transaction (spec 2.2), signed by the coin's mint key, for the Creator wallet to sign next.
+ * `POST /launches`, a multipart form with `mode`, `name`, `ticker`, `wallet` and the `image` file, and for a Fair Open
+ * its schedule (spec 2.1 step 4): when its window starts, its minimum raise in lamports, and the calendar's teaser.
  */
-export const LaunchForm = z.object({
-  mode: z.literal("instant"),
-  name: z.string().max(256),
-  ticker: z.string().max(64),
-  wallet: Address,
-});
+export const LaunchForm = z.discriminatedUnion("mode", [
+  z.object({ mode: z.literal("instant"), name: z.string().max(256), ticker: z.string().max(64), wallet: Address }),
+  z.object({
+    mode: z.literal("fair_open"),
+    name: z.string().max(256),
+    ticker: z.string().max(64),
+    wallet: Address,
+    depositsOpenAt: UnixSeconds,
+    minRaise: RawAmount,
+    teaser: z.string().max(1024),
+  }),
+]);
 export type LaunchForm = z.infer<typeof LaunchForm>;
 
-export const PreparedLaunch = z.object({
-  id: z.uuid(),
-  mint: Address,
-  pool: Address,
-  /** The creation transaction, base64, with the mint key's signature; the Creator wallet signs it next. */
-  transaction: z.string(),
-  /** After this block height the transaction can no longer land, and the launch must be prepared again. */
-  lastValidBlockHeight: RawAmount,
-  /** What the Creator wallet pays, in lamports, as simulated: the pool's and the coin record's rent and the fees. */
-  cost: RawAmount,
-});
+/** A rung of a Fair Open's ladder: what the pot spends on it, and its creation transaction, base64. */
+export const LadderRung = z.object({ rung: RawAmount, transaction: z.string() });
+export type LadderRung = z.infer<typeof LadderRung>;
+
+/** What the Creator wallet signs next, and what it pays. */
+export const PreparedLaunch = z.discriminatedUnion("mode", [
+  z.object({
+    mode: z.literal("instant"),
+    id: z.uuid(),
+    mint: Address,
+    pool: Address,
+    /** The creation transaction, base64, with the mint key's signature; the Creator wallet signs it next. */
+    transaction: z.string(),
+    /** After this block height the transaction can no longer land, and the launch must be prepared again. */
+    lastValidBlockHeight: RawAmount,
+    /** What the Creator wallet pays, in lamports, as simulated: the pool's and the coin record's rent and the fees. */
+    cost: RawAmount,
+  }),
+  z.object({
+    mode: z.literal("fair_open"),
+    id: z.uuid(),
+    /** The launch's account, at the PDA of its durable nonce: its Fair Open page's address. */
+    launch: Address,
+    nonce: Address,
+    /** The schedule, base64: the Creator wallet signs it, and the launch key co-signs it last and sends it. */
+    transaction: z.string(),
+    lastValidBlockHeight: RawAmount,
+    /**
+     * The ladder (ADR 0005): the coin's creation transaction for each rung, largest first, on the launch's durable nonce
+     * and signed by the coin's mint key. The Creator wallet signs all of them with the schedule, in one approval, or,
+     * if it cannot, only the rung the pot covers, at the open.
+     */
+    rungs: z.array(LadderRung),
+    /** What the schedule costs the Creator wallet, in lamports, as simulated: rent, most of it returned, and the fee. */
+    cost: RawAmount,
+    depositsOpenAt: z.iso.datetime(),
+    opensAt: z.iso.datetime(),
+  }),
+]);
 export type PreparedLaunch = z.infer<typeof PreparedLaunch>;
 
-/** `POST /launches/:id/submit`: the creation transaction, base64, once the Creator wallet has signed it. */
-export const SubmitLaunch = z.object({ transaction: z.string().max(4096) });
+/**
+ * `POST /launches/:id/submit`: the transaction, base64, once the Creator wallet has signed it, and for a Fair Open the
+ * ladder's rungs it signed with it, in the order prepared, or null when it signs the open at the open instead.
+ */
+export const SubmitLaunch = z.object({ transaction: z.string().max(4096), rungs: z.array(z.string().max(4096)).max(64).nullable().optional() });
 export type SubmitLaunch = z.infer<typeof SubmitLaunch>;
 
 /** `GET /launches/:id` and the answer to a submit: where the launch stands. */
 export const LaunchStatus = z.object({
   id: z.uuid(),
+  mode: z.enum(["instant", "fair_open"]),
   status: z.enum(["prepared", "sending", "landed", "failed", "expired"]),
   name: z.string(),
   ticker: z.string(),
@@ -129,5 +186,16 @@ export const LaunchStatus = z.object({
   signature: z.string().nullable(),
   error: z.string().nullable(),
   explorer: z.object({ transaction: z.string().url().nullable(), mint: z.string().url() }),
+  /** A Fair Open's schedule: its page's address, its window, and how its open is signed. */
+  fairOpen: z
+    .object({
+      launch: Address,
+      depositsOpenAt: z.iso.datetime(),
+      opensAt: z.iso.datetime(),
+      minRaise: RawAmount,
+      teaser: z.string().nullable(),
+      ladder: z.enum(["signed", "at_open"]),
+    })
+    .nullable(),
 });
 export type LaunchStatus = z.infer<typeof LaunchStatus>;

@@ -12,7 +12,10 @@ import {
   createTransactionMessage,
   fetchEncodedAccount,
   getBase64EncodedWireTransaction,
+  getBase58Decoder,
   getBase64Encoder,
+  getPublicKeyFromAddress,
+  getTransactionDecoder,
   pipe,
   setTransactionMessageFeePayerSigner,
   setTransactionMessageLifetimeUsingBlockhash,
@@ -20,8 +23,11 @@ import {
   type Base58EncodedBytes,
   type Instruction,
   type Signature as KitSignature,
+  type SignatureBytes,
+  type Transaction,
+  verifySignature,
 } from "@solana/kit";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import type { Context } from "hono";
 import {
   allocate,
@@ -48,6 +54,7 @@ import {
   FairOpenMove,
   FairOpenSender,
   FairOpenSent,
+  SubmitOpen,
   type FairOpen,
   type FairOpenAdmission,
   type FairOpenOutcome,
@@ -56,10 +63,14 @@ import {
   type FairOpenSeat,
   type PreparedFairOpenTransaction,
 } from "@top-pad/contract";
-import { creators, creatorWallets, fairOpens, pools } from "@top-pad/db";
+import { creators, creatorWallets, fairOpenRungs, fairOpens, launches, pools, type Db } from "@top-pad/db";
 import { admit, AdmissionRefused, loadAdmissionKey, personOf, refusalOf, tierName } from "./admission";
 import { sessionCreator } from "./auth";
-import { explorerUrl, fairOpenSetup } from "./env";
+import { explorerUrl, fairOpenLaunchSetup, fairOpenSetup } from "./env";
+import { launchRow } from "./fairOpenKeeper";
+import { loadKeeper } from "./keeper";
+import { keeperSignatureOn, wireOf } from "./rungs";
+import { confirmed, sendWire, TransactionFailed } from "./send";
 import type { AppEnv } from "./http";
 import { indexNow } from "./indexing";
 
@@ -137,7 +148,11 @@ export async function getFairOpen(c: Context<AppEnv>) {
   const wallet = c.req.query("wallet");
   if (wallet !== undefined && !Address.safeParse(wallet).success) return refuse(c, 400, { error: "That is not a Solana wallet address.", code: "invalid" });
   const rpc = createSolanaRpc(cfg.rpcUrl);
-  const [account, [row]] = await Promise.all([fetchMaybeLaunch(rpc, address as KitAddress, limited()), db.select().from(fairOpens).where(eq(fairOpens.launch, address))]);
+  const [account, [row], scheduled] = await Promise.all([
+    fetchMaybeLaunch(rpc, address as KitAddress, limited()),
+    db.select().from(fairOpens).where(eq(fairOpens.launch, address)),
+    launchRow(db, address),
+  ]);
   if (!account.exists && !row) return notFound(c);
   const launch = account.exists ? account.data : null;
   const at = now();
@@ -202,7 +217,7 @@ export async function getFairOpen(c: Context<AppEnv>) {
   const body: FairOpen = {
     launch: address,
     creator: await creatorOf(c, terms.creator),
-    teaser: row?.teaser ?? null,
+    teaser: scheduled?.teaser ?? row?.teaser ?? null,
     identityHash: hex(terms.identityHash),
     depositsOpenAt: iso(terms.depositsOpenAt),
     opensAt: iso(terms.opensAt),
@@ -241,11 +256,23 @@ export async function getFairOpen(c: Context<AppEnv>) {
           }
         : null,
     rent: { seat: `${rent.seat}`, coinAccount: `${rent.coinAccount}` },
+    ladder: scheduled ? await ladderOf(db, scheduled) : null,
     you,
     explorer: explorerUrl(cfg, "address", address),
   };
   c.header("cache-control", "no-store");
   return c.json(body);
+}
+
+/** How a launch Heat scheduled has its open signed: the whole ladder in advance, or the one rung at the open. */
+async function ladderOf(db: Db, scheduled: NonNullable<Awaited<ReturnType<typeof launchRow>>>): Promise<FairOpen["ladder"]> {
+  if (scheduled.ladder !== "at_open") return "signed";
+  const [signed] = await db
+    .select({ rung: fairOpenRungs.rung })
+    .from(fairOpenRungs)
+    .where(and(eq(fairOpenRungs.launchId, scheduled.id), isNotNull(fairOpenRungs.creatorSignature)))
+    .limit(1);
+  return signed ? "at_open_signed" : "at_open";
 }
 
 /** A transaction message for the wallet to sign, the wallet paying, on a recent blockhash. */
@@ -442,6 +469,98 @@ export async function reportFairOpenTransaction(c: Context<AppEnv>) {
     }
     if (Date.now() > until) break;
     await sleep(1_000);
+  }
+  return c.json(outcome);
+}
+
+/**
+ * The rung the creator signs at the open, when their wallet could not sign the ladder at scheduling (ADR 0005): once
+ * the window has closed, the rung the pot covers, as the launch service prepared it, signed by the coin's mint key.
+ */
+async function openRungFor(c: Context<AppEnv>, rpc: Rpc) {
+  const found = await launchFor(c, rpc);
+  if ("refusal" in found) return { refusal: found.refusal } as const;
+  const { address, launch } = found;
+  const scheduled = await launchRow(c.var.db, address);
+  if (!scheduled) return { refusal: notFound(c) } as const;
+  if (scheduled.ladder !== "at_open") return { refusal: refuse(c, 409, { error: "This Fair Open's ladder was signed in advance: our keeper opens it.", code: "already_signed" }) } as const;
+  const phase = fairOpenPhase(launch, now());
+  if (phase.phase !== "due") {
+    const error =
+      phase.phase === "window" || phase.phase === "scheduled"
+        ? `Sign your open once the window closes, at ${iso(launch.opensAt).slice(11, 19)} UTC: only then is what the pot spends known.`
+        : phase.phase === "opened"
+          ? "This Fair Open has opened."
+          : "This Fair Open can no longer open.";
+    return { refusal: refuse(c, 409, { error, code: "not_due" }) } as const;
+  }
+  const { spend } = allocate(launch.counts, launch.unverifiedCounts, launch.step, launch.potCap);
+  const amount = rungAtOrBelow(launch.potCap, spend)!;
+  const [rung] = await c.var.db.select().from(fairOpenRungs).where(and(eq(fairOpenRungs.launchId, scheduled.id), eq(fairOpenRungs.rung, amount)));
+  if (!rung) throw new Error(`${address} has no rung of ${amount}`);
+  return { address, launch, scheduled, rung } as const;
+}
+
+/** `POST /fair-opens/:launch/open`: the rung the pot covers, for the Creator wallet to sign at the open. */
+export async function prepareOpenSignature(c: Context<AppEnv>) {
+  const { cfg } = c.var;
+  const sender = FairOpenSender.safeParse(await c.req.json().catch(() => null));
+  if (!sender.success) return refuse(c, 400, { error: "Say which wallet signs.", code: "invalid" });
+  const heat = cfg.heat;
+  if (!heat?.keys) return refuse(c, 503, { error: `Heat runs no Fair Opens on ${cfg.cluster}.`, code: "unavailable" });
+  const rpc = createSolanaRpc(cfg.rpcUrl);
+  const found = await openRungFor(c, rpc);
+  if ("refusal" in found) return found.refusal;
+  const { scheduled, rung } = found;
+  if (sender.data.wallet !== scheduled.wallet) return refuse(c, 403, { error: "Only the Creator wallet that scheduled this Fair Open signs its open.", code: "not_the_creator" });
+  if (rung.creatorSignature) return refuse(c, 409, { error: "You have signed your open: our keeper is sending it.", code: "already_signed" });
+  const body: PreparedFairOpenTransaction = { transaction: wireOf(rung, { keeper: heat.keys.keeper, creator: scheduled.wallet, mint: scheduled.mint }), admission: null };
+  return c.json(body);
+}
+
+/**
+ * `POST /fair-opens/:launch/open/submit`: the rung signed by the Creator wallet. Our keeper co-signs it and sends it,
+ * only once it passes its preflight (a failed rung would void the ladder); the keeper's Workflow, which waits for this
+ * signature, sends it too if this send is lost.
+ */
+export async function submitOpenSignature(c: Context<AppEnv>) {
+  const { cfg, db } = c.var;
+  const body = SubmitOpen.safeParse(await c.req.json().catch(() => null));
+  if (!body.success) return refuse(c, 400, { error: "Send the signed rung.", code: "invalid" });
+  const setup = fairOpenLaunchSetup(cfg, c.env);
+  if (!setup.ok) return refuse(c, 503, { error: `Fair Opens are not open here: ${setup.reason}`, code: "unavailable" });
+  const rpc = createSolanaRpc(cfg.rpcUrl);
+  const found = await openRungFor(c, rpc);
+  if ("refusal" in found) return found.refusal;
+  const { scheduled, rung } = found;
+  let signed: Transaction;
+  try {
+    signed = getTransactionDecoder().decode(base64.encode(body.data.transaction)) as Transaction;
+  } catch {
+    return refuse(c, 400, { error: "That is not a transaction.", code: "invalid" });
+  }
+  const message = new Uint8Array(base64.encode(rung.message));
+  const creatorSignature = (signed.signatures as Record<string, SignatureBytes | null>)[scheduled.wallet];
+  const same = signed.messageBytes.length === message.length && new Uint8Array(signed.messageBytes).every((b, i) => b === message[i]);
+  if (!same || !creatorSignature || !(await verifySignature(await getPublicKeyFromAddress(scheduled.wallet as KitAddress), creatorSignature, message))) {
+    return refuse(c, 400, { error: "That is not the rung the pot covers, signed by the Creator wallet.", code: "invalid" });
+  }
+  const keeper = await loadKeeper(setup.keeperKey, setup.keeper);
+  const signatures = { creatorSignature: getBase58Decoder().decode(creatorSignature), keeperSignature: rung.keeperSignature ?? (await keeperSignatureOn(keeper, rung.message)) };
+  await db.update(fairOpenRungs).set(signatures).where(and(eq(fairOpenRungs.launchId, scheduled.id), eq(fairOpenRungs.rung, rung.rung)));
+  const wire = wireOf({ ...rung, ...signatures }, { keeper: setup.keeper, creator: scheduled.wallet, mint: scheduled.mint });
+  const signature = signatures.keeperSignature;
+  let outcome: FairOpenOutcome = { signature, status: "pending", error: null, explorer: explorerUrl(cfg, "tx", signature) };
+  try {
+    await sendWire(rpc, wire, { preflightCommitment: "processed" });
+    await db.update(launches).set({ openSignature: signature, openSentAt: new Date() }).where(and(eq(launches.id, scheduled.id), isNull(launches.openSignature)));
+    await confirmed(rpc, signature, SETTLE_WAIT_MS);
+    outcome = { ...outcome, status: "landed" };
+    c.executionCtx.waitUntil(indexNow(c.env, [signature]));
+  } catch (e) {
+    if (e instanceof TransactionFailed) outcome = { ...outcome, status: "failed", error: e.message };
+    // Refused in preflight, or not yet confirmed: the keeper's Workflow holds the signed rung and sends it.
+    else console.warn("the open signed at the open did not go out from here; the keeper's Workflow sends it", (e as Error).message);
   }
   return c.json(outcome);
 }

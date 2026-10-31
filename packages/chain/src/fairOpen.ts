@@ -12,11 +12,12 @@ import {
   signBytes,
   type Address,
   type Instruction,
+  type Nonce,
   type ReadonlyUint8Array,
   type TransactionSigner,
 } from "@solana/kit";
 import { getSetComputeUnitLimitInstruction, getSetComputeUnitPriceInstruction } from "@solana-program/compute-budget";
-import { getCreateAccountInstruction, getInitializeNonceAccountInstruction, SYSTEM_PROGRAM_ADDRESS } from "@solana-program/system";
+import { fetchNonce, getCreateAccountInstruction, getInitializeNonceAccountInstruction, getTransferSolInstruction, SYSTEM_PROGRAM_ADDRESS } from "@solana-program/system";
 import { getInitializePoolParametersEncoder } from "@top-pad/clients/dbc";
 import {
   DEPOSIT_STEP,
@@ -322,15 +323,12 @@ const budget = (units: number, computeUnitPrice: bigint) => [getSetComputeUnitLi
 
 const programAccounts = async () => ({ eventAuthority: await eventAuthorityAddress(FAIR_OPEN_PROGRAM_ADDRESS), program: FAIR_OPEN_PROGRAM_ADDRESS });
 
-export type FairOpenSchedule = {
-  /** The Creator wallet: signs, and pays the rent of the launch, its vault and its nonce (spec 2.1 step 7). */
+/** What `create_launch` takes, whoever made the launch's durable nonce. */
+type LaunchTerms = {
+  /** The Creator wallet: signs, and pays the rent of the launch, its vault and the open's accounts (spec 2.1 step 7). */
   creator: TransactionSigner;
   /** Heat's keeper, which co-signs and holds the nonce. */
   keeper: TransactionSigner;
-  /** A new key for the launch's durable nonce account. */
-  nonce: TransactionSigner;
-  /** The rent of a nonce account, from `getMinimumBalanceForRentExemption(80)`. */
-  nonceRent: bigint;
   dbcConfig: Address;
   depositsOpenAt: bigint;
   minRaise: bigint;
@@ -338,32 +336,63 @@ export type FairOpenSchedule = {
   computeUnitPrice: bigint;
 };
 
-/** Scheduling a Fair Open: its durable nonce created and handed to the keeper, then `create_launch`. */
+export type FairOpenSchedule = LaunchTerms & {
+  /** A new key for the launch's durable nonce account, which the creator pays for in the same transaction. */
+  nonce: TransactionSigner;
+  /** The rent of a nonce account, from `getMinimumBalanceForRentExemption(80)`. */
+  nonceRent: bigint;
+};
+
+async function createLaunchInstruction(t: LaunchTerms, nonce: Address): Promise<Instruction> {
+  const { launch, vault } = await fairOpenAccounts(nonce);
+  return getCreateLaunchInstructionAsync({
+    programConfig: (await findProgramConfigPda())[0],
+    creator: t.creator,
+    keeper: t.keeper,
+    dbcConfig: t.dbcConfig,
+    nonce,
+    launch,
+    vault,
+    ...(await programAccounts()),
+    depositsOpenAt: t.depositsOpenAt,
+    minRaise: t.minRaise,
+    identityHash: t.identityHash,
+  });
+}
+
+/** A durable nonce account made by `payer`, whose value only `authority` can advance. */
+export function nonceAccountInstructions(n: { payer: TransactionSigner; nonce: TransactionSigner; authority: Address; rent: bigint }): Instruction[] {
+  return [
+    getCreateAccountInstruction({ payer: n.payer, newAccount: n.nonce, lamports: n.rent, space: NONCE_ACCOUNT_SPACE, programAddress: SYSTEM_PROGRAM_ADDRESS }),
+    getInitializeNonceAccountInstruction({ nonceAccount: n.nonce.address, nonceAuthority: n.authority }),
+  ];
+}
+
+/** A durable nonce's current value, which a transaction signed on it must name. */
+export async function fetchNonceValue(rpc: Parameters<typeof fetchNonce>[0], nonce: Address, config?: Parameters<typeof fetchNonce>[2]): Promise<Nonce> {
+  const { data } = await fetchNonce(rpc, nonce, { commitment: "confirmed", ...config });
+  return data.blockhash as string as Nonce;
+}
+
+/** Scheduling a Fair Open in one go, as the scripts and tests do: its durable nonce created and handed to the keeper, then `create_launch`. */
 export async function createLaunchInstructions(s: FairOpenSchedule): Promise<Instruction[]> {
-  const { launch, vault } = await fairOpenAccounts(s.nonce.address);
   return [
     ...budget(FAIR_OPEN_COMPUTE_UNITS.createLaunch, s.computeUnitPrice),
-    getCreateAccountInstruction({
-      payer: s.creator,
-      newAccount: s.nonce,
-      lamports: s.nonceRent,
-      space: NONCE_ACCOUNT_SPACE,
-      programAddress: SYSTEM_PROGRAM_ADDRESS,
-    }),
-    getInitializeNonceAccountInstruction({ nonceAccount: s.nonce.address, nonceAuthority: s.keeper.address }),
-    await getCreateLaunchInstructionAsync({
-      programConfig: (await findProgramConfigPda())[0],
-      creator: s.creator,
-      keeper: s.keeper,
-      dbcConfig: s.dbcConfig,
-      nonce: s.nonce.address,
-      launch,
-      vault,
-      ...(await programAccounts()),
-      depositsOpenAt: s.depositsOpenAt,
-      minRaise: s.minRaise,
-      identityHash: s.identityHash,
-    }),
+    ...nonceAccountInstructions({ payer: s.creator, nonce: s.nonce, authority: s.keeper.address, rent: s.nonceRent }),
+    await createLaunchInstruction(s, s.nonce.address),
+  ];
+}
+
+/**
+ * Scheduling a Fair Open on a durable nonce our keeper made beforehand, as the launch service does, so the creator can
+ * sign the ladder on its value in the same approval as this (ADR 0005): the creator pays the keeper back the nonce's
+ * rent, which comes back to the creator when the keeper closes the nonce, then `create_launch`.
+ */
+export async function scheduleInstructions(s: LaunchTerms & { nonce: Address; nonceRent: bigint }): Promise<Instruction[]> {
+  return [
+    ...budget(FAIR_OPEN_COMPUTE_UNITS.createLaunch, s.computeUnitPrice),
+    getTransferSolInstruction({ source: s.creator, destination: s.keeper.address, amount: s.nonceRent }),
+    await createLaunchInstruction(s, s.nonce),
   ];
 }
 
@@ -428,6 +457,15 @@ export async function markFailedInstructions(m: { launch: Address; refund?: Omit
 /** A failed launch's seat returned to its wallet: anyone may send it, the sender paying the fee. */
 export async function withdrawFailedInstructions(r: Refund & { computeUnitPrice: bigint }): Promise<Instruction[]> {
   return [...budget(FAIR_OPEN_COMPUTE_UNITS.withdrawFailed, r.computeUnitPrice), await withdrawFailedInstruction(r)];
+}
+
+/** Seats a refunds transaction returns: each takes its seat and its wallet, so 8 fit with room to spare. */
+export const REFUND_SEATS = 8;
+
+/** Several seats of a failed launch returned to their wallets in one transaction, which anyone may send. */
+export async function refundsInstructions(r: { launch: Address; seats: Omit<Refund, "launch">[]; computeUnitPrice: bigint }): Promise<Instruction[]> {
+  const refunds = await Promise.all(r.seats.map((seat) => withdrawFailedInstruction({ launch: r.launch, ...seat })));
+  return [...budget(FAIR_OPEN_COMPUTE_UNITS.withdrawFailed * r.seats.length, r.computeUnitPrice), ...refunds];
 }
 
 /** A failed launch closed once every seat is back, its rent and its vault's returned to the creator. */

@@ -104,6 +104,12 @@ export const FairOpen = z.object({
     .nullable(),
   /** What a new seat prepays beyond its deposit, all of it returned (spec 2.1 step 9). */
   rent: z.object({ seat: RawAmount, coinAccount: RawAmount }),
+  /**
+   * How the creator signs the open (ADR 0005): `signed` when the whole ladder was signed at scheduling, `at_open` when
+   * the Creator wallet must sign the rung the pot covers once the window has closed, and `at_open_signed` once it has;
+   * null for a launch Heat did not schedule.
+   */
+  ladder: z.enum(["signed", "at_open", "at_open_signed"]).nullable(),
   /** The wallet asked about, with its admission and its seat. */
   you: z.object({ wallet: Address, admission: FairOpenAdmission, seat: FairOpenSeat.nullable() }).nullable(),
   explorer: z.string().url(),
@@ -114,7 +120,14 @@ export type FairOpen = z.infer<typeof FairOpen>;
 export const FairOpenMove = z.object({ wallet: Address, amount: RawAmount });
 export type FairOpenMove = z.infer<typeof FairOpenMove>;
 
-/** `POST /fair-opens/:launch/mark-failed`, `/refund` and `/claim`: the wallet that signs and pays the network fee. */
+/**
+ * `POST /fair-opens/:launch/open/submit`: the rung the pot covers, base64, signed by the Creator wallet at the open,
+ * when it could not sign the ladder at scheduling.
+ */
+export const SubmitOpen = z.object({ transaction: z.string().max(4096) });
+export type SubmitOpen = z.infer<typeof SubmitOpen>;
+
+/** `POST /fair-opens/:launch/mark-failed`, `/refund`, `/claim` and `/open`: the wallet that signs. */
 export const FairOpenSender = z.object({ wallet: Address });
 export type FairOpenSender = z.infer<typeof FairOpenSender>;
 
@@ -129,7 +142,7 @@ export type PreparedFairOpenTransaction = z.infer<typeof PreparedFairOpenTransac
 /** A refusal before anything is signed, with the reason the page shows. */
 export const FairOpenRefusal = z.object({
   error: z.string(),
-  code: z.enum(["invalid", "not_found", "unavailable", "not_admitted", "window", "over_cap", "no_seat", "cannot_fail", "not_failed", "not_opened", "delivered", "creators_seat"]),
+  code: z.enum(["invalid", "not_found", "unavailable", "not_admitted", "window", "over_cap", "no_seat", "cannot_fail", "not_failed", "not_opened", "delivered", "creators_seat", "not_the_creator", "not_due", "already_signed"]),
 });
 export type FairOpenRefusal = z.infer<typeof FairOpenRefusal>;
 

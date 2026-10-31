@@ -21,8 +21,12 @@
       { "name": "LIVE_ROOMS", "class_name": "LiveRoom" }
     ]
   },
-  // The keeper's Workflow for each Instant launch, keyed by its coin: the window claim at 60 s (spec 10.2).
-  "workflows": [{ "name": "top-pad-instant-launches", "binding": "INSTANT_LAUNCHES", "class_name": "InstantLaunchKeeper" }],
+  // The keeper's Workflows (spec 10.2): each Instant launch's, keyed by its coin, sends the window claim at 60 s; each
+  // Fair Open's, keyed by its launch account, uploads its coin's metadata, opens it at its time and pushes every seat.
+  "workflows": [
+    { "name": "top-pad-instant-launches", "binding": "INSTANT_LAUNCHES", "class_name": "InstantLaunchKeeper" },
+    { "name": "top-pad-fair-opens", "binding": "FAIR_OPENS", "class_name": "FairOpenKeeper" }
+  ],
   // The version this code is, which the indexer checks against the Worker's after a deploy.
   "version_metadata": { "binding": "CF_VERSION_METADATA" },
   // Local development (`wrangler dev`) runs against devnet, the one cluster with Heat's configs, on the docker database.
@@ -74,7 +78,10 @@
           { "name": "LIVE_ROOMS", "class_name": "LiveRoom" }
         ]
       },
-      "workflows": [{ "name": "top-pad-instant-launches-devnet", "binding": "INSTANT_LAUNCHES", "class_name": "InstantLaunchKeeper" }],
+      "workflows": [
+        { "name": "top-pad-instant-launches-devnet", "binding": "INSTANT_LAUNCHES", "class_name": "InstantLaunchKeeper" },
+        { "name": "top-pad-fair-opens-devnet", "binding": "FAIR_OPENS", "class_name": "FairOpenKeeper" }
+      ],
       "version_metadata": { "binding": "CF_VERSION_METADATA" },
       // The keeper key, which is also the launch key, and the admission key, which signs each Fair Open deposit's
       // admission and holds no funds (spec 10.3), from the account's Secrets Store and bound to this Worker alone; put

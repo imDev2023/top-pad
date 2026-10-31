@@ -3,8 +3,11 @@ import {
   appendTransactionMessageInstructions,
   compileTransaction,
   compressTransactionMessageUsingAddressLookupTables,
+  createNoopSigner,
   createTransactionMessage,
   generateKeyPairSigner,
+  getBase64Encoder,
+  getTransactionDecoder,
   getTransactionEncoder,
   pipe,
   setTransactionMessageFeePayerSigner,
@@ -146,6 +149,21 @@ describe("the creation transaction", () => {
     expect(ladder[0]!.rung).toBe(1_700_000_000n);
     expect(new Set(ladder.map((r) => r.transaction)).size).toBe(64);
     expect(Math.max(...ladder.map((r) => r.bytes))).toBeLessThanOrEqual(LIMIT);
+  });
+});
+
+describe("a ladder signed in parts", () => {
+  it("leaves the signatures of signers that cannot sign here for the wallet and our keeper to fill", async () => {
+    const c = await creation();
+    const creator = createNoopSigner(c.creator.address);
+    const keeper = createNoopSigner(c.keeper.address);
+    const ladder = await signLadder({ ...c, creator, keeper, potCap: 1_700_000_000n, nonce: await random(), nonceValue: "11111111111111111111111111111111" as Nonce, table: await table() });
+    for (const { transaction } of ladder) {
+      const signatures = getTransactionDecoder().decode(getBase64Encoder().encode(transaction)).signatures;
+      expect(signatures[c.mint.address]).toBeTruthy();
+      expect(signatures[c.creator.address]).toBeNull();
+      expect(signatures[c.keeper.address]).toBeNull();
+    }
   });
 });
 

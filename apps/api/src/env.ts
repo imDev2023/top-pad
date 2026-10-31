@@ -3,6 +3,7 @@ import { CLUSTERS, type HeatCluster } from "@top-pad/chain";
 import { Cluster } from "@top-pad/contract";
 import type { Indexer } from "./indexer";
 import type { LiveRoom } from "./rooms";
+import type { FairOpenKeeperParams } from "./fairOpenKeeper";
 import type { KeeperParams } from "./windowClaims";
 
 /** What the launch service needs from R2: the signed Arweave data items wait there until uploaded (spec 10.4). */
@@ -57,6 +58,8 @@ export type Bindings = {
   LIVE_ROOMS?: DurableObjectNamespace<LiveRoom>;
   /** The keeper's Workflow for each Instant launch, keyed by its coin (spec 10.2): its window claim at 60 s. */
   INSTANT_LAUNCHES?: Workflow<KeeperParams>;
+  /** The keeper's Workflow for each Fair Open, keyed by its launch account (spec 10.2): the upload, the open, the pushes. */
+  FAIR_OPENS?: Workflow<FairOpenKeeperParams>;
   /** Which version of the Worker this code is: the indexer checks it runs the same as the Worker that calls it. */
   CF_VERSION_METADATA?: { id: string; tag: string; timestamp: string };
 };
@@ -153,6 +156,18 @@ export function instantLaunchSetup(cfg: Config, env: Bindings):
     keeperKey: typeof keeperKey === "string" ? { get: async () => keeperKey } : keeperKey,
     blobs: env.BLOBS,
   };
+}
+
+/** What scheduling a Fair Open needs on this cluster, or why it cannot be scheduled here. */
+export function fairOpenLaunchSetup(cfg: Config, env: Bindings):
+  | { ok: true; config: Address; quoteMint: Address; lookupTable: Address; keeper: Address; keeperKey: SecretBinding; blobs: BlobStore }
+  | { ok: false; reason: string } {
+  const instant = instantLaunchSetup(cfg, env);
+  if (!instant.ok) return instant;
+  const heat = cfg.heat!;
+  if (!heat.lookupTable) return { ok: false, reason: `Heat has no shared lookup table on ${cfg.cluster}.` };
+  if (!heat.keys?.admission || !env.ADMISSION_KEY) return { ok: false, reason: "Fair Open deposits are not taken on this deployment." };
+  return { ...instant, config: heat.configs!.fairOpen, lookupTable: heat.lookupTable };
 }
 
 /** What Fair Open deposits need on this cluster, or why they cannot be taken here. */

@@ -6,8 +6,8 @@ import { and, gt, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
 import type { Context } from "hono";
 import { VampShieldCheck, type FieldVerdict, type VampShieldVerdict } from "@top-pad/contract";
 import { protectedCoins, type Db } from "@top-pad/db";
-import { candidateKeys, FOLD_VERSION, judge, lookupValues, type Field, type ProtectedCoin } from "@top-pad/vamp-shield";
-import { canonicalName, canonicalTicker, nameVerdict, tickerVerdict } from "@top-pad/vamp-shield/rules";
+import { candidateKeys, FOLD_VERSION, foldKeys, judge, lookupValues, type CoinKeys, type Field, type ProtectedCoin } from "@top-pad/vamp-shield";
+import { canonicalName, canonicalTicker, nameVerdict, teaserVerdict, tickerVerdict } from "@top-pad/vamp-shield/rules";
 import type { AppEnv } from "./http";
 
 const clear: FieldVerdict = { status: "clear", reason: null, match: null };
@@ -71,6 +71,44 @@ export async function checkText(db: Db, tickerInput: string, nameInput: string):
     verdicts,
     clear: verdicts.ticker.status === "clear" && verdicts.name.status === "clear",
   };
+}
+
+/** The longest run of words in a teaser read as a coin's name: most names are one to three words. */
+const TEASER_PHRASE_WORDS = 4;
+/** The shortest word in a teaser read as a ticker: shorter ones are everyday words far more often than coins. */
+const TEASER_TICKER_MIN = 3;
+
+/**
+ * Vamp Shield's verdict on a Fair Open's teaser (spec 2.1 step 4): the text rules, then whether it names a Protected
+ * coin. Each run of up to four words is read as a name, matched by its strict and loose keys against Protected names,
+ * and each word of three or more letters and digits as a ticker, matched by its strict key against Protected tickers.
+ * Core keys are left out: they strip words such as OFFICIAL from free text and would refuse ordinary sentences.
+ */
+export async function checkTeaser(db: Db, input: string): Promise<{ ok: true; teaser: string } | { ok: false; reason: string }> {
+  const rules = teaserVerdict(input);
+  if (!rules.ok || rules.teaser === "") return rules;
+  const words = rules.teaser.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  const phrases: string[] = [];
+  for (let i = 0; i < words.length; i++) {
+    for (let n = 1; n <= TEASER_PHRASE_WORDS && i + n <= words.length; n++) phrases.push(words.slice(i, i + n).join(" "));
+  }
+  const names = phrases.map((p) => foldKeys(p, "name"));
+  const tickers = words.filter((w) => Array.from(w).length >= TEASER_TICKER_MIN).map((w) => foldKeys(w, "ticker"));
+  const values = (keys: string[]) => [...new Set(keys.filter((k) => k.length > 0))];
+  const lookup = {
+    ticker: { strict: values(tickers.map((k) => k.strict)), loose: [], core: [] },
+    name: { strict: values(names.map((k) => k.strict)), loose: values(names.map((k) => k.loose)), core: [] },
+  };
+  const found = await candidates(db, lookup);
+  const empty = { strict: "", loose: "", core: "" };
+  for (const keys of [...tickers.map((ticker): CoinKeys => ({ ticker: { ...empty, strict: ticker.strict }, name: empty })), ...names.map((name): CoinKeys => ({ ticker: empty, name: { ...name, core: "" } }))]) {
+    const judgement = judge(keys, found);
+    if (judgement.verdict === "refused") {
+      const coin = judgement.matches[0]!.coin;
+      return { ok: false, reason: `The teaser names ${coin.name} ($${coin.ticker.replace(/^\$/, "")}), a protected coin: the calendar cannot carry another coin's name.` };
+    }
+  }
+  return rules;
 }
 
 /** The reason a refused launch shows first: the ticker's, else the name's. */

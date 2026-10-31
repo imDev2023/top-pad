@@ -1,6 +1,8 @@
 import { createSolanaRpc, isSolanaError } from "@solana/kit";
+import { potCapOf, rungs, WINDOW_SECONDS } from "@top-pad/chain";
+import { TEASER_MAX_LENGTH } from "@top-pad/vamp-shield/rules";
 import { and, eq, lt, sql } from "drizzle-orm";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
 import { HTTPException } from "hono/http-exception";
@@ -11,9 +13,21 @@ import { notifyPending, runJob } from "@top-pad/jobs";
 import { finishXLink, logout, me, startXLink } from "./auth";
 import { getCoin, getCoinCandles, getCoinTrades } from "./coins";
 import { getEarnings, prepareClaim, reportClaim } from "./earnings";
-import { getFairOpen, prepareDeposit, prepareFairOpenClaim, prepareMarkFailed, prepareRefund, prepareWithdrawal, reportFairOpenTransaction } from "./fairOpens";
+import { reclaimUnscheduled, sweepFairOpens } from "./fairOpenKeeper";
+import { MAX_AHEAD_SECONDS, renewFairOpen } from "./fairOpenLaunches";
+import {
+  getFairOpen,
+  prepareDeposit,
+  prepareFairOpenClaim,
+  prepareMarkFailed,
+  prepareOpenSignature,
+  prepareRefund,
+  prepareWithdrawal,
+  reportFairOpenTransaction,
+  submitOpenSignature,
+} from "./fairOpens";
 import { indexerOf } from "./indexing";
-import { config, instantLaunchSetup, type Bindings } from "./env";
+import { config, fairOpenLaunchSetup, instantLaunchSetup, type Bindings } from "./env";
 import { sameOriginWrites, withConfig, withDb, type AppEnv } from "./http";
 import { checkKeeperFloat } from "./keeper";
 import { getLaunch, prepareLaunch, submitLaunch } from "./launches";
@@ -62,20 +76,35 @@ app.get("/health", async (c) => {
 
 app.get("/platform", (c) => {
   const { cfg } = c.var;
+  const potCap = cfg.heat?.configs ? potCapOf(cfg.heat.graduationTarget) : null;
   const platform: Platform = {
     cluster: cfg.cluster,
     xLinking: cfg.x !== null,
-    launchModes: { instant: cfg.x !== null && instantLaunchSetup(cfg, c.env).ok, fairOpen: false },
+    launchModes: { instant: cfg.x !== null && instantLaunchSetup(cfg, c.env).ok, fairOpen: cfg.x !== null && fairOpenLaunchSetup(cfg, c.env).ok },
+    fairOpen:
+      potCap === null
+        ? null
+        : {
+            potCap: `${potCap}`,
+            rungs: rungs(potCap).map((r) => `${r}`),
+            windowSeconds: Number(WINDOW_SECONDS),
+            maxAheadSeconds: MAX_AHEAD_SECONDS,
+            teaserMaxLength: TEASER_MAX_LENGTH,
+          },
     maxImageBytes: cfg.maxImageBytes,
     imageTypes: [...IMAGE_TYPES],
   };
   return c.json(platform);
 });
 
-// Bodies are read whole, so their size is capped before anything reads them; only a launch's form carries an image.
+// Bodies are read whole, so their size is capped before anything reads them; only a launch's form carries an image,
+// and only a Fair Open's submit carries a ladder, 64 signed transactions of about 1.5 KB each in base64.
+const LADDER_SUBMIT = /^\/launches\/[^/]+\/submit$/;
 app.post("*", async (c, next) => {
   const { maxImageBytes } = c.var.cfg;
-  if (c.req.path !== "/launches") return bodyLimit({ maxSize: 16 * 1024, onError: (c) => c.json({ error: "The request is too large." }, 413) })(c, next);
+  const tooLarge = (c: Context) => c.json({ error: "The request is too large." }, 413);
+  if (LADDER_SUBMIT.test(c.req.path)) return bodyLimit({ maxSize: 192 * 1024, onError: tooLarge })(c, next);
+  if (c.req.path !== "/launches") return bodyLimit({ maxSize: 16 * 1024, onError: tooLarge })(c, next);
   const refusal: LaunchRefusal = { error: `The image is too large: a coin's image can be at most ${Math.round(maxImageBytes / 1024)} KB.`, code: "image" };
   return bodyLimit({ maxSize: maxImageBytes + 16 * 1024, onError: (c) => c.json(refusal, 413) })(c, next);
 });
@@ -88,6 +117,7 @@ app.post("/vamp-shield/check", checkRoute);
 app.post("/launches", prepareLaunch);
 app.post("/launches/:id/submit", submitLaunch);
 app.get("/launches/:id", getLaunch);
+app.post("/launches/:id/renew", renewFairOpen);
 app.get("/coins/:mint", getCoin);
 app.get("/coins/:mint/trades", getCoinTrades);
 app.get("/coins/:mint/candles", getCoinCandles);
@@ -101,6 +131,8 @@ app.post("/fair-opens/:launch/withdraw", prepareWithdrawal);
 app.post("/fair-opens/:launch/mark-failed", prepareMarkFailed);
 app.post("/fair-opens/:launch/refund", prepareRefund);
 app.post("/fair-opens/:launch/claim", prepareFairOpenClaim);
+app.post("/fair-opens/:launch/open", prepareOpenSignature);
+app.post("/fair-opens/:launch/open/submit", submitOpenSignature);
 
 /**
  * `GET /indexer`: how the indexer stands; asking also starts it if it is not running, as the cron does, and moves it to
@@ -114,16 +146,22 @@ app.get("/indexer", async (c) => {
   return c.json(await indexer.wake(version).catch(() => indexerOf(c.env)!.wake(version)));
 });
 
-/** Expired sign-in state, and launches prepared so long ago that their blockhash can no longer land. */
-async function housekeeping(db: Db) {
+/**
+ * Expired sign-in state, and launches prepared so long ago that their blockhash can no longer land: a Fair Open among
+ * them releases its ticker, and our keeper takes back the nonce it made for it.
+ */
+async function housekeeping(db: Db, env: Bindings) {
   const authorizations = await db.delete(xAuthorizations).where(lt(xAuthorizations.expiresAt, sql`now()`)).returning({ state: xAuthorizations.state });
   const expiredSessions = await db.delete(sessions).where(lt(sessions.expiresAt, sql`now()`)).returning({ tokenHash: sessions.tokenHash });
   const stale = await db
     .update(launches)
     .set({ status: "expired" })
-    .where(and(eq(launches.status, "prepared"), lt(launches.createdAt, sql`now() - interval '15 minutes'`)))
+    .where(and(eq(launches.mode, "instant"), eq(launches.status, "prepared"), lt(launches.createdAt, sql`now() - interval '15 minutes'`)))
     .returning({ id: launches.id });
-  return { authorizations: authorizations.length, sessions: expiredSessions.length, expiredLaunches: stale.length, candles: await pruneCandles(db) };
+  const cfg = config(env);
+  const keeperKey = env.KEEPER_KEY ? (typeof env.KEEPER_KEY === "string" ? { get: async () => env.KEEPER_KEY as string } : env.KEEPER_KEY) : null;
+  const fairOpens = await reclaimUnscheduled(db, cfg, keeperKey);
+  return { authorizations: authorizations.length, sessions: expiredSessions.length, expiredLaunches: stale.length, fairOpens, candles: await pruneCandles(db) };
 }
 
 /**
@@ -142,7 +180,8 @@ async function scheduled(_controller: ScheduledController, env: Bindings, ctx: E
       await runJob(db, "keeper-balance", () => checkKeeperFloat(db, createSolanaRpc(cfg.rpcUrl), keeper, cfg.keeperFloatMinLamports), { exclusive: true }).catch(() => undefined);
     }
     await runJob(db, "window-claims", () => sweepWindowClaims(db, env), { exclusive: true }).catch(() => undefined);
-    await runJob(db, "housekeeping", () => housekeeping(db), { exclusive: true }).catch(() => undefined);
+    await runJob(db, "fair-opens", () => sweepFairOpens(db, env), { exclusive: true }).catch(() => undefined);
+    await runJob(db, "housekeeping", () => housekeeping(db, env), { exclusive: true }).catch(() => undefined);
     await notifyPending(db, cfg.alertWebhookUrl);
   } finally {
     ctx.waitUntil(close());

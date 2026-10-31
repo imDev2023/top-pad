@@ -151,8 +151,9 @@ export const protectedCoins = pgTable(
 );
 
 /**
- * A launch the launch service prepared (spec 10.2): its coin, the creation transaction's message as the mint key signed
- * it, and how far it got. The mint key itself is never kept (spec 10.3), only its signature.
+ * A launch the launch service prepared (spec 10.2): its coin, the message the Creator wallet signs (an Instant launch's
+ * creation transaction, signed by the mint key, or a Fair Open's schedule), and how far it got. The mint key itself is
+ * never kept (spec 10.3), only its signatures. A Fair Open's ladder is in `fair_open_rungs`.
  */
 export const launches = pgTable(
   "launches",
@@ -171,10 +172,10 @@ export const launches = pgTable(
     config: text("config").notNull(),
     metadataUri: text("metadata_uri").notNull(),
     imageUri: text("image_uri").notNull(),
-    /** The creation transaction's message, base64: a submitted transaction must carry exactly these bytes. */
+    /** The message the Creator wallet signs, base64: a submitted transaction must carry exactly these bytes. */
     message: text("message").notNull(),
-    /** The mint key's signature on the message, base58. */
-    mintSignature: text("mint_signature").notNull(),
+    /** The mint key's signature on an Instant launch's message, base58; a Fair Open's schedule has none. */
+    mintSignature: text("mint_signature"),
     lastValidBlockHeight: bigint("last_valid_block_height", { mode: "bigint" }).notNull(),
     status: text("status", { enum: ["prepared", "sending", "landed", "failed", "expired"] })
       .notNull()
@@ -186,8 +187,58 @@ export const launches = pgTable(
     createdAt: createdAt(),
     submittedAt: timestamp("submitted_at", { withTimezone: true }),
     landedAt: timestamp("landed_at", { withTimezone: true }),
+    /**
+     * A Fair Open's ticker's strict key (spec 2.1 step 3), reserved while the launch is being scheduled and through its
+     * deposit window, so two Fair Opens of one ticker never hold overlapping windows; null once released, when the launch
+     * opens, fails or expires unsent.
+     */
+    tickerKey: text("ticker_key"),
+    // A Fair Open's schedule (spec 2.1 step 4): its launch account, the durable nonce our keeper made for it, its window
+    // and minimum raise, and the calendar's teaser.
+    fairOpen: text("fair_open").unique(),
+    nonce: text("nonce").unique(),
+    depositsOpenAt: timestamp("deposits_open_at", { withTimezone: true }),
+    opensAt: timestamp("opens_at", { withTimezone: true }),
+    minRaise: bigint("min_raise", { mode: "bigint" }),
+    teaser: text("teaser"),
+    /** How the creator signs the open (ADR 0005): the whole ladder at scheduling, or the one rung at the open. */
+    ladder: text("ladder", { enum: ["signed", "at_open"] }),
+    // What the keeper's Workflow did at the open (spec 10.2): the rung it sent, when it sent it by the Worker's clock, and
+    // when it landed by the chain's, from which how late the open lands is measured; then when every seat had its coins.
+    openSignature: text("open_signature"),
+    openSentAt: timestamp("open_sent_at", { withTimezone: true }),
+    openSlot: bigint("open_slot", { mode: "number" }),
+    openLandedAt: timestamp("open_landed_at", { withTimezone: true }),
+    deliveredAt: timestamp("delivered_at", { withTimezone: true }),
   },
-  (t) => [index("launches_creator_created_idx").on(t.creatorId, t.createdAt), index("launches_status_idx").on(t.status)],
+  (t) => [
+    index("launches_creator_created_idx").on(t.creatorId, t.createdAt),
+    index("launches_status_idx").on(t.status),
+    uniqueIndex("launches_ticker_reserved").on(t.tickerKey).where(sql`${t.tickerKey} is not null`),
+  ],
+);
+
+/**
+ * A Fair Open's ladder (spec 2.1 step 6, ADR 0005): its creation transaction for each rung, on the launch's durable
+ * nonce, with the signatures collected so far, base58. The mint key signs every rung when the launch is prepared, and is
+ * then dropped; the Creator wallet signs every rung at scheduling, or only the rung the pot covers at the open; our
+ * keeper signs last.
+ */
+export const fairOpenRungs = pgTable(
+  "fair_open_rungs",
+  {
+    launchId: uuid("launch_id")
+      .notNull()
+      .references(() => launches.id),
+    /** What the pot spends on this rung, in the quote's raw units. */
+    rung: bigint("rung", { mode: "bigint" }).notNull(),
+    /** The creation transaction's message, base64. */
+    message: text("message").notNull(),
+    mintSignature: text("mint_signature").notNull(),
+    creatorSignature: text("creator_signature"),
+    keeperSignature: text("keeper_signature"),
+  },
+  (t) => [primaryKey({ columns: [t.launchId, t.rung] })],
 );
 
 /** A launch's two Arweave data items (spec 2.2): signed when it is prepared, uploaded through Turbo when submitted. */

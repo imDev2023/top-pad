@@ -106,7 +106,9 @@ const submit = (cookie: string, id: string, transaction: string) =>
 
 async function prepared(res: Response) {
   expect(res.status, JSON.stringify(await res.clone().json())).toBe(201);
-  return PreparedLaunch.parse(await res.json());
+  const launch = PreparedLaunch.parse(await res.json());
+  if (launch.mode !== "instant") throw new Error("expected an Instant launch");
+  return launch;
 }
 
 async function refusal(res: Response) {

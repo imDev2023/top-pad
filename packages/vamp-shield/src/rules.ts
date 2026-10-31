@@ -61,6 +61,46 @@ export function nameVerdict(input: string): NameVerdict {
   return refuse("The name mixes letters from scripts that are not written together, which is how lookalike names are made; use one script.");
 }
 
+/** A Fair Open's teaser is one line of at most 80 characters for the launch calendar (spec 2.1 step 4). */
+export const TEASER_MAX_LENGTH = 80;
+
+export type TeaserVerdict = { ok: true; teaser: string } | { ok: false; reason: string };
+
+/** The teaser as it is checked and stored: NFC, its runs of spaces made one, trimmed. */
+export const canonicalTeaser = (input: string) => input.normalize("NFC").replace(/[ \t]+/g, " ").trim();
+
+// A link: a scheme, a "www.", or a word, a dot and two or more letters, as most domains and handles' sites are written.
+const LINK = /[a-z][a-z0-9+.-]*:\/\/|\bwww\.|[\p{L}\p{N}-]+\.[a-z]{2,}\b/iu;
+// A cashtag: a dollar sign before a letter, as terminals and X read $PEPE.
+const CASHTAG = /\$\s*\p{L}/u;
+
+/**
+ * The canonical teaser, or the reason the launch form shows for refusing it: plain text with no links or cashtags, and
+ * none of the characters refused in names (spec 2.1 step 4). Whether it names a Protected coin is the API's to say.
+ * An empty teaser is allowed: it is optional.
+ */
+export function teaserVerdict(input: string): TeaserVerdict {
+  const teaser = canonicalTeaser(input);
+  const refuse = (reason: string): TeaserVerdict => ({ ok: false, reason });
+  const length = Array.from(teaser).length;
+  if (length > TEASER_MAX_LENGTH) return refuse(`The teaser is ${length} characters; it can have at most ${TEASER_MAX_LENGTH}.`);
+  if (/[\p{Cc}\p{Zl}\p{Zp}]/u.test(teaser)) return refuse("The teaser is one line: it cannot contain line breaks or other control characters.");
+  if (/\p{Cs}/u.test(teaser)) return refuse("The teaser is not valid Unicode text.");
+  if (hasHiddenCharacter(teaser)) {
+    return refuse("The teaser cannot contain invisible characters, such as zero-width spaces or text direction controls.");
+  }
+  if (hasUnassignedCharacter(teaser)) return refuse("The teaser has a private-use or unassigned character, which looks different on every device.");
+  if (LINK.test(teaser)) return refuse("The teaser is plain text: links and web addresses cannot go in it.");
+  if (CASHTAG.test(teaser)) return refuse("The teaser cannot carry cashtags such as $PEPE: the coin stays sealed until its open.");
+  // Words may be in different scripts, but a word that mixes them is how lookalike words are made.
+  for (const word of teaser.split(/\s+/)) {
+    if (restrictionLevel(word) === "minimally-restrictive") {
+      return refuse(`"${word}" mixes letters from different alphabets, which is how lookalike words are made; write each word in one.`);
+    }
+  }
+  return { ok: true, teaser };
+}
+
 /** UTF-8 length; a lone surrogate counts 3 bytes, as the U+FFFD that an encoder writes in its place. */
 function utf8Length(text: string): number {
   let bytes = 0;

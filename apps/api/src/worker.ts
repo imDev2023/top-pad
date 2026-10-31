@@ -3,5 +3,5 @@
 // Kept apart from ./index so the API's tests, which run in Node, never load `cloudflare:workers`.
 export { default } from "./index";
 export { Indexer } from "./indexer";
-export { InstantLaunchKeeper } from "./keeperWorkflow";
+export { FairOpenKeeper, InstantLaunchKeeper } from "./keeperWorkflow";
 export { LiveRoom } from "./rooms";
