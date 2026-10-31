@@ -556,6 +556,7 @@ export function LaunchFlow({ linkOutcome: arrived }: { linkOutcome: LinkOutcome 
             opensAt={opensAtPreview}
             minRaise={scheduled?.ok ? scheduled.minRaise : 0n}
             potCap={terms?.potCap ?? null}
+            scheduled={!!landed?.fairOpen}
           />
         )}
         <p className="note">

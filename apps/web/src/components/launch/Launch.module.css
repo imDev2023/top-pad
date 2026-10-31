@@ -343,10 +343,8 @@
   font-weight: 500;
 }
 
-/* The ladder behind its details link */
+/* The ladder behind its details link: margins, not a grid gap, which a closed <details> keeps under its summary. */
 .rungs {
-  display: grid;
-  gap: 10px;
   padding: 10px 14px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -360,12 +358,11 @@
 }
 
 .rungs[open] > summary {
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 
-.rungs > :global(.note),
-.rungs > .linkButton {
-  margin-bottom: 8px;
+.rungs > :global(.note) {
+  margin: 0 0 10px;
 }
 
 .rungList {

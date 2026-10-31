@@ -84,10 +84,18 @@ export class FairOpenKeeper extends WorkflowEntrypoint<Bindings, FairOpenKeeperP
 
     // The schedule may reach the RPC a moment after the submit that started this Workflow.
     const schedule = await step.do("read the schedule", quick, () => withDb((db) => readSchedule(db, cfg, launch)));
+    // Whether the open's step found the launch cannot open, so anyone may mark it failed now.
+    let cannotOpen = false;
     if (schedule.status === "scheduled") {
       const uploadAt = schedule.opensAtMs - UPLOAD_LEAD_MS;
       if (uploadAt > Date.now()) await step.sleepUntil("wait until 15 s before the open", uploadAt);
-      await step.do("upload the coin's metadata", quick, () => withDb((db) => uploadMetadata(db, cfg, blobs, launch)));
+      // Never in the open's way: tried for about the 15 s before the open, after which the open goes out anyway, holding
+      // up to 10 s for the coin's URI to be served (spec 2.1 step 10), and the metadata goes up after it.
+      const upload = { retries: { limit: 4, delay: "2 seconds", backoff: "constant" }, timeout: "30 seconds" } as const;
+      const uploaded = await step
+        .do("upload the coin's metadata", upload, () => withDb((db) => uploadMetadata(db, cfg, blobs, launch)))
+        .then(() => true)
+        .catch((e: Error) => (console.error(`the metadata of ${launch} did not go up before the open`, e.message), false));
       const openAt = schedule.opensAtMs - OPEN_LEAD_MS;
       if (openAt > Date.now()) await step.sleepUntil("wait for the open", openAt);
       // One long try: it watches the chain's clock, sends the rung once it can, and waits for a creator signing at the
@@ -96,6 +104,8 @@ export class FairOpenKeeper extends WorkflowEntrypoint<Bindings, FairOpenKeeperP
         withDb((db) => sendOpen(db, cfg, key, launch)),
       );
       console.log(`open of ${launch}: ${JSON.stringify(open)}`);
+      if (!uploaded) await step.do("upload the coin's metadata after the open", quick, () => withDb((db) => uploadMetadata(db, cfg, blobs, launch)));
+      cannotOpen = open.outcome === "cannot_open";
       if (open.outcome === "opened" && open.signature) {
         const signature = open.signature;
         await step.do("index the open", async () => {
@@ -111,9 +121,9 @@ export class FairOpenKeeper extends WorkflowEntrypoint<Bindings, FairOpenKeeperP
         withDb((db) => pushSeats(db, cfg, key, launch)),
       );
     } else if (now.status === "scheduled" || now.status === "failed") {
-      // A launch that has not opened by now cannot: its pot fell short, or the open is late. Marking it failed waits
-      // for the late time when that is the reason.
-      if (now.status === "scheduled" && now.lateAtMs > Date.now()) await step.sleepUntil("wait until the open is late", now.lateAtMs + 2_000);
+      // A launch that has not opened by now cannot: its pot fell short, which the open's step found, and it is failed at
+      // once; otherwise it is failed once the open is late.
+      if (now.status === "scheduled" && !cannotOpen && now.lateAtMs > Date.now()) await step.sleepUntil("wait until the open is late", now.lateAtMs + 2_000);
       await step.do("fail the launch and refund every seat", { retries: { limit: 20, delay: "5 seconds", backoff: "constant" }, timeout: "10 minutes" }, () =>
         failAndRefund(cfg, key, launch),
       );

@@ -397,20 +397,24 @@ function IfClosedNow({ view }: { view: FairOpen }) {
           <dt>The pot {opened ? "bought" : "would buy"} with</dt>
           <dd data-testid="fair-open-rung">{rung === null ? "Nothing: too little" : <Sol lamports={rung} />}</dd>
         </div>
-        <div>
-          <dt>Your deposit {opened ? "bought" : "buys"} with</dt>
-          <dd data-testid="fair-open-fill">{seat ? <Sol lamports={seat.fill} /> : "No deposit yet"}</dd>
-        </div>
-        <div>
-          <dt>Your refund</dt>
-          <dd>{seat ? <Sol lamports={seat.refund} /> : "None"}</dd>
-        </div>
-        <div>
-          <dt>Rent for your seat and coin account, all returned</dt>
-          <dd>
-            <Sol lamports={seat ? BigInt(seat.seatRent) + BigInt(seat.coinRent) : rent} digits={6} />
-          </dd>
-        </div>
+        {(seat || view.phase === "scheduled" || view.phase === "window") && (
+          <>
+            <div>
+              <dt>Your deposit {opened ? "bought" : "buys"} with</dt>
+              <dd data-testid="fair-open-fill">{seat ? <Sol lamports={seat.fill} /> : "No deposit yet"}</dd>
+            </div>
+            <div>
+              <dt>Your refund</dt>
+              <dd>{seat ? <Sol lamports={seat.refund} /> : "None"}</dd>
+            </div>
+            <div>
+              <dt>Rent for your seat and coin account, all returned</dt>
+              <dd>
+                <Sol lamports={seat ? BigInt(seat.seatRent) + BigInt(seat.coinRent) : rent} digits={6} />
+              </dd>
+            </div>
+          </>
+        )}
       </dl>
       {rung === null ? (
         BigInt(spend) > 0n && <p className="note">The pot would spend less than its smallest buy, so the open could not run and every deposit would come back.</p>

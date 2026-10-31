@@ -12,6 +12,7 @@ import { coinImage, newHandle, newTicker, pageErrors, snap } from "./steps";
 import { TARGET } from "./target";
 import { connectTestWallet, installTestWallet } from "./wallet";
 
+
 const SOL = 1_000_000_000n;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -57,7 +58,7 @@ test("a creator whose wallet cannot sign a batch schedules a Fair Open and signs
     await page.getByRole("link", { name: "Open its page" }).click();
     await page.waitForURL(/\/fair-open\//);
     launch = page.url().split("/fair-open/")[1]!.split(/[?#]/)[0] as Address;
-    await connectTestWallet(page, page.getByRole("main").getByRole("button", { name: "Connect wallet" }).first());
+    // The wallet that signed the schedule is remembered here, so the creator's panel shows at once.
     await expect(page.getByTestId("sign-open")).toContainText("You chose to sign your open at the open");
     await snap(page, "fair-open-sign-at-open-3-waiting");
     await deposit(launch, other, 30n * 10_000_000n, await admitted(launch, other.address, newPerson(), Tier.Scored));

@@ -183,7 +183,7 @@ function Seated({ view, account, chain, onChanged }: { view: FairOpen; account: 
         </dl>
       ) : (
         you.admission.admitted && (
-          <p className="note">{view.phase === "failed" || view.phase === "closed" ? "You hold no seat here." : "You hold no seat here yet."}</p>
+          <p className="note">{view.phase === "scheduled" || view.phase === "window" ? "You hold no seat here yet." : "You hold no seat here."}</p>
         )
       )}
 

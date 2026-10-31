@@ -48,9 +48,12 @@ export function SealedCard({
   opensAt,
   minRaise,
   potCap,
+  scheduled = false,
 }: {
   handle: string | null;
   teaser: string;
+  /** Once scheduled, a launch with no teaser shows none rather than the placeholder that invites one. */
+  scheduled?: boolean;
   /** When the coin opens, in milliseconds, once a valid window is set. */
   opensAt: number | null;
   minRaise: bigint;
@@ -62,7 +65,7 @@ export function SealedCard({
         ?
       </span>
       <div className={styles.coinText}>
-        <b className={teaser ? styles.teaser : `${styles.teaser} ${styles.teaserEmpty}`}>{teaser || "Your one-line teaser"}</b>
+        {(teaser || !scheduled) && <b className={teaser ? styles.teaser : `${styles.teaser} ${styles.teaserEmpty}`}>{teaser || "Your one-line teaser"}</b>}
         <span className="note">
           {opensAt ? `Opens ${when(opensAt)}. ` : ""}The name, ticker and image stay sealed until the open.
         </span>
