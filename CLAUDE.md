@@ -6,6 +6,7 @@ The owner's original brief is `resources.md`; the project's terms are in `GLOSSA
 
 The build follows **`docs/spec.md`**, the one build-ready spec (decisions in `docs/adr/0001` to `0006`), as tickets labelled `build` (#39 to #64), sub-issues of the map wired with native blocking edges; the open ones with no open blocker are the frontier.
 Each build ticket lands as its own PR, which the session merges itself once the ticket's devnet demo works end to end and CI is green (owner, 2026-10-29): `main` is fast-forwarded to the PR's head, so the commits keep the SHAs tickets cite; if `main` has moved, rebase the branch and wait for CI on the new head first.
+One ticket per session (owner, 2026-10-31): once its ticket is merged and closed, a session updates the map and hands off to a fresh session with the `next-session-prompt` skill instead of starting the next ticket, so no session runs on toward the 1M-token context window.
 The wayfinder map (GitHub issue #1, label `wayfinder:map`) indexes every decision and its `## Next` section names the next unit of work.
 Start any session by reading that section: `gh issue view 1 --repo imDev2023/top-pad`.
 The product stays separate from Stoker; merging is revisited only after the devnet cohort ([ADR 0001](docs/adr/0001-separate-product-from-stoker.md)).

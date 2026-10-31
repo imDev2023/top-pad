@@ -6,7 +6,7 @@ import type { UiWalletAccount } from "@wallet-standard/react";
 import type { FairOpen, FairOpenOutcome } from "@top-pad/contract";
 import { useState } from "react";
 import { ApiProblem, linkXUrl, prepareFairOpen, reportFairOpen } from "@/lib/api";
-import { sol } from "@/lib/format";
+import { coinAmount, sol } from "@/lib/format";
 import { WalletButton } from "../WalletButton";
 import { useWallet, type SolanaChain } from "../WalletProvider";
 import styles from "./FairOpen.module.css";
@@ -35,6 +35,7 @@ const REFUSALS: Record<number, string> = {
   6020: "This person's seat is held by another wallet.",
   6021: "That would be over your cap.",
   6029: "The pot can still open, so it cannot be marked failed yet.",
+  6048: "Your coins and refund were already on their way: they are in your wallet.",
 };
 
 function refusalOf(outcome: FairOpenOutcome) {
@@ -48,12 +49,13 @@ const CONNECT: Record<FairOpen["phase"], string> = {
   scheduled: "Connect a wallet to deposit. Your tier sets your cap: Unverified 0.1 SOL, Scored 0.5 SOL, Verified 2 SOL.",
   window: "Connect a wallet to deposit. Your tier sets your cap: Unverified 0.1 SOL, Scored 0.5 SOL, Verified 2 SOL.",
   due: "The window has closed. Connect a wallet to see your seat.",
+  opened: "Connect a wallet to see your coins and refund.",
   failing: "Connect a wallet to see your seat and take back your SOL.",
   failed: "Connect a wallet to see your seat and take back your SOL.",
   closed: "Every deposit and rent has gone back.",
 };
 
-type Action = "deposit" | "withdraw" | "mark-failed" | "refund";
+type Action = "deposit" | "withdraw" | "mark-failed" | "refund" | "claim";
 
 /** What a landed transaction did, in words. */
 function doneText(action: Action, lamports: bigint | undefined, seated: boolean) {
@@ -66,6 +68,8 @@ function doneText(action: Action, lamports: bigint | undefined, seated: boolean)
       return seated ? "Marked failed, and your deposit and both rents are back in your wallet." : "Marked failed: every depositor can now take their SOL back.";
     case "refund":
       return "Your deposit and both rents are back in your wallet.";
+    case "claim":
+      return "Your coins and refund are in your wallet.";
   }
 }
 type Sending = { phase: "idle" } | { phase: "preparing" | "signing" | "confirming"; action: Action } | { phase: "done"; text: string; explorer: string } | { phase: "failed"; text: string };
@@ -241,6 +245,35 @@ function Seated({ view, account, chain, onChanged }: { view: FairOpen; account: 
         </form>
       )}
 
+      {view.phase === "opened" && seat?.coins != null && (
+        <dl className={styles.holding}>
+          <div>
+            <dt className="eyebrow">Your coins</dt>
+            <dd className={styles.held} data-testid="fair-open-coins">
+              <span className="num">{coinAmount(seat.coins, view.open?.coinDecimals)}</span>
+            </dd>
+          </div>
+          <div>
+            <dt className="eyebrow">Your refund</dt>
+            <dd>
+              <span className="num">{sol(seat.refund, 9)}</span> SOL
+            </dd>
+          </div>
+        </dl>
+      )}
+      {view.phase === "opened" &&
+        seat &&
+        (seat.delivered ? (
+          <p className="note" data-testid="fair-open-in-wallet">
+            In your wallet: Heat&apos;s keeper sent them right after the open.
+          </p>
+        ) : you.wallet === view.creator.wallet ? (
+          <p className="note">As the creator, your coins go into the Creator lock, which comes in Heat&apos;s next build.</p>
+        ) : (
+          <button type="button" className="btn btn-go" disabled={busy} onClick={() => void send("claim")}>
+            Claim my coins and refund
+          </button>
+        ))}
       {view.phase === "scheduled" && <p className="note">Deposits open with the window. Your cap and your seat show here.</p>}
       {view.phase === "due" && seat && (
         <p className="note">Your deposit is locked until the open. If the coin is not created in time, the launch fails and you take everything back.</p>

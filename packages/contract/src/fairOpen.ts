@@ -12,10 +12,11 @@ export type FairOpenFailure = z.infer<typeof FairOpenFailure>;
 
 /**
  * Where a Fair Open stands, by Heat's clock: `scheduled` before its window, `window` while deposits are taken, `due`
- * once the window has closed and the pot can open, `failing` once anyone may mark it failed, `failed` once marked, with
- * every deposit coming back, and `closed` once every seat is back and the creator's rent too.
+ * once the window has closed and the pot can open, `opened` once its coin exists and the pot has bought, `failing` once
+ * anyone may mark it failed, `failed` once marked, with every deposit coming back, and `closed` once every seat is back
+ * and the creator's rent too.
  */
-export const FairOpenPhase = z.enum(["scheduled", "window", "due", "failing", "failed", "closed"]);
+export const FairOpenPhase = z.enum(["scheduled", "window", "due", "opened", "failing", "failed", "closed"]);
 export type FairOpenPhase = z.infer<typeof FairOpenPhase>;
 
 /** A level of the allocation, in the quote's raw units: each seat fills its ask or the level, whichever is less. */
@@ -38,7 +39,10 @@ export const FairOpenAdmission = z.discriminatedUnion("admitted", [
 ]);
 export type FairOpenAdmission = z.infer<typeof FairOpenAdmission>;
 
-/** A wallet's seat, read from the chain, with what it would buy with and get back if the window closed now. */
+/**
+ * A wallet's seat, read from the chain: what it buys with and gets back, if the window closed now or, once the launch
+ * has opened, what it bought.
+ */
 export const FairOpenSeat = z.object({
   address: Address,
   tier: DepositorTier,
@@ -47,8 +51,12 @@ export const FairOpenSeat = z.object({
   /** The rent the seat and the coin account hold, both returned. */
   seatRent: RawAmount,
   coinRent: RawAmount,
+  /** What its deposit spends of the rung, and its refund. */
   fill: RawAmount,
   refund: RawAmount,
+  /** Once the launch has opened: the coins it bought, in the coin's raw units, and whether they and its refund are in its wallet. */
+  coins: RawAmount.nullable(),
+  delivered: z.boolean(),
 });
 export type FairOpenSeat = z.infer<typeof FairOpenSeat>;
 
@@ -78,6 +86,22 @@ export const FairOpen = z.object({
   pot: z.object({ total: RawAmount, seats: z.number().int().nonnegative(), unverified: RawAmount, scored: RawAmount, verified: RawAmount }),
   /** If the window closed now (spec 2.1 step 11): what the pot would spend, each tier's level, and the rung it opens on. */
   allocation: z.object({ spend: RawAmount, others: FairOpenLevel, unverified: FairOpenLevel, rung: RawAmount.nullable() }),
+  /**
+   * Once it has opened (spec 2.1 step 10): its coin, revealed, and its pool; the rung the pot spent and the coins it
+   * bought, in the coin's raw units; and how many seats have their coins and refund. The coin's name and ticker come
+   * from the indexer, and are null until it has seen the open.
+   */
+  open: z
+    .object({
+      mint: Address,
+      pool: Address,
+      coin: z.object({ name: z.string(), ticker: z.string() }).nullable(),
+      spent: RawAmount,
+      coins: RawAmount,
+      coinDecimals: z.number().int().nonnegative(),
+      delivered: z.number().int().nonnegative(),
+    })
+    .nullable(),
   /** What a new seat prepays beyond its deposit, all of it returned (spec 2.1 step 9). */
   rent: z.object({ seat: RawAmount, coinAccount: RawAmount }),
   /** The wallet asked about, with its admission and its seat. */
@@ -90,7 +114,7 @@ export type FairOpen = z.infer<typeof FairOpen>;
 export const FairOpenMove = z.object({ wallet: Address, amount: RawAmount });
 export type FairOpenMove = z.infer<typeof FairOpenMove>;
 
-/** `POST /fair-opens/:launch/mark-failed` and `/refund`: the wallet that signs and pays the network fee. */
+/** `POST /fair-opens/:launch/mark-failed`, `/refund` and `/claim`: the wallet that signs and pays the network fee. */
 export const FairOpenSender = z.object({ wallet: Address });
 export type FairOpenSender = z.infer<typeof FairOpenSender>;
 
@@ -105,7 +129,7 @@ export type PreparedFairOpenTransaction = z.infer<typeof PreparedFairOpenTransac
 /** A refusal before anything is signed, with the reason the page shows. */
 export const FairOpenRefusal = z.object({
   error: z.string(),
-  code: z.enum(["invalid", "not_found", "unavailable", "not_admitted", "window", "over_cap", "no_seat", "cannot_fail", "not_failed"]),
+  code: z.enum(["invalid", "not_found", "unavailable", "not_admitted", "window", "over_cap", "no_seat", "cannot_fail", "not_failed", "not_opened", "delivered", "creators_seat"]),
 });
 export type FairOpenRefusal = z.infer<typeof FairOpenRefusal>;
 

@@ -3,7 +3,7 @@
 import type { FairOpen, LiveBatch } from "@top-pad/contract";
 import { useCallback, useEffect, useState } from "react";
 import { fairOpenLiveUrl, getFairOpen } from "@/lib/api";
-import { shortAddress, sol } from "@/lib/format";
+import { coinAmount, compactNumber, shortAddress, sol } from "@/lib/format";
 import { useLiveRoom } from "../coin/useLiveRoom";
 import { useWallet } from "../WalletProvider";
 import { DepositPanel } from "./DepositPanel";
@@ -43,6 +43,8 @@ function headline(view: FairOpen, now: number) {
       return { label: "Window closes in", value: countdown(Date.parse(view.opensAt) - now), note: `at ${clock(view.opensAt, now)} · the open is due then` };
     case "due":
       return { label: "The open is due", value: "Now", note: `If it has not run by ${clock(view.lateAt, now)}, the launch fails and every deposit comes back.` };
+    case "opened":
+      return { label: "The coin is live", value: "Opened", note: "The pot bought first, and public trading opened in the same second." };
     case "failing":
       return { label: "This Fair Open cannot open", value: "Failing", note: `It fails because ${FAILURES[view.failure!]}. Anyone can mark it failed now.` };
     case "failed":
@@ -55,8 +57,9 @@ function headline(view: FairOpen, now: number) {
 /**
  * A Fair Open's page (spec 9, screen 2): the sealed coin, the countdown, the pot filling against its cap with the line
  * past which Unverified deposits stop counting, the minimum raise, the visitor's own deposit, what the pot would buy if
- * the window closed now, and what happens at the open. Every deposit, withdrawal and failure reloads it live; on a phone
- * the deposit panel comes first.
+ * the window closed now, and what happens at the open; once it has opened, the coin revealed, what the pot bought, and
+ * the visitor's coins and refund. Every deposit, withdrawal, open, delivery and failure reloads it live; on a phone the
+ * deposit panel comes first.
  */
 export function FairOpenPage({ initial }: { initial: FairOpen }) {
   const launch = initial.launch;
@@ -105,17 +108,27 @@ export function FairOpenPage({ initial }: { initial: FairOpen }) {
   const windowOpen = view.phase === "scheduled" || view.phase === "window";
   const ended = view.phase === "failing" || view.phase === "failed" || view.phase === "closed";
   const people = view.pot.seats;
+  const open = view.open;
+  const coin = open?.coin ?? null;
+  const hash = (
+    <span className={`mono ${styles.hash}`} title="SHA-256 of the coin's name, ticker and metadata URI, which fixes its image too">
+      {view.identityHash.slice(0, 16).replace(/(.{4})/g, "$1\u{a0}").trim()}…
+    </span>
+  );
 
   return (
     <div className={styles.page}>
       <header className={`panel ${styles.head}`}>
         <div className={styles.identity}>
-          <span className={styles.sealed} aria-hidden="true">
-            ?
+          <span className={open ? styles.revealed : styles.sealed} aria-hidden="true">
+            {open ? (coin?.ticker.slice(0, 1) ?? "") : "?"}
           </span>
           <div className={styles.title}>
-            <p className="eyebrow">Fair Open</p>
-            <h1>Sealed coin</h1>
+            <p className="eyebrow">{open ? "Fair Open · opened" : "Fair Open"}</p>
+            <h1 data-testid="fair-open-coin">
+              {open ? (coin ? coin.name : "The coin is live") : "Sealed coin"}
+              {coin && <span className={`mono ${styles.ticker}`}>{coin.ticker}</span>}
+            </h1>
             <p className="muted">
               by{" "}
               {view.creator.handle ? (
@@ -127,14 +140,17 @@ export function FairOpenPage({ initial }: { initial: FairOpen }) {
           </div>
         </div>
         {view.teaser && <p className={styles.teaser}>&ldquo;{view.teaser}&rdquo;</p>}
-        <p className="note">
-          Its name, ticker and image are revealed at the open. The creator committed to them in advance: the coin created at the
-          open must match{" "}
-          <span className={`mono ${styles.hash}`} title="SHA-256 of the coin's name, ticker and metadata URI, which fixes its image too">
-            {view.identityHash.slice(0, 16).replace(/(.{4})/g, "$1\u{a0}").trim()}…
-          </span>{" "}
-          or the open fails and everyone is refunded.
-        </p>
+        {open ? (
+          <p className="note">
+            Revealed at the open, and the coin the creator committed to in advance: its name, ticker and metadata URI match {hash}, or the open could not
+            have run.
+          </p>
+        ) : (
+          <p className="note">
+            Its name, ticker and image are revealed at the open. The creator committed to them in advance: the coin created at the open must match {hash} or
+            the open fails and everyone is refunded.
+          </p>
+        )}
       </header>
 
       <div className={styles.layout}>
@@ -150,6 +166,21 @@ export function FairOpenPage({ initial }: { initial: FairOpen }) {
               <span className={`num ${styles.big}`}>{head.value}</span>
               <span className="note">{head.note}</span>
             </div>
+            {open ? (
+              <div className={`panel ${styles.figure}`}>
+                <span className="eyebrow">The pot bought with</span>
+                <span className={styles.big}>
+                  <span className="num" data-testid="fair-open-spent">
+                    {sol(open.spent, 4)}
+                  </span>
+                  <span className={styles.unit}> SOL</span>
+                </span>
+                <span className="note">
+                  of the <span className="num">{sol(view.pot.total, 2)}</span>&nbsp;SOL {people} {people === 1 ? "person" : "people"} deposited; the rest was
+                  refunded
+                </span>
+              </div>
+            ) : (
             <div className={`panel ${styles.figure}`}>
               <span className="eyebrow">In the pot</span>
               <span className={styles.big}>
@@ -170,6 +201,7 @@ export function FairOpenPage({ initial }: { initial: FairOpen }) {
                 )}
               </span>
             </div>
+            )}
             <div className={`panel ${styles.figure}`}>
               <span className="eyebrow">Minimum raise</span>
               {minRaise === 0n ? (
@@ -199,7 +231,7 @@ export function FairOpenPage({ initial }: { initial: FairOpen }) {
 
           <PotMeter view={view} />
 
-          {ended ? <AfterFailure view={view} /> : <OpenSteps view={view} at={at} />}
+          {open ? <AfterOpen view={view} /> : ended ? <AfterFailure view={view} /> : <OpenSteps view={view} at={at} />}
         </div>
       </div>
     </div>
@@ -245,8 +277,56 @@ function OpenSteps({ view, at }: { view: FairOpen; at: number }) {
       <div className="verdict verdict-info">
         <b>Devnet build</b>
         <span className="note">
-          The open itself comes in Heat&apos;s next build. Until it does, every Fair Open here fails 15 minutes after its open, and every depositor takes
-          their SOL back.
+          Heat&apos;s keeper does not send the open on its own yet: here a Fair Open opens when Heat runs it by hand, and one nobody opens fails 15 minutes
+          after its time, every depositor taking their SOL back.
+        </span>
+      </div>
+    </section>
+  );
+}
+
+/** After the open (spec 2.1 steps 10 to 12): what the pot bought and at what price, and every seat's coins and refund. */
+function AfterOpen({ view }: { view: FairOpen }) {
+  const open = view.open!;
+  const coins = Number(BigInt(open.coins)) / 10 ** open.coinDecimals;
+  const price = coins > 0 ? Number(BigInt(open.spent)) / 1e9 / coins : 0;
+  const seats = view.pot.seats;
+  const name = open.coin?.ticker ?? "coins";
+  return (
+    <section className={`panel ${styles.steps}`} aria-labelledby="after-open">
+      <h2 id="after-open" className={styles.sectionTitle}>
+        What happened at the open
+      </h2>
+      <ol className={styles.list}>
+        <li>
+          <b>One transaction created the coin, its pool and the pot&apos;s buy.</b>{" "}
+          <span className="muted">The pot bought first and paid the normal 1.25% fee. Anyone else buying in that second paid the 99% sniper tax.</span>
+        </li>
+        <li>
+          <b>
+            The pot bought <span className="num">{coinAmount(open.coins, open.coinDecimals)}</span> {name} with{" "}
+            <span className="num">{sol(open.spent, 4)}</span>&nbsp;SOL.
+          </b>{" "}
+          <span className="muted">
+            Everyone in the pot paid the same price, <span className="num">{compactNumber(price)}</span>&nbsp;SOL a coin, and got back what the pot did not
+            spend of their deposit.
+          </span>
+        </li>
+        <li>
+          <b data-testid="fair-open-delivered">
+            {open.delivered >= seats ? "Every seat has its coins and refund." : `${open.delivered} of ${seats} seats have their coins and refund.`}
+          </b>{" "}
+          <span className="muted">Heat&apos;s keeper sends them to each depositor&apos;s wallet; anyone can, and a depositor can claim their own here.</span>
+        </li>
+      </ol>
+      <a className={`btn btn-go ${styles.trade}`} href={`/coin/${open.mint}`}>
+        Trade {open.coin ? open.coin.ticker : "the coin"} on its page
+      </a>
+      <div className="verdict verdict-info">
+        <b>Devnet build</b>
+        <span className="note">
+          The Tax Share and the Creator lock come in Heat&apos;s next build. Until then, the sniper tax of this coin&apos;s first minute waits in its pool,
+          and a creator&apos;s own coins wait in the pot.
         </span>
       </div>
     </section>

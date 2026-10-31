@@ -179,7 +179,7 @@ export const getFairOpen = (launch: string, wallet?: string) =>
 const postJson = (body: unknown): RequestInit => ({ method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 
 /** A Fair Open transaction for the wallet to sign and send: a deposit, a withdrawal, the failure or a refund. */
-export const prepareFairOpen = (launch: string, action: "deposit" | "withdraw" | "mark-failed" | "refund", body: { wallet: string; amount?: string }) =>
+export const prepareFairOpen = (launch: string, action: "deposit" | "withdraw" | "mark-failed" | "refund" | "claim", body: { wallet: string; amount?: string }) =>
   call(PreparedFairOpenTransaction, `/fair-opens/${encodeURIComponent(launch)}/${action}`, postJson(body));
 
 /** A sent Fair Open transaction, settled by the API against the chain. */

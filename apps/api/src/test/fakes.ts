@@ -229,7 +229,16 @@ export function coinRecord(p: { mint: Address; pool: Address; windowClaimed: boo
  * A Fair Open's launch account as the program keeps it: a window from `depositsOpenAt`, devnet's 1.7 SOL pot, and the
  * seats `asks` counts, as [deposit in steps, tier] pairs.
  */
-export function fairOpenLaunch(p: { creator: Address; nonce: Address; depositsOpenAt: bigint; minRaise?: bigint; asks?: [number, Tier][]; failure?: number }) {
+export function fairOpenLaunch(p: {
+  creator: Address;
+  nonce: Address;
+  depositsOpenAt: bigint;
+  minRaise?: bigint;
+  asks?: [number, Tier][];
+  failure?: number;
+  /** An opened launch: its coin and what its open recorded. */
+  opened?: { mint: Address; spend: bigint; spent: bigint; coins: bigint; othersLevel: bigint; unverifiedLevel: bigint; delivered: number };
+}) {
   const counts = new Array<number>(200).fill(0);
   const unverifiedCounts = new Array<number>(10).fill(0);
   const deposits = [0n, 0n, 0n];
@@ -249,7 +258,7 @@ export function fairOpenLaunch(p: { creator: Address; nonce: Address; depositsOp
     potCap: 1_700_000_000n,
     lowestRung: lowestRung(1_700_000_000n),
     step: DEPOSIT_STEP,
-    status: p.failure === undefined ? LaunchStatus.Scheduled : LaunchStatus.Failed,
+    status: p.opened ? LaunchStatus.Opened : p.failure === undefined ? LaunchStatus.Scheduled : LaunchStatus.Failed,
     failure: p.failure ?? null,
     failedAt: 0n,
     seats: (p.asks ?? []).length,
@@ -259,15 +268,32 @@ export function fairOpenLaunch(p: { creator: Address; nonce: Address; depositsOp
     coinRent: BigInt((p.asks ?? []).length) * 2_039_280n,
     counts,
     unverifiedCounts,
-    reserved: new Uint8Array(128),
+    openRent: p.opened ? 0n : 23_517_880n,
+    mint: p.opened?.mint ?? ("11111111111111111111111111111111" as Address),
+    keeperLamports: 0n,
+    spend: p.opened?.spend ?? 0n,
+    othersLevel: p.opened?.othersLevel ?? 0n,
+    unverifiedLevel: p.opened?.unverifiedLevel ?? 0n,
+    spent: p.opened?.spent ?? 0n,
+    coins: p.opened?.coins ?? 0n,
+    refunded: 0n,
+    delivered: p.opened?.delivered ?? 0,
+    reserved: new Uint8Array(28),
     bump: 255,
     vaultBump: 254,
   };
   return { owner: FAIR_OPEN_PROGRAM_ADDRESS as string, data: new Uint8Array(getLaunchEncoder().encode(launch)) };
 }
 
-/** A seat as the program keeps it. */
-export function fairOpenSeat(p: { launch: Address; wallet: Address; person: Uint8Array; tier: Tier; deposit: bigint }) {
+/** A seat as the program keeps it; a delivered one with what it bought. */
+export function fairOpenSeat(p: {
+  launch: Address;
+  wallet: Address;
+  person: Uint8Array;
+  tier: Tier;
+  deposit: bigint;
+  delivered?: { spent: bigint; coins: bigint; refund: bigint };
+}) {
   const data = getSeatEncoder().encode({
     launch: p.launch,
     wallet: p.wallet,
@@ -275,8 +301,12 @@ export function fairOpenSeat(p: { launch: Address; wallet: Address; person: Uint
     tier: p.tier,
     cap: [10n, 50n, 200n][p.tier]! * DEPOSIT_STEP,
     deposit: p.deposit,
-    coinRent: 2_039_280n,
-    reserved: new Uint8Array(48),
+    coinRent: p.delivered ? 0n : 2_039_280n,
+    spent: p.delivered?.spent ?? 0n,
+    coins: p.delivered?.coins ?? 0n,
+    refund: p.delivered?.refund ?? 0n,
+    delivered: p.delivered !== undefined,
+    reserved: new Uint8Array(23),
     bump: 253,
   });
   return { owner: FAIR_OPEN_PROGRAM_ADDRESS as string, data: new Uint8Array(data) };

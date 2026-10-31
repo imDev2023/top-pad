@@ -414,11 +414,18 @@ export const fairOpens = pgTable(
     potCap: bigint("pot_cap", { mode: "bigint" }).notNull(),
     lowestRung: bigint("lowest_rung", { mode: "bigint" }).notNull(),
     step: bigint("step", { mode: "bigint" }).notNull(),
-    status: text("status", { enum: ["scheduled", "failed", "closed"] })
+    status: text("status", { enum: ["scheduled", "opened", "failed", "closed"] })
       .notNull()
       .default("scheduled"),
     failure: text("failure", { enum: ["below_lowest_rung", "min_raise_missed", "late"] }),
     failedAt: timestamp("failed_at", { withTimezone: true }),
+    /** From the open (spec 2.1 step 10): the coin and its pool, the rung the pot spent and the coins it bought. */
+    mint: text("mint"),
+    pool: text("pool"),
+    spent: bigint("spent", { mode: "bigint" }),
+    coins: bigint("coins", { mode: "bigint" }),
+    openedSignature: text("opened_signature"),
+    openedAt: timestamp("opened_at", { withTimezone: true }),
     teaser: text("teaser"),
     createdSignature: text("created_signature").notNull(),
     createdSlot: bigint("created_slot", { mode: "number" }).notNull(),
@@ -428,8 +435,9 @@ export const fairOpens = pgTable(
 );
 
 /**
- * Every change to a Fair Open seat (spec 2.1 step 9, 15), from the Fair Open program's events: a deposit, a withdrawal in
- * the window, or a failed launch's refund. Keyed by its transaction and its place among the transaction's seat events.
+ * Every change to a Fair Open seat (spec 2.1 steps 9, 12 and 15), from the Fair Open program's events: a deposit, a
+ * withdrawal in the window, its coins and refund delivered after the open, or a failed launch's refund. Keyed by its
+ * transaction and its place among the transaction's seat events.
  */
 export const fairOpenSeatEvents = pgTable(
   "fair_open_seat_events",
@@ -443,15 +451,18 @@ export const fairOpenSeatEvents = pgTable(
     wallet: text("wallet").notNull(),
     /** The person's pseudonym in this launch, hex. */
     person: text("person").notNull(),
-    kind: text("kind", { enum: ["deposit", "withdraw", "refund"] }).notNull(),
-    /** The tier a deposit was admitted at; none on a withdrawal or refund. */
+    kind: text("kind", { enum: ["deposit", "withdraw", "delivery", "refund"] }).notNull(),
+    /** The tier a deposit was admitted at; none on a withdrawal, delivery or refund. */
     tier: text("tier", { enum: ["unverified", "scored", "verified"] }),
-    /** What moved, in the quote's raw units: a refund's is the deposit alone, its rents apart. */
+    /** What moved, in the quote's raw units: a refund's is the deposit alone, its rents apart; a delivery's, its refund. */
     amount: bigint("amount", { mode: "bigint" }).notNull(),
-    /** What the seat held after it. */
+    /** What the seat held after it: a delivery's is the deposit it bought with. */
     deposit: bigint("deposit", { mode: "bigint" }).notNull(),
-    /** A refund's rents returned: the coin account's and the seat's. */
+    /** A refund's rents returned, the coin account's and the seat's; a delivery's, the coin account's when it existed. */
     rent: bigint("rent", { mode: "bigint" }),
+    /** A delivery's spend of the rung and the coins it bought. */
+    spent: bigint("spent", { mode: "bigint" }),
+    coins: bigint("coins", { mode: "bigint" }),
   },
   (t) => [
     primaryKey({ columns: [t.signature, t.eventIndex] }),

@@ -11,7 +11,7 @@ import { notifyPending, runJob } from "@top-pad/jobs";
 import { finishXLink, logout, me, startXLink } from "./auth";
 import { getCoin, getCoinCandles, getCoinTrades } from "./coins";
 import { getEarnings, prepareClaim, reportClaim } from "./earnings";
-import { getFairOpen, prepareDeposit, prepareMarkFailed, prepareRefund, prepareWithdrawal, reportFairOpenTransaction } from "./fairOpens";
+import { getFairOpen, prepareDeposit, prepareFairOpenClaim, prepareMarkFailed, prepareRefund, prepareWithdrawal, reportFairOpenTransaction } from "./fairOpens";
 import { indexerOf } from "./indexing";
 import { config, instantLaunchSetup, type Bindings } from "./env";
 import { sameOriginWrites, withConfig, withDb, type AppEnv } from "./http";
@@ -100,6 +100,7 @@ app.post("/fair-opens/:launch/deposit", prepareDeposit);
 app.post("/fair-opens/:launch/withdraw", prepareWithdrawal);
 app.post("/fair-opens/:launch/mark-failed", prepareMarkFailed);
 app.post("/fair-opens/:launch/refund", prepareRefund);
+app.post("/fair-opens/:launch/claim", prepareFairOpenClaim);
 
 /**
  * `GET /indexer`: how the indexer stands; asking also starts it if it is not running, as the cron does, and moves it to

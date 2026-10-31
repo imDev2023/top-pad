@@ -66,7 +66,8 @@ export const CLUSTERS: Record<Cluster, HeatCluster | null> = {
       keeper: address("GpDvDUpEC9ynHTJBt3XaZcTvBUw1HaMnU9Wwox18xfNi"),
       admission: address("2LH1VzF3rbCKdfSZDBXkbbwXbZZsbYkP8qkVRP9rgzuJ"),
     },
-    lookupTable: null,
+    // Made and frozen on 2026-10-31 (#46).
+    lookupTable: address("B2XYd5qp7wyT5Dnvg3CJh6aZxoiiAAX4QRvLLMsgxMHT"),
   },
   mainnet: {
     quote: { mint: WSOL_MINT, symbol: "SOL", decimals: 9 },

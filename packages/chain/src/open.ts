@@ -21,6 +21,7 @@ import {
   type Nonce,
   type TransactionSigner,
 } from "@solana/kit";
+import { fetchAddressLookupTable } from "@solana-program/address-lookup-table";
 import { getSetComputeUnitLimitInstruction, getSetComputeUnitPriceInstruction } from "@solana-program/compute-budget";
 import { getWithdrawNonceAccountInstruction, SYSTEM_PROGRAM_ADDRESS } from "@solana-program/system";
 import { ASSOCIATED_TOKEN_PROGRAM_ADDRESS, findAssociatedTokenPda, getCreateAssociatedTokenIdempotentInstructionAsync } from "@solana-program/token";
@@ -189,6 +190,12 @@ export type CreationLifetime =
 
 /** The addresses of Heat's shared lookup table, by the table's address. */
 export type LookupTable = { address: Address; addresses: Address[] };
+
+/** Heat's shared lookup table, read from the chain. */
+export async function fetchLookupTable(rpc: Parameters<typeof fetchAddressLookupTable>[0], address: Address): Promise<LookupTable> {
+  const { data } = await fetchAddressLookupTable(rpc, address, { commitment: "confirmed" });
+  return { address, addresses: data.addresses };
+}
 
 /** A creation transaction's message, our keeper paying, compressed through the shared lookup table. */
 export async function creationMessage(c: Creation, lifetime: CreationLifetime, table: LookupTable) {

@@ -6,6 +6,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import {
   appendTransactionMessageInstructions,
+  compressTransactionMessageUsingAddressLookupTables,
   createDefaultRpcTransport,
   createKeyPairSignerFromBytes,
   createSolanaRpcFromTransport,
@@ -20,6 +21,8 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
   signTransactionMessageWithSigners,
   type Address,
+  type AddressesByLookupTableAddress,
+  type Base64EncodedWireTransaction,
   type Instruction,
   type KeyPairSigner,
   type RpcTransport,
@@ -53,18 +56,22 @@ const patient: RpcTransport = async (request) => {
 export const rpc = createSolanaRpcFromTransport(patient);
 
 /**
- * Sends a transaction of `instructions`, `payer` paying and every signer they name signing; its signature once confirmed.
- * Confirmation is polled over HTTP, since the public endpoint's WebSocket refuses connections at times; a signed
- * transaction can be sent again safely, since it lands at most once, so a send that fails is simply retried.
+ * Sends a transaction of `instructions`, `payer` paying and every signer they name signing, its common addresses through
+ * `lookups` if given; its signature once confirmed. Confirmation is polled over HTTP, since the public endpoint's
+ * WebSocket refuses connections at times; a signed transaction can be sent again safely, since it lands at most once, so
+ * a send that fails is simply retried.
  */
-export async function send(payer: TransactionSigner, instructions: Instruction[]): Promise<string> {
+export async function send(payer: TransactionSigner, instructions: Instruction[], lookups: AddressesByLookupTableAddress = {}): Promise<string> {
   const { value: lifetime } = await rpc.getLatestBlockhash({ commitment: "confirmed" }).send();
   const transaction = await signTransactionMessageWithSigners(
-    pipe(
-      createTransactionMessage({ version: 0 }),
-      (m) => setTransactionMessageFeePayerSigner(payer, m),
-      (m) => setTransactionMessageLifetimeUsingBlockhash(lifetime, m),
-      (m) => appendTransactionMessageInstructions(instructions, m),
+    compressTransactionMessageUsingAddressLookupTables(
+      pipe(
+        createTransactionMessage({ version: 0 }),
+        (m) => setTransactionMessageFeePayerSigner(payer, m),
+        (m) => setTransactionMessageLifetimeUsingBlockhash(lifetime, m),
+        (m) => appendTransactionMessageInstructions(instructions, m),
+      ),
+      lookups,
     ),
   );
   const signature = getSignatureFromTransaction(transaction);
@@ -99,10 +106,18 @@ export const bank = () => createKeyPairSignerFromBytes(Uint8Array.from(JSON.pars
 
 /** New wallets funded in one transaction from the bank, one per amount of lamports, in order. */
 export async function fundedWallets<T extends bigint[]>(...lamports: T): Promise<{ [K in keyof T]: KeyPairSigner }> {
-  const from = await bank();
   const wallets = await Promise.all(lamports.map(() => generateKeyPairSigner()));
-  await send(from, wallets.map((w, i) => getTransferSolInstruction({ source: from, destination: w.address, amount: lamports[i]! })));
+  await fund(wallets, lamports);
   return wallets as { [K in keyof T]: KeyPairSigner };
+}
+
+/** Funds wallets from the bank, `lamports[i]` to `wallets[i]`, up to 16 a transaction. */
+export async function fund(wallets: { address: Address }[], lamports: bigint[]) {
+  const from = await bank();
+  for (let i = 0; i < wallets.length; i += 16) {
+    const transfers = wallets.slice(i, i + 16).map((w, j) => getTransferSolInstruction({ source: from, destination: w.address, amount: lamports[i + j]! }));
+    await send(from, transfers);
+  }
 }
 
 /** Sends what is left in throwaway wallets back to the bank, so a run keeps only what it spent. */
@@ -116,9 +131,8 @@ export async function sweep(...wallets: KeyPairSigner[]) {
   }
 }
 
-/** An exact-in swap on a coin's pool on the Instant config; its signature once confirmed. */
-export async function swap(trader: KeyPairSigner, mint: Address, side: "buy" | "sell", amountIn: bigint): Promise<string> {
-  const config = devnet.configs!.instant;
+/** An exact-in swap on a coin's pool, on the Instant config unless another is given; its signature once confirmed. */
+export async function swap(trader: KeyPairSigner, mint: Address, side: "buy" | "sell", amountIn: bigint, config = devnet.configs!.instant): Promise<string> {
   const pool = await dbcPoolAddress(config, mint, devnet.quote.mint);
   return send(trader, await swapInstructions({ config, pool, mint, quoteMint: devnet.quote.mint, trader, side, amountIn, minimumOut: 1n }));
 }
@@ -199,6 +213,12 @@ const customError = (err: unknown) => {
   const custom = (err as { InstructionError?: [number, { Custom?: bigint | number }] } | null)?.InstructionError?.[1]?.Custom;
   return custom !== undefined ? Number(custom) : err ? -1 : null;
 };
+
+/** The custom error a signed transaction, base64, fails with in simulation, or its other error, or null. */
+export async function simulatedWireError(wire: string) {
+  const { value } = await rpc.simulateTransaction(wire as Base64EncodedWireTransaction, { encoding: "base64", commitment: "confirmed" }).send();
+  return customError(value.err);
+}
 
 /** The custom error a simulated transaction of `instructions` fails with, `payer` paying. */
 export async function simulatedError(payer: TransactionSigner, instructions: Instruction[]): Promise<number | null> {

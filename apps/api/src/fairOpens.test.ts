@@ -8,10 +8,10 @@ import {
   type SignatureBytes,
 } from "@solana/kit";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { admissionMessage, ED25519_PROGRAM_ADDRESS, FAIR_OPEN_PROGRAM_ADDRESS, fairOpenAccounts, seatAddress, Tier } from "@top-pad/chain";
-import { DEPOSIT_DISCRIMINATOR, getDepositInstructionDataDecoder, MARK_FAILED_DISCRIMINATOR, WITHDRAW_FAILED_DISCRIMINATOR } from "@top-pad/clients/fair-open";
+import { admissionMessage, ED25519_PROGRAM_ADDRESS, FAIR_OPEN_PROGRAM_ADDRESS, fairOpenAccounts, seatAddress, seatOutcome, Tier } from "@top-pad/chain";
+import { CLAIM_DISCRIMINATOR, DEPOSIT_DISCRIMINATOR, getDepositInstructionDataDecoder, MARK_FAILED_DISCRIMINATOR, WITHDRAW_FAILED_DISCRIMINATOR } from "@top-pad/clients/fair-open";
 import { FairOpen, FairOpenRefusal, PreparedFairOpenTransaction } from "@top-pad/contract";
-import { admissions, createDb, creators, creatorWallets, fairOpens, type Db } from "@top-pad/db";
+import { admissions, createDb, creators, creatorWallets, fairOpens, pools, type Db } from "@top-pad/db";
 import { createTestDatabase } from "@top-pad/db/testing";
 import { app } from "./index";
 import { decode, Fakes, fairOpenLaunch, fairOpenSeat, ORIGINS, testBindings, testContext, testKeypair } from "./test/fakes";
@@ -47,7 +47,7 @@ beforeEach(async () => {
   fakes = new Fakes();
   indexedNow = [];
   vi.stubGlobal("fetch", fakes.fetch);
-  for (const table of [admissions, fairOpens, creatorWallets]) await db.delete(table);
+  for (const table of [admissions, fairOpens, creatorWallets, pools]) await db.delete(table);
 });
 afterEach(() => vi.unstubAllGlobals());
 
@@ -71,11 +71,13 @@ const nowSeconds = () => BigInt(Math.floor(Date.now() / 1000));
 const STEP = 10_000_000n;
 
 /** A launch on chain whose window opened `ago` seconds ago, with the seats `asks` counts. */
-async function launchOnChain(o: { ago: bigint; minRaise?: bigint; asks?: [number, Tier][]; failure?: number; creator?: Address } = { ago: 60n }) {
+async function launchOnChain(
+  o: { ago: bigint; minRaise?: bigint; asks?: [number, Tier][]; failure?: number; creator?: Address; opened?: Parameters<typeof fairOpenLaunch>[0]["opened"] } = { ago: 60n },
+) {
   const nonce = random();
   const creator = o.creator ?? random();
   const { launch } = await fairOpenAccounts(nonce);
-  fakes.accounts.set(launch, fairOpenLaunch({ creator, nonce, depositsOpenAt: nowSeconds() - o.ago, minRaise: o.minRaise, asks: o.asks, failure: o.failure }));
+  fakes.accounts.set(launch, fairOpenLaunch({ creator, nonce, depositsOpenAt: nowSeconds() - o.ago, minRaise: o.minRaise, asks: o.asks, failure: o.failure, opened: o.opened }));
   return { launch, creator };
 }
 
@@ -138,7 +140,7 @@ describe("a Fair Open's page", () => {
       wallet,
       admission: { admitted: true, tier: "unverified", cap: "100000000", via: "none", handle: null },
       // 2.1 SOL asked of a 1.7 SOL pot: the Unverified seat's 0.1 SOL fills, within a quarter of the spend.
-      seat: { address: seat, tier: "unverified", cap: "100000000", deposit: "100000000", seatRent: "2000000", coinRent: "2039280", fill: "100000000", refund: "0" },
+      seat: { address: seat, tier: "unverified", cap: "100000000", deposit: "100000000", seatRent: "2000000", coinRent: "2039280", fill: "100000000", refund: "0", coins: null, delivered: false },
     });
   });
 
@@ -300,6 +302,65 @@ describe("the failure path", () => {
     const { message } = await prepared(await post(`/fair-opens/${failed.launch}/refund`, { wallet }));
     expect(message.instructions.at(-1)!.data!.slice(0, 8)).toEqual(WITHDRAW_FAILED_DISCRIMINATOR);
     expect(await refusal(await post(`/fair-opens/${failed.launch}/refund`, { wallet: random() }))).toMatchObject({ status: 404, code: "no_seat" });
+  });
+});
+
+describe("an opened launch", () => {
+  // 2.1 SOL asked of a 1.7 SOL pot that opened on its full rung for 300 million coins.
+  const opened = (mint: Address) => ({ mint, spend: 1_700_000_000n, spent: 1_700_000_000n, coins: 300_000_000_000_000n, othersLevel: 1_600_000_000n, unverifiedLevel: 1_600_000_000n, delivered: 1 });
+  const asks: [number, Tier][] = [[200, Tier.Verified], [10, Tier.Unverified]];
+
+  it("shows the coin it opened and what the visitor's seat bought", async () => {
+    const mint = random();
+    const { launch } = await launchOnChain({ ago: 700n, asks, opened: opened(mint) });
+    const wallet = random();
+    const person = crypto.getRandomValues(new Uint8Array(32));
+    const seat = await seatAddress(launch, person);
+    fakes.accounts.set(seat, fairOpenSeat({ launch, wallet, person, tier: Tier.Unverified, deposit: 10n * STEP }));
+    const before = await view(launch, wallet);
+    expect(before.phase).toBe("opened");
+    // The indexer has not seen the open yet: the coin is known by its address alone.
+    expect(before.open).toMatchObject({ mint, spent: "1700000000", coins: "300000000000000", coinDecimals: 6, delivered: 1, coin: null });
+    const o = seatOutcome(opened(mint), Tier.Unverified, 10n * STEP);
+    expect(before.you!.seat).toMatchObject({ fill: `${o.spent}`, refund: `${o.refund}`, coins: `${o.coins}`, delivered: false });
+
+    await db.insert(pools).values({
+      pool: before.open!.pool,
+      mint,
+      config: "rPqMj6mwJp9qnZBMeawF8s2iC74EkhpbUSvhWd9XTnC",
+      creator: random(),
+      name: "Opened Coin",
+      ticker: "OPEN",
+      uri: "https://turbo-gateway.com/opened",
+      activatedAt: new Date(),
+      createdSignature: "sig",
+      createdSlot: 1,
+      createdAt: new Date(),
+      sqrtPrice: "1",
+      quoteReserve: 0n,
+    });
+    expect((await view(launch, wallet)).open!.coin).toEqual({ name: "Opened Coin", ticker: "OPEN" });
+  });
+
+  it("builds a seat's own claim, and refuses one before the open, the creator's, a delivered one and a wallet with no seat", async () => {
+    const mint = random();
+    const { launch, creator } = await launchOnChain({ ago: 700n, asks, opened: opened(mint) });
+    const wallet = random();
+    const person = crypto.getRandomValues(new Uint8Array(32));
+    fakes.accounts.set(await seatAddress(launch, person), fairOpenSeat({ launch, wallet, person, tier: Tier.Unverified, deposit: 10n * STEP }));
+    const claim = (launchAddress: string, from: string) => post(`/fair-opens/${launchAddress}/claim`, { wallet: from });
+    const { message } = await prepared(await claim(launch, wallet));
+    const ours = message.instructions.filter((ix) => ix.programAddress === FAIR_OPEN_PROGRAM_ADDRESS);
+    expect(ours.map((ix) => Array.from(ix.data!.slice(0, 8)))).toEqual([Array.from(CLAIM_DISCRIMINATOR)]);
+
+    expect(await refusal(await claim(launch, creator))).toMatchObject({ status: 409, code: "creators_seat" });
+    expect(await refusal(await claim(launch, random()))).toMatchObject({ status: 404, code: "no_seat" });
+    const delivered = random();
+    const theirs = crypto.getRandomValues(new Uint8Array(32));
+    fakes.accounts.set(await seatAddress(launch, theirs), fairOpenSeat({ launch, wallet: delivered, person: theirs, tier: Tier.Verified, deposit: 200n * STEP, delivered: { spent: 1n, coins: 1n, refund: 1n } }));
+    expect(await refusal(await claim(launch, delivered))).toMatchObject({ status: 409, code: "delivered" });
+    const { launch: scheduled } = await launchOnChain({ ago: 60n, asks });
+    expect(await refusal(await claim(scheduled, wallet))).toMatchObject({ status: 409, code: "not_opened" });
   });
 });
 

@@ -1,8 +1,9 @@
-// A Fair Open's page and its transactions (spec 2.1 steps 9 and 15; spec 9, screen 2). The launch is read from its
+// A Fair Open's page and its transactions (spec 2.1 steps 9 to 12 and 15; spec 9, screen 2). The launch is read from its
 // account, the one place its pot is always right, with what the pot would buy if the window closed now by the
-// reference calculation the program's own must match (spec 2.1 step 11). Deposits, withdrawals, the failure and the
-// refund are built here for the wallet to sign and send, a deposit carrying its admission; none of it is needed to get
-// a deposit back, which `@top-pad/chain` builds from the chain alone (tests/devnet shows it with no Heat server).
+// reference calculation the program's own must match (spec 2.1 step 11), and once it has opened, what each seat bought.
+// Deposits, withdrawals, a seat's claim after the open, the failure and the refund are built here for the wallet to sign
+// and send, a deposit carrying its admission; none of it is needed to get a deposit or coins out, which `@top-pad/chain`
+// builds from the chain alone (tests/devnet shows it with no Heat server).
 import {
   appendTransactionMessageInstructions,
   compileTransaction,
@@ -24,6 +25,9 @@ import { and, eq, sql } from "drizzle-orm";
 import type { Context } from "hono";
 import {
   allocate,
+  claimInstructions,
+  COIN_DECIMALS,
+  dbcPoolAddress,
   depositInstructions,
   FAIR_OPEN_PROGRAM_ADDRESS,
   fairOpenPhase,
@@ -31,13 +35,14 @@ import {
   markFailedInstructions,
   rungAtOrBelow,
   SEAT_LAYOUT,
+  seatOutcome,
   spentOf,
   Tier,
   tierCap,
   withdrawFailedInstructions,
   withdrawInstructions,
 } from "@top-pad/chain";
-import { fetchMaybeLaunch, getSeatDecoder, getSeatSize, type Launch, type Seat } from "@top-pad/clients/fair-open";
+import { fetchMaybeLaunch, getSeatDecoder, getSeatSize, LaunchStatus, type Launch, type Seat } from "@top-pad/clients/fair-open";
 import {
   Address,
   FairOpenMove,
@@ -51,7 +56,7 @@ import {
   type FairOpenSeat,
   type PreparedFairOpenTransaction,
 } from "@top-pad/contract";
-import { creators, creatorWallets, fairOpens } from "@top-pad/db";
+import { creators, creatorWallets, fairOpens, pools } from "@top-pad/db";
 import { admit, AdmissionRefused, loadAdmissionKey, personOf, refusalOf, tierName } from "./admission";
 import { sessionCreator } from "./auth";
 import { explorerUrl, fairOpenSetup } from "./env";
@@ -175,7 +180,9 @@ export async function getFairOpen(c: Context<AppEnv>) {
       : { admitted: true, tier: person.tier, cap: `${tierCap(tier, terms.step)}`, via: person.via, handle: person.handle };
     let seat: FairOpenSeat | null = null;
     if (found) {
-      const spent = rung === null ? 0n : spentOf(a, rung, found.seat.tier, found.seat.deposit);
+      // Once opened, what the seat bought, by the same reference the program delivers it by; before, what it would.
+      const opened = launch?.status === LaunchStatus.Opened ? seatOutcome(launch, found.seat.tier, found.seat.deposit) : null;
+      const spent = opened?.spent ?? (rung === null ? 0n : spentOf(a, rung, found.seat.tier, found.seat.deposit));
       seat = {
         address: found.address,
         tier: tierName(found.seat.tier),
@@ -185,6 +192,8 @@ export async function getFairOpen(c: Context<AppEnv>) {
         coinRent: `${found.seat.coinRent}`,
         fill: `${spent}`,
         refund: `${found.seat.deposit - spent}`,
+        coins: opened ? `${opened.coins}` : null,
+        delivered: found.seat.delivered,
       };
     }
     you = { wallet, admission, seat };
@@ -219,6 +228,18 @@ export async function getFairOpen(c: Context<AppEnv>) {
       verified: `${terms.verifiedDeposits}`,
     },
     allocation: { spend: `${a.spend}`, others: level(a.others), unverified: level(a.unverified), rung: rung === null ? null : `${rung}` },
+    open:
+      launch?.status === LaunchStatus.Opened
+        ? {
+            mint: launch.mint,
+            pool: await dbcPoolAddress(launch.dbcConfig, launch.mint, launch.quoteMint),
+            coin: (await db.select({ name: pools.name, ticker: pools.ticker }).from(pools).where(eq(pools.mint, launch.mint)))[0] ?? null,
+            spent: `${launch.spent}`,
+            coins: `${launch.coins}`,
+            coinDecimals: COIN_DECIMALS,
+            delivered: launch.delivered,
+          }
+        : null,
     rent: { seat: `${rent.seat}`, coinAccount: `${rent.coinAccount}` },
     you,
     explorer: explorerUrl(cfg, "address", address),
@@ -371,6 +392,29 @@ export async function prepareRefund(c: Context<AppEnv>) {
   const seat = await seatOfWallet(rpc, address, wallet);
   if (!seat) return refuse(c, 404, { error: "This wallet holds no seat in this Fair Open.", code: "no_seat" });
   return c.json(await prepared(rpc, wallet, await withdrawFailedInstructions({ launch: address, seat: seat.address, wallet, computeUnitPrice: cfg.computeUnitPrice })));
+}
+
+/**
+ * `POST /fair-opens/:launch/claim`: once the launch has opened, the wallet's seat takes its coins and refund itself,
+ * into the wallet's own coin account, if no push has delivered them yet. The creator's coins go only into the Creator
+ * lock.
+ */
+export async function prepareFairOpenClaim(c: Context<AppEnv>) {
+  const { cfg } = c.var;
+  const sender = FairOpenSender.safeParse(await c.req.json().catch(() => null));
+  if (!sender.success) return refuse(c, 400, { error: "Say which wallet claims.", code: "invalid" });
+  const rpc = createSolanaRpc(cfg.rpcUrl);
+  const found = await launchFor(c, rpc);
+  if ("refusal" in found) return found.refusal;
+  const { address, launch } = found;
+  if (launch.status !== LaunchStatus.Opened) return refuse(c, 409, { error: "This Fair Open has not opened: there is nothing to claim yet.", code: "not_opened" });
+  const wallet = sender.data.wallet as KitAddress;
+  if (wallet === launch.creator) return refuse(c, 409, { error: "The creator's coins go only into the Creator lock.", code: "creators_seat" });
+  const seat = await seatOfWallet(rpc, address, wallet);
+  if (!seat) return refuse(c, 404, { error: "This wallet holds no seat in this Fair Open.", code: "no_seat" });
+  if (seat.seat.delivered) return refuse(c, 409, { error: "Your coins and refund are in your wallet already.", code: "delivered" });
+  const instructions = await claimInstructions({ launch: address, mint: launch.mint, seat: seat.address, wallet: createNoopSigner(wallet), computeUnitPrice: cfg.computeUnitPrice });
+  return c.json(await prepared(rpc, wallet, instructions));
 }
 
 /**

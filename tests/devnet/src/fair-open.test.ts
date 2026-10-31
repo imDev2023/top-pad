@@ -2,30 +2,46 @@
 // build, with no Heat server: launches scheduled by script, deposits admitted with the devnet admission key and sent
 // straight to the program, and every refund built from the chain alone. The program refuses on chain a second wallet of
 // a seated person, a deposit over its cap or off the step, and one without a valid, unexpired admission; it fails a
-// launch at once when its pot misses the minimum raise, and 15 minutes after a missed open whatever the pot holds; and
-// each depositor takes back their deposit and both rents to the lamport. It spends about 0.05 devnet SOL in fees from
+// launch at once when its pot misses the minimum raise, and 15 minutes after a missed open whatever the pot holds, when
+// it also refuses any rung (#46); and each depositor takes back their deposit and both rents to the lamport, the
+// creator its rent, and our keeper closes the nonce. It spends about 0.05 devnet SOL in fees from
 // Heat's devnet bank (the deposits and rents come back) and signs with the keeper and admission keys, which, like the
 // bank, only this Mac holds (~/.config/top-pad/devnet); without them it is skipped.
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { generateKeyPair, getAddressFromPublicKey, type Address, type Instruction, type KeyPairSigner } from "@solana/kit";
+import { generateKeyPair, generateKeyPairSigner, getAddressFromPublicKey, type Address, type Instruction, type KeyPairSigner } from "@solana/kit";
 import { describe, expect, it } from "vitest";
 import {
   admissionMessage,
+  allocate,
   closeLaunchInstructions,
   depositInstructions,
   ED25519_PROGRAM_ADDRESS,
   ed25519Instruction,
   FAIR_OPEN_PROGRAM_ADDRESS,
   markFailedInstructions,
+  rungAtOrBelow,
   signAdmission,
   Tier,
 } from "@top-pad/chain";
-import { fetchLaunch, fetchMaybeLaunch, Failure, LaunchStatus } from "@top-pad/clients/fair-open";
+import { FAIR_OPEN_ERROR__TOO_LATE, fetchLaunch, fetchMaybeLaunch, Failure, LaunchStatus } from "@top-pad/clients/fair-open";
 import { decodeTransaction } from "@top-pad/indexer";
-import { bank, chainTime, devnet, fundedWallets, landed, programCompute, rpc, send, sendRefused, simulatedError, sweep } from "./devnet";
-import { admitted, deposit, markFailed, newPerson, recoverDeposits, refund, scheduleFairOpen, seatOf, withdraw, type ScheduledFairOpen } from "./fairOpen";
+import { bank, chainTime, devnet, fundedWallets, landed, programCompute, rpc, send, sendRefused, simulatedError, simulatedWireError, sweep } from "./devnet";
+import {
+  admitted,
+  creationSignedNow,
+  deposit,
+  keeper,
+  markFailed,
+  newPerson,
+  recoverDeposits,
+  refund,
+  scheduleFairOpen,
+  seatOf,
+  withdraw,
+  type ScheduledFairOpen,
+} from "./fairOpen";
 
 const keys = ["keeper.json", "admission.json", "bank.json"].every((name) => existsSync(join(homedir(), ".config/top-pad/devnet", name)));
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -171,10 +187,24 @@ describe.skipIf(!keys).concurrent("a Fair Open on devnet, with no Heat server", 
         await deposit(launch.launch, dana, 10n * STEP, await admitted(launch.launch, dana.address, newPerson(), Tier.Scored));
         const { data } = await fetchLaunch(rpc, launch.launch);
 
-        // The pot could open, so nobody may fail it until 15 minutes after its scheduled time.
+        // The pot could open, so nobody may fail it until 15 minutes after its scheduled time; from then on no rung opens
+        // it either (#46), even one the creator signs at that moment.
         await untilChainTime(data.opensAt);
         expect(await simulatedError(stranger, await markFailedInstructions({ launch: launch.launch, computeUnitPrice: 0n }))).toBe(CAN_STILL_OPEN);
         await untilChainTime(data.opensAt + 900n);
+        const { spend } = allocate(data.counts, data.unverifiedCounts, data.step, data.potCap);
+        const late = await creationSignedNow({
+          launch: launch.launch,
+          dbcConfig: devnet.configs!.fairOpen,
+          quoteMint: devnet.quote.mint,
+          creator,
+          keeper: await keeper(),
+          mint: await generateKeyPairSigner(),
+          coin: launch.coin,
+          rung: rungAtOrBelow(data.potCap, spend)!,
+          computeUnitPrice: 0n,
+        });
+        expect(await simulatedWireError(late)).toBe(FAIR_OPEN_ERROR__TOO_LATE);
         await markFailed(launch.launch, stranger);
         expect((await fetchLaunch(rpc, launch.launch)).data.failure).toEqual({ __option: "Some", value: Failure.Late });
 

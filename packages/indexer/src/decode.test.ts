@@ -114,7 +114,7 @@ describe("decoding a transaction", () => {
 
   it("finds a seat's deposits and withdrawal, each with what it holds after", () => {
     const seat = (name: string) => decodeTransaction(fixture(name), HEAT).seatEvents;
-    const common = { eventIndex: 0, launch: E2E_LAUNCH, wallet: DEPOSITOR, person: PERSON, rent: null, seatClosed: false };
+    const common = { eventIndex: 0, launch: E2E_LAUNCH, wallet: DEPOSITOR, person: PERSON, rent: null, spent: null, coins: null, seatClosed: false };
     expect(seat("fair-open-deposit")).toEqual([{ ...common, kind: "deposit", tier: "unverified", amount: 50_000_000n, deposit: 50_000_000n, seatOpened: true }]);
     expect(seat("fair-open-top-up")).toEqual([{ ...common, kind: "deposit", tier: "unverified", amount: 30_000_000n, deposit: 80_000_000n, seatOpened: false }]);
     expect(seat("fair-open-withdraw")).toEqual([{ ...common, kind: "withdraw", tier: null, amount: 20_000_000n, deposit: 60_000_000n, seatOpened: false }]);
@@ -124,7 +124,7 @@ describe("decoding a transaction", () => {
     const failed = decodeTransaction(fixture("fair-open-failed-with-refund"), HEAT);
     expect(failed.fairOpenEnds).toEqual([{ launch: E2E_LAUNCH, kind: "failed", failure: "min_raise_missed" }]);
     // The deposit back, and both rents: the coin account's 1,488,440 lamports and the seat's 1,554,480 on devnet.
-    const refund = { eventIndex: 0, launch: E2E_LAUNCH, kind: "refund", tier: null, deposit: 0n, rent: 3_042_920n, seatOpened: false, seatClosed: true };
+    const refund = { eventIndex: 0, launch: E2E_LAUNCH, kind: "refund", tier: null, deposit: 0n, rent: 3_042_920n, spent: null, coins: null, seatOpened: false, seatClosed: true };
     expect(failed.seatEvents).toEqual([{ ...refund, wallet: DEPOSITOR, person: PERSON, amount: 360_000_000n }]);
     expect(decodeTransaction(fixture("fair-open-refund"), HEAT).seatEvents).toEqual([
       { ...refund, wallet: "EfPnzdQ5FKXMEwFuAhRU3QRNjvAcGG3stRP6KG4hNZRy", person: "1b8c0a794baa0825101492343ce0fd73bb10a245aefc3475c5addbf074ae19d8", amount: 100_000_000n },
@@ -137,7 +137,7 @@ describe("decoding a transaction", () => {
   });
 
   it("holds nothing on configs that are not Heat's, or when the transaction failed", () => {
-    const none = { pools: [], coins: [], swaps: [], windowClaims: [], feeClaims: [], fairOpens: [], seatEvents: [], fairOpenEnds: [] };
+    const none = { pools: [], coins: [], swaps: [], windowClaims: [], feeClaims: [], fairOpens: [], fairOpenOpens: [], seatEvents: [], fairOpenEnds: [] };
     for (const name of ["launch-with-creator-buy", "window-claim", "creator-claim"]) expect(decodeTransaction(fixture(name), new Set())).toEqual(none);
     const failed = fixture("launch-with-creator-buy");
     failed.meta!.err = { InstructionError: [4, { Custom: 6000 }] };

@@ -29,12 +29,16 @@ import {
   LAUNCH_CLOSED_EVENT_DISCRIMINATOR,
   LAUNCH_CREATED_EVENT_DISCRIMINATOR,
   LAUNCH_FAILED_EVENT_DISCRIMINATOR,
+  LAUNCH_OPENED_EVENT_DISCRIMINATOR,
   parseDepositedEvent,
   parseFailedDepositReturnedEvent,
   parseLaunchClosedEvent,
   parseLaunchCreatedEvent,
   parseLaunchFailedEvent,
+  parseLaunchOpenedEvent,
+  parseSeatDeliveredEvent,
   parseWithdrawnEvent,
+  SEAT_DELIVERED_EVENT_DISCRIMINATOR,
   WITHDRAWN_EVENT_DISCRIMINATOR,
 } from "@top-pad/clients/fair-open";
 
@@ -135,7 +139,21 @@ export type FairOpenCreated = {
 const TIERS = ["unverified", "scored", "verified"] as const;
 export type DepositorTier = (typeof TIERS)[number];
 
-/** A change to a Fair Open seat: a deposit, a withdrawal in the window, or a failed launch's refund. */
+/** A Fair Open opened (spec 2.1 step 10): its coin and pool created, and what the pot spent and bought. */
+export type FairOpenOpened = {
+  launch: string;
+  creator: string;
+  mint: string;
+  pool: string;
+  /** What the fills added up to, the rung the pot spent, and the coins it bought; raw units. */
+  spend: bigint;
+  spent: bigint;
+  coins: bigint;
+  /** The pot's own fee, split 50/50 rather than joining the Tax Share. */
+  potFee: bigint;
+};
+
+/** A change to a Fair Open seat: a deposit, a withdrawal in the window, its delivery after the open, or a refund. */
 export type SeatEvent = {
   /** The event's place among its transaction's seat events, in execution order. */
   eventIndex: number;
@@ -143,13 +161,17 @@ export type SeatEvent = {
   wallet: string;
   /** The person's pseudonym in the launch, hex. */
   person: string;
-  kind: "deposit" | "withdraw" | "refund";
+  kind: "deposit" | "withdraw" | "delivery" | "refund";
   tier: DepositorTier | null;
+  /** What moved: a delivery's refund. */
   amount: bigint;
-  /** What the seat held after it. */
+  /** What the seat held after it: a delivery's deposit. */
   deposit: bigint;
-  /** A refund's rents returned, the coin account's and the seat's; null otherwise. */
+  /** A refund's rents returned, the coin account's and the seat's; a delivery's coin account rent, if returned. */
   rent: bigint | null;
+  /** A delivery's spend of the rung and the coins it bought; null otherwise. */
+  spent: bigint | null;
+  coins: bigint | null;
   /** Whether a deposit took the seat, or a withdrawal or refund closed it. */
   seatOpened: boolean;
   seatClosed: boolean;
@@ -168,6 +190,7 @@ export type Decoded = {
   windowClaims: WindowClaimed[];
   feeClaims: FeesClaimed[];
   fairOpens: FairOpenCreated[];
+  fairOpenOpens: FairOpenOpened[];
   seatEvents: SeatEvent[];
   fairOpenEnds: FairOpenEnded[];
 };
@@ -207,7 +230,17 @@ function executionOrder(tx: RawTransaction) {
  * event, so a transaction is never indexed half right.
  */
 export function decodeTransaction(tx: RawTransaction, configs: ReadonlySet<string>): Decoded {
-  const decoded: Decoded = { pools: [], coins: [], swaps: [], windowClaims: [], feeClaims: [], fairOpens: [], seatEvents: [], fairOpenEnds: [] };
+  const decoded: Decoded = {
+    pools: [],
+    coins: [],
+    swaps: [],
+    windowClaims: [],
+    feeClaims: [],
+    fairOpens: [],
+    fairOpenOpens: [],
+    seatEvents: [],
+    fairOpenEnds: [],
+  };
   if (!tx.meta || tx.meta.err) return decoded;
   const keys = [...tx.transaction.message.accountKeys, ...(tx.meta.loadedAddresses?.writable ?? []), ...(tx.meta.loadedAddresses?.readonly ?? [])];
   const key = (index: number) => {
@@ -351,6 +384,8 @@ function decodeFairOpenEvent(event: ReadonlyUint8Array, decoded: Decoded) {
       amount: e.amount,
       deposit: e.deposit,
       rent: null,
+      spent: null,
+      coins: null,
       seatOpened: e.newSeat,
       seatClosed: false,
     });
@@ -365,6 +400,8 @@ function decodeFairOpenEvent(event: ReadonlyUint8Array, decoded: Decoded) {
       amount: e.amount,
       deposit: e.deposit,
       rent: null,
+      spent: null,
+      coins: null,
       seatOpened: false,
       seatClosed: e.closed,
     });
@@ -379,8 +416,38 @@ function decodeFairOpenEvent(event: ReadonlyUint8Array, decoded: Decoded) {
       amount: e.deposit,
       deposit: 0n,
       rent: e.coinRent + e.seatRent,
+      spent: null,
+      coins: null,
       seatOpened: false,
       seatClosed: true,
+    });
+  } else if (startsWith(event, LAUNCH_OPENED_EVENT_DISCRIMINATOR)) {
+    const e = parseLaunchOpenedEvent(event);
+    decoded.fairOpenOpens.push({
+      launch: e.launch,
+      creator: e.creator,
+      mint: e.mint,
+      pool: e.pool,
+      spend: e.spend,
+      spent: e.spent,
+      coins: e.coins,
+      potFee: e.potFee,
+    });
+  } else if (startsWith(event, SEAT_DELIVERED_EVENT_DISCRIMINATOR)) {
+    const e = parseSeatDeliveredEvent(event);
+    seat({
+      launch: e.launch,
+      wallet: e.wallet,
+      person: hex(e.person),
+      kind: "delivery",
+      tier: null,
+      amount: e.refund,
+      deposit: e.deposit,
+      rent: e.coinRent,
+      spent: e.spent,
+      coins: e.coins,
+      seatOpened: false,
+      seatClosed: false,
     });
   } else if (startsWith(event, LAUNCH_FAILED_EVENT_DISCRIMINATOR)) {
     const e = parseLaunchFailedEvent(event);

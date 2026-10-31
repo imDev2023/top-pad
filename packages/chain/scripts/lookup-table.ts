@@ -8,12 +8,14 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
+  address,
   appendTransactionMessageInstructions,
   assertIsTransactionWithBlockhashLifetime,
   createKeyPairSignerFromBytes,
   createSolanaRpc,
   createSolanaRpcSubscriptions,
   createTransactionMessage,
+  fetchEncodedAccount,
   getBase64EncodedWireTransaction,
   getSignatureFromTransaction,
   pipe,
@@ -79,7 +81,11 @@ async function run(what: string, payer: KeyPairSigner, instructions: Instruction
 }
 
 const addresses = await fairOpenLookupTableAddresses(heat);
-const recentSlot = await rpc.getSlot({ commitment: "finalized" }).send();
+// A table's address commits to a recent slot the program finds in the SlotHashes sysvar, newest first: one a few entries
+// back (each a slot and a hash, after the list's length), so a node of the endpoint that trails the others has it too.
+const slotHashes = await fetchEncodedAccount(rpc, address("SysvarS1otHashes111111111111111111111111111"), { commitment: "confirmed" });
+if (!slotHashes.exists) throw new Error("no SlotHashes sysvar");
+const recentSlot = new DataView(slotHashes.data.buffer, slotHashes.data.byteOffset).getBigUint64(8 + 40 * 8, true);
 const [table] = await findAddressLookupTablePda({ authority: bank.address, recentSlot });
 console.log(`The lookup table ${table}, holding ${addresses.length} addresses:`);
 for (const a of addresses) console.log(`  ${a}`);

@@ -1,5 +1,6 @@
 // What the indexer writes for Heat (spec 10.2): the pools on Heat's configs, the coins the fee program registers, every
-// trade with its candles, the fee program's claims, and each Fair Open with its seats' deposits, withdrawals and refunds.
+// trade with its candles, the fee program's claims, and each Fair Open with its open and its seats' deposits,
+// withdrawals, deliveries and refunds.
 // Each transaction is written in one database transaction that first claims its signature, so the live source, the
 // browser's fast path and reconciliation can all hand it in and it is written once.
 import { and, eq, inArray, sql } from "drizzle-orm";
@@ -22,6 +23,7 @@ import {
   type CoinRegistered,
   type FairOpenCreated,
   type FairOpenEnded,
+  type FairOpenOpened,
   type FeesClaimed,
   type PoolCreated,
   type RawTransaction,
@@ -42,6 +44,7 @@ export type Indexed = {
   windowClaims: WindowClaimed[];
   feeClaims: FeesClaimed[];
   fairOpens: FairOpenCreated[];
+  fairOpenOpens: FairOpenOpened[];
   seatEvents: SeatEvent[];
   fairOpenEnds: FairOpenEnded[];
 };
@@ -189,6 +192,15 @@ export function heatHandler({ heat, blockIndexOf, onIndexed }: HeatHandlerOption
           })
           .onConflictDoNothing();
       }
+      // The open, in the creation transaction that made the coin and its pool, which were written above.
+      for (const o of decoded.fairOpenOpens) {
+        const [found] = await t
+          .update(fairOpens)
+          .set({ status: "opened", mint: o.mint, pool: o.pool, spent: o.spent, coins: o.coins, openedSignature: signature, openedAt: blockTime })
+          .where(eq(fairOpens.launch, o.launch))
+          .returning({ launch: fairOpens.launch });
+        if (!found) throw new Error(`Fair Open ${o.launch} opened, and the indexer has not seen it created`);
+      }
       for (const e of decoded.seatEvents) {
         await t
           .insert(fairOpenSeatEvents)
@@ -205,6 +217,8 @@ export function heatHandler({ heat, blockIndexOf, onIndexed }: HeatHandlerOption
             amount: e.amount,
             deposit: e.deposit,
             rent: e.rent,
+            spent: e.spent,
+            coins: e.coins,
           })
           .onConflictDoNothing();
       }
@@ -232,6 +246,7 @@ export function heatHandler({ heat, blockIndexOf, onIndexed }: HeatHandlerOption
         windowClaims: decoded.windowClaims,
         feeClaims: decoded.feeClaims,
         fairOpens: decoded.fairOpens,
+        fairOpenOpens: decoded.fairOpenOpens,
         seatEvents: decoded.seatEvents,
         fairOpenEnds: decoded.fairOpenEnds,
       });
@@ -242,7 +257,7 @@ export function heatHandler({ heat, blockIndexOf, onIndexed }: HeatHandlerOption
     if (added.length) result.trades = added.length;
     const claims = decoded.windowClaims.length + decoded.feeClaims.length;
     if (claims) result.claims = claims;
-    const fairOpen = decoded.fairOpens.length + decoded.seatEvents.length + decoded.fairOpenEnds.length;
+    const fairOpen = decoded.fairOpens.length + decoded.fairOpenOpens.length + decoded.seatEvents.length + decoded.fairOpenEnds.length;
     if (fairOpen) result.fairOpen = fairOpen;
     return result;
   };
