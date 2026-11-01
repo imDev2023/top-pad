@@ -105,7 +105,8 @@ export function FairOpenPage({ initial }: { initial: FairOpen }) {
   const at = now + offsetMs;
   const head = headline(view, at);
   const minRaise = BigInt(view.minRaise);
-  const reached = BigInt(view.allocation.spend) >= minRaise;
+  // A launch that opened reached its minimum raise, whatever its counts say once its account has closed.
+  const reached = view.open !== null || BigInt(view.allocation.spend) >= minRaise;
   const windowOpen = view.phase === "scheduled" || view.phase === "window";
   const ended = view.phase === "failing" || view.phase === "failed" || view.phase === "closed";
   const people = view.pot.seats;
