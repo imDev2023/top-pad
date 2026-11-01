@@ -6,6 +6,7 @@ import { expect, test } from "@playwright/test";
 import type { Address } from "@solana/kit";
 import { Tier } from "@top-pad/chain";
 import { fetchLaunch, LaunchStatus } from "@top-pad/clients/fair-open";
+import { FairOpen } from "@top-pad/contract";
 import { chainTime, coinBalance, fundedWallets, rpc, sweep } from "@top-pad/tests-devnet/devnet";
 import { admitted, deposit, newPerson, sellAll } from "@top-pad/tests-devnet/fair-open";
 import { coinImage, newHandle, newTicker, pageErrors, snap } from "./steps";
@@ -80,10 +81,12 @@ test("a creator whose wallet cannot sign a batch schedules a Fair Open and signs
     expect(errors).toEqual([]);
   } finally {
     if (launch) {
-      const account = await fetchLaunch(rpc, launch).catch(() => null);
-      if (account?.data.status === LaunchStatus.Opened) {
-        await untilChainTime(account.data.opensAt + 75n);
-        await sellAll(other, account.data.mint);
+      // The coin, once opened, outlives its launch account, which the keeper closes once its Tax Share is paid.
+      const found = await fetch(`${TARGET.api}/fair-opens/${launch}`).catch(() => null);
+      const row = found?.ok ? FairOpen.parse(await found.json()) : null;
+      if (row?.open) {
+        await untilChainTime(BigInt(Math.floor(Date.parse(row.opensAt) / 1000)) + 75n);
+        await sellAll(other, row.open.mint as Address);
       }
     }
     await sweep(creator, other);

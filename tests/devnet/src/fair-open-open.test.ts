@@ -5,10 +5,13 @@
 // calculation to the lamport, on an oversubscribed pot with an Unverified sub-level and on a partial fill; pushes and a
 // claim deliver them; the coin's record names its launch; the open refuses an early rung, a smaller one, and any other
 // transaction; and the nonce's rent goes back to the creator. It measures the creation transaction's size and compute.
-// It spends about 0.15 devnet SOL from Heat's devnet bank: fees, each coin's pool accounts, and 1.25% each way on the
-// pot's coins, which its depositors sell back once the tax window ends. Each seat's own rent stays in it until its Tax
-// Share (#49) closes it; the depositors' wallets derive from the bank's key and the launch, so a later run finds them. It
-// signs with the keeper and admission keys, which, like the bank, only this Mac holds (~/.config/top-pad/devnet).
+// After an open (#49): the creator's coins go into a Jupiter Lock escrow, released from day 7 to day 30 to the Creator
+// wallet with nobody able to cancel it; at 60 s the window's fees, less the pot's own fee, become the Tax Share, paid to
+// every other seat in proportion to what it spent as the seat closes; and the launch closes, its rent back to the creator.
+// Every run settles its launch so: the seats' rent comes back to wallets derived from the bank's key and the launch.
+// It spends about 0.2 devnet SOL from Heat's devnet bank: fees, each coin's pool accounts, the creator's escrow, and 1.25%
+// each way on the pot's coins, which its depositors sell back once the tax window ends. It signs with the keeper and
+// admission keys, which, like the bank, only this Mac holds (~/.config/top-pad/devnet).
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -31,12 +34,20 @@ import {
 import { getTransferSolInstruction } from "@solana-program/system";
 import {
   allocate,
+  claimablePool,
   claimInstructions,
+  collectTaxShareInstructions,
+  CREATOR_LOCK_CLIFF_SECONDS,
+  CREATOR_LOCK_END_SECONDS,
+  creatorLockEscrowAddress,
   dbcPoolAddress,
   FAIR_OPEN_PROGRAM_ADDRESS,
+  lockCreatorInstructions,
+  pushTaxShareInstructions,
   rungAtOrBelow,
   seatOutcome,
   swapInstructions,
+  taxShareOf,
   Tier,
   type Creation,
   type SignedRung,
@@ -50,10 +61,12 @@ import {
   LaunchStatus,
   type Launch,
 } from "@top-pad/clients/fair-open";
+import { fetchVirtualPool } from "@top-pad/clients/dbc";
 import { fetchCoinRecord, findCoinRecordPda, LaunchMode } from "@top-pad/clients/fee";
+import { fetchVestingEscrow } from "@top-pad/clients/jupiter-lock";
 import { decodeTransaction } from "@top-pad/indexer";
 import { describe, expect, it } from "vitest";
-import { bank, chainTime, coinBalance, devnet, fund, fundedWallets, landed, programCompute, rpc, send, simulatedWireError, sweep } from "./devnet";
+import { bank, chainTime, coinBalance, devnet, fund, fundedWallets, landed, programCompute, rpc, send, simulatedWireError, swap, sweep } from "./devnet";
 import {
   admitted,
   closeNonce,
@@ -61,12 +74,15 @@ import {
   deposit,
   depositorsOf,
   keeper,
+  lookupTable,
   newPerson,
   pushAll,
   recoverDeposits,
   scheduleFairOpen,
   seatOf,
+  seatsOf,
   sellAll,
+  settleOpened,
   signedLadder,
   type ScheduledFairOpen,
 } from "./fairOpen";
@@ -156,16 +172,17 @@ async function expectDelivered(launch: Launch, launchAddress: Address, people: {
   }
 }
 
-/** After a run: sell back what each wallet holds once the tax window is over, close the nonce, and sweep. */
+/**
+ * After a run: an opened launch settled to its end, every seat delivered, locked and paid its Tax Share, so its rent comes
+ * back; then what each wallet holds sold back, the nonce closed, and every wallet swept.
+ */
 async function settleRun(s: ScheduledFairOpen | null, wallets: KeyPairSigner[]) {
   if (!s) return sweep(...wallets);
   const account = await fetchLaunch(rpc, s.launch).catch(() => null);
   if (account?.data.status === LaunchStatus.Opened) {
-    const pool = await dbcPoolAddress(FAIR_OPEN_CONFIG, account.data.mint, devnet.quote.mint);
-    const { getVirtualPoolDecoder } = await import("@top-pad/clients/dbc");
-    const raw = await rpc.getAccountInfo(pool, { encoding: "base64", commitment: "confirmed" }).send();
-    const activation = getVirtualPoolDecoder().decode(getBase64Encoder().encode(raw.value!.data[0])).poolState.activationPoint;
-    await untilChainTime(activation + 61n);
+    const undelivered = (await seatsOf(s.launch)).filter((x) => !x.seat.delivered && x.seat.wallet !== account.data.creator);
+    await pushAll(s.launch, account.data.mint, undelivered.map((x) => ({ seat: x.address, wallet: x.seat.wallet })));
+    await settleOpened(s.launch);
     for (const w of wallets) await sellAll(w, account.data.mint);
     await closeNonce(s.nonce, s.creator.address);
   } else {
@@ -237,7 +254,8 @@ describe.skipIf(!keys).concurrent("a Fair Open's open on devnet", () => {
           unverifiedLevel: a.unverified.level,
           spent: rung,
           coins: pot!.baseAmount,
-          openRent: 0n,
+          // What is left of the creator's prepaid rent is the Creator lock's: its escrow and the escrow's coin account.
+          openRent: (await rpc.getMinimumBalanceForRentExemption(296n).send()) + (await rpc.getMinimumBalanceForRentExemption(165n).send()),
         });
         const record = (await fetchCoinRecord(rpc, (await findCoinRecordPda({ mint: mint.address }))[0])).data;
         expect(record).toMatchObject({ launchMode: LaunchMode.FairOpen, fairOpenLaunch: { __option: "Some", value: launch.launch }, potFee: pot!.fee - pot!.fee / 5n });
@@ -313,5 +331,96 @@ describe.skipIf(!keys).concurrent("a Fair Open's open on devnet", () => {
       }
     },
     12 * 60_000,
+  );
+  it(
+    "locks the creator's coins in Jupiter Lock, pays every other seat its Tax Share as it closes, and closes the launch",
+    async () => {
+      const creator = await bank();
+      const [sniper] = await fundedWallets(SOL / 10n);
+      let scheduled: ScheduledFairOpen | null = null;
+      let people: { wallet: KeyPairSigner; tier: Tier; deposit: bigint }[] = [];
+      try {
+        const launch = (scheduled = await scheduleFairOpen(creator, (await chainTime()) + OPENS_IN + 60n - 600n));
+        people = await depositors(launch.launch, [[Tier.Verified, 40n], [Tier.Scored, 20n], [Tier.Unverified, 10n]]);
+        // The creator deposits too, under their own tier: their coins go only into the Creator lock.
+        await deposit(launch.launch, creator, 30n * STEP, await admitted(launch.launch, creator.address, newPerson(), Tier.Scored));
+        const { ladder, mint } = await signedLadder(launch);
+        const before = (await fetchLaunch(rpc, launch.launch)).data;
+        expect([before.creatorDeposit, before.creatorTier]).toEqual([30n * STEP, Tier.Scored]);
+        const a = allocate(before.counts, before.unverifiedCounts, before.step, before.potCap);
+        const signed = ladder.find((r) => r.rung === rungAtOrBelow(before.potCap, a.spend))!;
+        await untilChainTime(before.opensAt);
+        await sendWire(signed.transaction);
+        const opening = signatureOf(signed.transaction);
+        expect((await landings([opening])).get(opening)!.err).toBeNull();
+        const pool = await dbcPoolAddress(FAIR_OPEN_CONFIG, mint.address, devnet.quote.mint);
+        // Snipers buy inside the Tax window, each paying the falling tax.
+        for (const amount of [SOL / 50n, SOL / 100n]) await swap(sniper, mint.address, "buy", amount, FAIR_OPEN_CONFIG);
+
+        const after = (await fetchLaunch(rpc, launch.launch)).data;
+        const seats = await Promise.all(people.map(async (p) => ({ seat: (await seatOf(launch.launch, p.wallet.address))!.address, wallet: p.wallet.address })));
+        await pushAll(launch.launch, mint.address, seats);
+        const payer = await keeper();
+        const { address: tableAddress, addresses } = await lookupTable();
+        const table = { [tableAddress]: addresses };
+
+        // The Creator lock: the creator's coins into a Jupiter Lock escrow, the rest of their seat back to them.
+        const creatorSeat = (await seatOf(launch.launch, creator.address))!;
+        const mine = seatOutcome(after, Tier.Scored, 30n * STEP);
+        const creatorBefore = await lamports(creator.address);
+        const lock = await send(payer, await lockCreatorInstructions({ launch: launch.launch, creator: creator.address, seat: creatorSeat.address, mint: mint.address, pool, computeUnitPrice: 0n }), table);
+        console.log(`the Creator lock: ${lock}, ${await programCompute(lock, FAIR_OPEN_PROGRAM_ADDRESS)} compute units`);
+        const escrowAddress = await creatorLockEscrowAddress(launch.launch);
+        const escrow = (await fetchVestingEscrow(rpc, escrowAddress, { commitment: "confirmed" })).data;
+        const activation = (await fetchVirtualPool(rpc, pool, { commitment: "confirmed" })).data.poolState.activationPoint;
+        expect(escrow).toMatchObject({ recipient: creator.address, tokenMint: mint.address, cancelMode: 0, updateRecipientMode: 2, cliffTime: activation + CREATOR_LOCK_CLIFF_SECONDS });
+        expect(escrow.cliffTime + escrow.frequency * escrow.numberOfPeriod).toBe(activation + CREATOR_LOCK_END_SECONDS);
+        expect(escrow.cliffUnlockAmount + escrow.amountPerPeriod * escrow.numberOfPeriod).toBe(mine.coins);
+        expect(await coinBalance(escrowAddress, mint.address)).toBe(mine.coins);
+        expect(await seatOf(launch.launch, creator.address)).toBeNull();
+        // Its refund, its prepaid coin-account rent and its seat's rent: the escrow came out of the prepaid rent.
+        expect((await lamports(creator.address)) - creatorBefore).toBe(mine.refund + creatorSeat.seat.coinRent + creatorSeat.lamports);
+
+        // At 60 s, the Tax Share's collection: the window's fees less the pot's own fee, and the open's dust.
+        const record = (await fetchCoinRecord(rpc, (await findCoinRecordPda({ mint: mint.address }))[0])).data;
+        await untilChainTime(activation + 60n);
+        const state = (await fetchVirtualPool(rpc, pool, { commitment: "confirmed" })).data.poolState;
+        const windowFees = state.partnerQuoteFee - record.potFee;
+        const collect = await send(payer, await collectTaxShareInstructions({ launch: launch.launch, pool: claimablePool(pool, state, devnet.quote.mint), treasury: devnet.keys!.treasury, computeUnitPrice: 0n }), table);
+        console.log(`the Tax Share's collection: ${collect}, ${await programCompute(collect, FAIR_OPEN_PROGRAM_ADDRESS)} compute units`);
+        const [collected] = (await decoded(collect)).taxShares;
+        const spentBySeats = [...people.map((p) => seatOutcome(after, p.tier, p.deposit).spent), mine.spent].reduce((x, y) => x + y);
+        // A late claim moves the seconds' normal fees too: at least the window's, never less.
+        expect(collected!.fees >= windowFees).toBe(true);
+        expect(collected).toMatchObject({ dust: spentBySeats - after.spent, taxShare: collected!.fees + spentBySeats - after.spent, toTreasury: false });
+        expect((await fetchVirtualPool(rpc, pool, { commitment: "confirmed" })).data.poolState.partnerQuoteFee).toBe(record.potFee);
+        console.log(`Tax Share: ${collected!.taxShare} lamports, ${collected!.fees} of window fees and ${collected!.dust} of dust`);
+
+        // Every other seat paid its share as it closes, its rent with it; the creator's gets none.
+        const open = await seatsOf(launch.launch);
+        const balances = await Promise.all(people.map((p) => lamports(p.wallet.address)));
+        const push = await send(payer, await pushTaxShareInstructions({ launch: launch.launch, seats: open.map((x) => ({ seat: x.address, wallet: x.seat.wallet })), computeUnitPrice: 0n }), table);
+        console.log(`a Tax Share push of ${open.length} seats: ${push}, ${await programCompute(push, FAIR_OPEN_PROGRAM_ADDRESS)} compute units`);
+        let paid = 0n;
+        for (const x of open) {
+          const p = people.find((q) => q.wallet.address === x.seat.wallet)!;
+          const fill = seatOutcome(after, p.tier, p.deposit).fill;
+          const share = taxShareOf(collected!.taxShare, collected!.basis, paid, fill);
+          paid += fill;
+          expect((await lamports(p.wallet.address)) - balances[people.indexOf(p)]!).toBe(share + x.lamports);
+        }
+        expect(await seatsOf(launch.launch)).toEqual([]);
+
+        // Done: the launch closes, its rent and its vault's back to the creator.
+        const rent = (await lamports(launch.launch)) + (await lamports(launch.vault));
+        const beforeClose = await lamports(creator.address);
+        await settleOpened(launch.launch);
+        expect((await lamports(creator.address)) - beforeClose).toBe(rent);
+        expect(await lamports(launch.launch)).toBe(0n);
+      } finally {
+        await settleRun(scheduled, [...people.map((p) => p.wallet), sniper]);
+      }
+    },
+    14 * 60_000,
   );
 });

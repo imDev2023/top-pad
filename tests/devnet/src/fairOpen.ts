@@ -30,18 +30,23 @@ import { fetchNonce } from "@solana-program/system";
 import { findAssociatedTokenPda, getCloseAccountInstruction } from "@solana-program/token";
 import {
   admissionMessage,
+  claimablePool,
   closeLaunchInstructions,
+  collectTaxShareInstructions,
   createLaunchInstructions,
   depositInstructions,
   FAIR_OPEN_PROGRAM_ADDRESS,
   fairOpenAccounts,
   fairOpenPhase,
   identityHash,
+  lockCreatorInstructions,
   markFailedInstructions,
   NONCE_ACCOUNT_SPACE,
   potCapOf,
   pushInstructions,
+  pushTaxShareInstructions,
   PUSH_SEATS,
+  TAX_SHARE_SEATS,
   SEAT_LAYOUT,
   swapInstructions,
   TOKEN_PROGRAM_ADDRESS,
@@ -60,7 +65,8 @@ import {
   type LookupTable,
   type SignedRung,
 } from "@top-pad/chain";
-import { fetchMaybeLaunch, getSeatDecoder, getSeatSize, type Seat } from "@top-pad/clients/fair-open";
+import { fetchMaybeLaunch, getSeatDecoder, getSeatSize, LaunchStatus, type Seat } from "@top-pad/clients/fair-open";
+import { fetchVirtualPool } from "@top-pad/clients/dbc";
 import { bankFile, chainTime, coinBalance, devnet, rpc, send } from "./devnet";
 
 const keyFile = (name: string) => Uint8Array.from(JSON.parse(readFileSync(join(homedir(), ".config/top-pad/devnet", name), "utf8")) as number[]);
@@ -289,4 +295,56 @@ export async function recoverDeposits(launch: Address, sender: KeyPairSigner, wa
   if (!account.exists || fairOpenPhase(account.data, await chainTime()).phase !== "failed") return;
   if (account.data.seats === 0) await send(sender, await closeLaunchInstructions({ launch, creator: account.data.creator, computeUnitPrice: 0n }));
   await closeNonce(account.data.nonce, account.data.creator);
+}
+
+/** What settling an opened launch sent: each step's transaction, for the tests to read back. */
+export type Settled = { lock: string | null; collect: string | null; pushes: string[]; close: string | null };
+
+/**
+ * Takes an opened launch to its end, as Heat's keeper does (spec 2.1 steps 13 and 14), our keeper paying: the Creator
+ * lock if the Creator wallet holds a seat, then once the coin's Tax window has ended its Tax Share collected and pushed to
+ * every seat, each closing, and the launch closed. Every seat must have its coins first. A run that stops partway can be
+ * settled again: each step does what the chain shows is undone, so a later run gets every seat's rent back.
+ */
+export async function settleOpened(launch: Address): Promise<Settled> {
+  const payer = await keeper();
+  const { address, addresses } = await lookupTable();
+  const table = { [address]: addresses };
+  const settled: Settled = { lock: null, collect: null, pushes: [], close: null };
+  let found = await fetchMaybeLaunch(rpc, launch, { commitment: "confirmed" });
+  if (!found.exists) return settled;
+  if (found.data.status !== LaunchStatus.Opened) throw new Error(`${launch} has not opened`);
+  const { creator, mint, dbcConfig, quoteMint } = found.data;
+  const pool = await dbcPoolAddress(dbcConfig, mint, quoteMint);
+  const seats = await seatsOf(launch);
+  const creatorSeat = seats.find((s) => s.seat.wallet === creator && !s.seat.delivered);
+  if (creatorSeat) settled.lock = await send(payer, await lockCreatorInstructions({ launch, creator, seat: creatorSeat.address, mint, pool, computeUnitPrice: 0n }), table);
+  if (!found.data.taxCollected) {
+    const state = (await fetchVirtualPool(rpc, pool, { commitment: "confirmed" })).data.poolState;
+    const claimable = claimablePool(pool, state, devnet.quote.mint);
+    for (let now = await chainTime(); now < claimable.windowEndsAt; now = await chainTime()) {
+      await new Promise((r) => setTimeout(r, Math.min(Number(claimable.windowEndsAt - now) * 1_000, 20_000) + 500));
+    }
+    settled.collect = await send(payer, await collectTaxShareInstructions({ launch, pool: claimable, treasury: devnet.keys!.treasury, computeUnitPrice: 0n }), table);
+  }
+  const owed = (await seatsOf(launch)).filter((s) => s.seat.delivered && s.seat.wallet !== creator);
+  for (let i = 0; i < owed.length; i += TAX_SHARE_SEATS) {
+    const batch = owed.slice(i, i + TAX_SHARE_SEATS).map((s) => ({ seat: s.address, wallet: s.seat.wallet }));
+    settled.pushes.push(await send(payer, await pushTaxShareInstructions({ launch, seats: batch, computeUnitPrice: 0n }), table));
+  }
+  found = await fetchMaybeLaunch(rpc, launch, { commitment: "confirmed" });
+  if (found.exists && found.data.seats === 0) settled.close = await send(payer, await closeLaunchInstructions({ launch, creator, computeUnitPrice: 0n }), table);
+  return settled;
+}
+
+/** Every seat of a launch, from the chain. */
+export async function seatsOf(launch: Address): Promise<{ address: Address; seat: Seat; lamports: bigint }[]> {
+  const found = await rpc
+    .getProgramAccounts(FAIR_OPEN_PROGRAM_ADDRESS, {
+      encoding: "base64",
+      commitment: "confirmed",
+      filters: [{ dataSize: BigInt(getSeatSize()) }, { memcmp: { offset: BigInt(SEAT_LAYOUT.launchOffset), bytes: launch as string as Base58EncodedBytes, encoding: "base58" } }],
+    })
+    .send();
+  return found.map((s) => ({ address: s.pubkey, seat: getSeatDecoder().decode(Buffer.from(s.account.data[0], "base64")), lamports: s.account.lamports }));
 }

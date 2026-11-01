@@ -2,10 +2,11 @@
 // window starting now with a teaser, and signs the schedule and the whole 64-rung ladder in one wallet approval. Two
 // depositors join, one from the page and one straight to the program; then nobody does anything: at the window's close
 // the keeper's Workflow (the API's, under `wrangler dev` locally, or the deployed one) uploads the coin's metadata,
-// sends the rung the pot covers, and pushes every seat its coins and refund. The spec measures how late the open landed
-// by the chain's clock and checks every seat was delivered within 2 minutes of the open. Every step of the launch flow
-// is photographed in every view. About 14 minutes and 0.05 devnet SOL a run: the deposits' coins are sold back after
-// the tax window; the creator's launch account keeps its rent until the Tax Share closes it (#49).
+// sends the rung the pot covers, pushes every seat its coins and refund, and once the Tax window ends collects the Tax
+// Share, pays every seat its share as it closes, and closes the launch, its rent back to the creator (#49). The spec
+// measures how late the open landed by the chain's clock and checks every seat was delivered within 2 minutes of the
+// open. Every step of the launch flow is photographed in every view. About 15 minutes and 0.05 devnet SOL a run: the
+// deposits' coins are sold back after the tax window.
 import { expect, test } from "@playwright/test";
 import type { Address } from "@solana/kit";
 import { Tier } from "@top-pad/chain";
@@ -122,16 +123,23 @@ test("a creator schedules a Fair Open from the site and signs once; the keeper o
     expect((await view(launch)).open?.delivered).toBe(2);
     await snap(depositorPage, "fair-open-scheduled-7-opened");
 
+    // At 60 s the keeper collects the Tax Share and pays it, every seat closing, and closes the launch.
+    await expect(depositorPage.getByTestId("fair-open-tax-share")).toContainText("Every depositor has been paid theirs", { timeout: 240_000 });
+    await expect(depositorPage.getByTestId("fair-open-your-tax-share")).toContainText("SOL");
+    await expect.poll(async () => (await rpc.getBalance(launch!, { commitment: "confirmed" }).send()).value, { timeout: 120_000 }).toBe(0n);
+    await snap(depositorPage, "fair-open-scheduled-8-tax-share");
+
     // The keeper closes the nonce, its rent back to the creator.
     await expect.poll(async () => (await rpc.getBalance(account.nonce, { commitment: "confirmed" }).send()).value, { timeout: 120_000 }).toBe(0n);
     expect(errors).toEqual([]);
   } finally {
     if (launch) {
-      const account = await fetchLaunch(rpc, launch).catch(() => null);
-      if (account?.data.status === LaunchStatus.Opened) {
+      // The coin, once opened, outlives its launch account, which the keeper closes when it is done.
+      const row = await view(launch).catch(() => null);
+      if (row?.open) {
         // Sold back once the tax window is over, the pot's coins return most of what they cost.
-        await untilChainTime(account.data.opensAt + 75n);
-        for (const w of [depositor, other]) await sellAll(w, account.data.mint);
+        await untilChainTime(BigInt(Math.floor(Date.parse(row.opensAt) / 1000)) + 75n);
+        for (const w of [depositor, other]) await sellAll(w, row.open.mint as Address);
       }
     }
     await sweep(creator, depositor, other);
