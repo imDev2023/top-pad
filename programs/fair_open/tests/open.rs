@@ -86,14 +86,15 @@ fn opens_in_one_transaction_and_records_the_coin_with_the_fee_program() {
     assert_eq!((record.fair_open_launch, record.pot_fee, record.pool), (Some(launch.launch), fee - fee / 5, coin.pool));
 
     // Our keeper paid only the transaction's three signatures: the open's accounts came out of the creator's prepaid rent,
-    // all of it, since the prepayment is exactly what they cost.
+    // which is exactly what they cost and what the Creator lock's will.
     assert_eq!(keeper_before - t.lamports(&keeper), 15_000);
     let opened = &events::<LaunchOpened>(&done)[0];
+    let lock_rent = fair_open::lock_rent(&t.svm.get_sysvar());
     assert_eq!(
         (opened.rent_paid_back, opened.pot_fee, opened.coins, opened.seats),
-        (open_rent, record.pot_fee, coins, 9)
+        (open_rent - lock_rent, record.pot_fee, coins, 9)
     );
-    assert_eq!(l.open_rent, 0);
+    assert_eq!(l.open_rent, lock_rent);
     assert_eq!(t.vault_holds(&launch), l.owed());
     println!(
         "open and settle: {} compute units; the open's accounts cost {} lamports, prepaid",
@@ -220,10 +221,12 @@ fn pushes_every_seat_its_coins_and_refund_at_the_pots_one_price() {
     assert!(burnt[0].amount < people.len() as u64);
     assert!(!t.exists(&associated_address(&launch.launch, &coin.mint)));
     assert_eq!((l.delivered, l.coin_rent), (9, 0));
-    // What the vault still owes: the lamports the rounding gathered for the Tax Share, and nothing else.
+    // What the vault still owes: the lamports the rounding gathered for the Tax Share, and the Creator lock's prepaid rent,
+    // which comes back to the creator with the launch's since they hold no seat.
     let dust: u64 = people.iter().map(|d| t.read::<Seat>(&d.seat(&launch)).spent).sum::<u64>() - l.spent;
-    assert_eq!(l.owed(), dust);
-    assert_eq!(t.vault_holds(&launch), dust + coin_rent);
+    assert_eq!(l.owed(), dust + l.open_rent);
+    assert_eq!(l.open_rent, fair_open::lock_rent(&t.svm.get_sysvar()));
+    assert_eq!(t.vault_holds(&launch), l.owed() + coin_rent);
 }
 
 #[test]

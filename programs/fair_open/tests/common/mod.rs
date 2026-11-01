@@ -1,8 +1,9 @@
 //! What the Fair Open program's LiteSVM tests share: the built program (target/deploy/fair_open.so, from `pnpm programs`)
 //! with its `ProgramConfig`, Heat's Fair Open config written in DBC's layout and owner, a durable nonce held by the
 //! keeper, and admissions signed by a test admission key and verified by the real Ed25519 precompile. The open runs the
-//! fee program (target/deploy/fee.so) with its `FeeConfig`, and our stand-in for DBC's pool creation and swap
-//! (tests/dbc-stand-in) at DBC's address; Meteora's own binary is never loaded (spec 5.1).
+//! fee program (target/deploy/fee.so) with its `FeeConfig`, and our stand-in for DBC's pool creation, swap and fee claim
+//! (tests/dbc-stand-in) at DBC's address; Meteora's own binary is never loaded (spec 5.1). The Creator lock runs our
+//! stand-in for Jupiter Lock's escrow (tests/lock-stand-in) at Lock's address.
 // LiteSVM's failed-transaction metadata is large by design; the helpers here only hand it back to the test.
 #![allow(clippy::result_large_err, dead_code)]
 use {
@@ -30,6 +31,7 @@ use {
 pub const PROGRAM: &[u8] = include_bytes!(concat!(env!("CARGO_TARGET_TMPDIR"), "/../deploy/fair_open.so"));
 const FEE_PROGRAM: &[u8] = include_bytes!(concat!(env!("CARGO_TARGET_TMPDIR"), "/../deploy/fee.so"));
 const DBC_STAND_IN: &[u8] = include_bytes!(concat!(env!("CARGO_TARGET_TMPDIR"), "/../deploy/dbc_stand_in.so"));
+const LOCK_STAND_IN: &[u8] = include_bytes!(concat!(env!("CARGO_TARGET_TMPDIR"), "/../deploy/lock_stand_in.so"));
 
 pub const TOKEN_PROGRAM: Pubkey = fair_open::TOKEN_PROGRAM;
 pub const ASSOCIATED_TOKEN_PROGRAM: Pubkey = fair_open::creation::ASSOCIATED_TOKEN_PROGRAM;
@@ -99,6 +101,13 @@ pub enum Code {
     AlreadyDelivered,
     CreatorsSeat,
     NotYourCoinAccount,
+    NotTheCreatorsSeat,
+    LockNotFunded,
+    TaxShareCollected,
+    TaxShareNotCollected,
+    NotTheTreasury,
+    NotDone,
+    CreatorCoinsNotLocked,
 }
 
 /// A launch's coin, as the creator seals it at scheduling.
@@ -205,6 +214,7 @@ impl Test {
         svm.add_program(fair_open::id(), PROGRAM).unwrap();
         svm.add_program(fee::id(), FEE_PROGRAM).unwrap();
         svm.add_program(dbc::PROGRAM_ID, DBC_STAND_IN).unwrap();
+        svm.add_program(fair_open::jupiter_lock::PROGRAM_ID, LOCK_STAND_IN).unwrap();
         let payer = Keypair::new();
         svm.airdrop(&payer.pubkey(), 100 * SOL).unwrap();
         let creator = Keypair::new();
@@ -677,6 +687,168 @@ impl Test {
         send_as(&mut self.svm, &[ix], &d.wallet, &[])
     }
 
+    /// The Creator lock of `creator`'s seat, sent by a stranger.
+    pub fn lock_creator(
+        &mut self,
+        launch: &LaunchKeys,
+        coin: &CoinKeys,
+        creator: &Depositor,
+    ) -> Result<TransactionMetadata, FailedTransactionMetadata> {
+        let ix = self.lock_creator_instruction(launch, coin, &creator.seat(launch));
+        self.send(&[compute_unit_limit(400_000), ix], &[])
+    }
+
+    pub fn lock_creator_instruction(&self, launch: &LaunchKeys, coin: &CoinKeys, seat: &Pubkey) -> Instruction {
+        let locker = locker_address(&launch.launch);
+        let escrow = escrow_address(&locker);
+        let accounts = fair_open::accounts::LockCreator {
+            launch: launch.launch,
+            vault: launch.vault,
+            seat: *seat,
+            creator: self.creator.pubkey(),
+            pool: coin.pool,
+            pot_coins: associated_address(&launch.launch, &coin.mint),
+            mint: coin.mint,
+            locker,
+            escrow,
+            escrow_coins: associated_address(&escrow, &coin.mint),
+            lock_event_authority: fair_open::jupiter_lock::EVENT_AUTHORITY,
+            lock_program: fair_open::jupiter_lock::PROGRAM_ID,
+            token_program: TOKEN_PROGRAM,
+            associated_token_program: ASSOCIATED_TOKEN_PROGRAM,
+            system_program: system_program::ID,
+            event_authority: event_authority(),
+            program: fair_open::id(),
+        };
+        instruction(accounts.to_account_metas(None), fair_open::instruction::LockCreator {}.data())
+    }
+
+    /// The Tax Share's collection, sent by a stranger.
+    pub fn collect_tax_share(
+        &mut self,
+        launch: &LaunchKeys,
+        coin: &CoinKeys,
+    ) -> Result<TransactionMetadata, FailedTransactionMetadata> {
+        let ix = self.collect_tax_share_instruction(launch, coin);
+        self.send(&[compute_unit_limit(400_000), ix], &[])
+    }
+
+    pub fn collect_tax_share_instruction(&self, launch: &LaunchKeys, coin: &CoinKeys) -> Instruction {
+        let dbc_pda = |seed: &[u8]| Pubkey::find_program_address(&[seed], &dbc::PROGRAM_ID).0;
+        let accounts = fair_open::accounts::CollectTaxShare {
+            program_config: program_config_address(),
+            launch: launch.launch,
+            vault: launch.vault,
+            pot: pot_address(&launch.launch),
+            quote_mint: fair_open::NATIVE_MINT,
+            treasury: self.treasury(),
+            coin_registrar: Pubkey::find_program_address(&[fair_open::COIN_REGISTRAR_SEED], &fair_open::id()).0,
+            fee_config: fee_config_address(),
+            coin_record: coin_record_address(&coin.mint),
+            fee_claimer: fee::FEE_CLAIMER,
+            fee_claimer_token_account: associated_address(&fee::FEE_CLAIMER, &fair_open::NATIVE_MINT),
+            pool_authority: dbc_pda(b"pool_authority"),
+            dbc_config: self.dbc_config,
+            pool: coin.pool,
+            base_vault: coin.base_vault,
+            quote_vault: coin.quote_vault,
+            mint: coin.mint,
+            token_base_program: TOKEN_PROGRAM,
+            dbc_event_authority: dbc_pda(b"__event_authority"),
+            dbc_program: dbc::PROGRAM_ID,
+            fee_event_authority: Pubkey::find_program_address(&[b"__event_authority"], &fee::id()).0,
+            fee_program: fee::id(),
+            token_program: TOKEN_PROGRAM,
+            system_program: system_program::ID,
+            event_authority: event_authority(),
+            program: fair_open::id(),
+        };
+        instruction(accounts.to_account_metas(None), fair_open::instruction::CollectTaxShare {}.data())
+    }
+
+    /// A push of the Tax Share to `seats`, given as (seat, wallet) pairs, sent by a stranger.
+    pub fn push_tax_share(
+        &mut self,
+        launch: &LaunchKeys,
+        seats: &[(Pubkey, Pubkey)],
+    ) -> Result<TransactionMetadata, FailedTransactionMetadata> {
+        let accounts = fair_open::accounts::PushTaxShare {
+            launch: launch.launch,
+            vault: launch.vault,
+            event_authority: event_authority(),
+            program: fair_open::id(),
+        };
+        let mut metas = accounts.to_account_metas(None);
+        for (seat, wallet) in seats {
+            metas.push(AccountMeta::new(*seat, false));
+            metas.push(AccountMeta::new(*wallet, false));
+        }
+        let ix = instruction(metas, fair_open::instruction::PushTaxShare {}.data());
+        self.send(&[compute_unit_limit(1_400_000), ix], &[])
+    }
+
+    /// Heat's treasury, as the fee program's settings name it.
+    pub fn treasury(&self) -> Pubkey {
+        self.read::<fee::FeeConfig>(&fee_config_address()).treasury
+    }
+
+    /// A buy of `amount` lamports on the coin's pool by a new wallet, after the pot's: our stand-in charges it the
+    /// sniper tax's cliff, the partner's share of which accrues in the pool as the window's fees.
+    pub fn snipe(&mut self, coin: &CoinKeys, amount: u64) -> TransactionMetadata {
+        let buyer = Keypair::new();
+        self.svm.airdrop(&buyer.pubkey(), SOL).unwrap();
+        let wsol = Pubkey::new_unique();
+        let rent = self.rent(165);
+        let mut data = token_account_data(&fair_open::NATIVE_MINT, &buyer.pubkey(), amount);
+        // A wrapped-SOL account: `is_native`, its rent-exempt reserve.
+        data[109..113].copy_from_slice(&1u32.to_le_bytes());
+        data[113..121].copy_from_slice(&rent.to_le_bytes());
+        let account = solana_account::Account {
+            lamports: rent + amount,
+            data,
+            owner: TOKEN_PROGRAM,
+            executable: false,
+            rent_epoch: 0,
+        };
+        self.svm.set_account(wsol, account).unwrap();
+        let coins = Pubkey::new_unique();
+        self.set_account(coins, token_account_data(&coin.mint, &buyer.pubkey(), 0), TOKEN_PROGRAM);
+        let dbc_pda = |seed: &[u8]| Pubkey::find_program_address(&[seed], &dbc::PROGRAM_ID).0;
+        let (ro, rw) = (AccountMeta::new_readonly, AccountMeta::new);
+        let mut data = dbc::SWAP2.to_vec();
+        data.extend(amount.to_le_bytes());
+        data.extend(1u64.to_le_bytes());
+        data.push(0);
+        let swap = Instruction {
+            program_id: dbc::PROGRAM_ID,
+            accounts: vec![
+                ro(dbc_pda(b"pool_authority"), false),
+                ro(self.dbc_config, false),
+                rw(coin.pool, false),
+                rw(wsol, false),
+                rw(coins, false),
+                rw(coin.base_vault, false),
+                rw(coin.quote_vault, false),
+                ro(coin.mint, false),
+                ro(fair_open::NATIVE_MINT, false),
+                ro(buyer.pubkey(), true),
+                ro(TOKEN_PROGRAM, false),
+                ro(TOKEN_PROGRAM, false),
+                ro(dbc::PROGRAM_ID, false),
+                ro(dbc_pda(b"__event_authority"), false),
+                ro(dbc::PROGRAM_ID, false),
+            ],
+            data,
+        };
+        send_as(&mut self.svm, &[swap], &buyer, &[]).unwrap()
+    }
+
+    /// The partner's quote fee accrued in the coin's pool and not yet claimed.
+    pub fn partner_quote_fee(&self, coin: &CoinKeys) -> u64 {
+        let pool = self.svm.get_account(&coin.pool).unwrap();
+        u64::from_le_bytes(pool.data[dbc::POOL_PARTNER_QUOTE_FEE_OFFSET..][..8].try_into().unwrap())
+    }
+
     /// The tokens a token account holds, or none if it does not exist.
     pub fn tokens(&self, account: &Pubkey) -> Option<u64> {
         let account = self.svm.get_account(account).filter(|a| a.owner == TOKEN_PROGRAM && a.data.len() == 165)?;
@@ -757,6 +929,30 @@ pub fn dbc_config_data(quote_mint: &Pubkey, graduation_target: u64) -> Vec<u8> {
     data[40..72].copy_from_slice(fee::FEE_CLAIMER.as_ref());
     data[dbc::CONFIG_MIGRATION_QUOTE_THRESHOLD_OFFSET..][..8].copy_from_slice(&graduation_target.to_le_bytes());
     data
+}
+
+/// An initialized SPL Token account of `mint`, owned by `owner`, holding `amount`.
+pub fn token_account_data(mint: &Pubkey, owner: &Pubkey, amount: u64) -> Vec<u8> {
+    let mut data = vec![0u8; 165];
+    data[..32].copy_from_slice(mint.as_ref());
+    data[32..64].copy_from_slice(owner.as_ref());
+    data[64..72].copy_from_slice(&amount.to_le_bytes());
+    data[108] = 1;
+    data
+}
+
+/// A launch's creator locker, the Creator lock escrow's base and sender.
+pub fn locker_address(launch: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(&[fair_open::CREATOR_LOCK_SEED, launch.as_ref()], &fair_open::id()).0
+}
+
+/// Jupiter Lock's escrow of `base`.
+pub fn escrow_address(base: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(
+        &[fair_open::jupiter_lock::ESCROW_SEED, base.as_ref()],
+        &fair_open::jupiter_lock::PROGRAM_ID,
+    )
+    .0
 }
 
 /// An SPL mint with no authorities, of `decimals`.

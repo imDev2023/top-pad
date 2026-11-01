@@ -1,5 +1,5 @@
 [workspace]
-members = ["programs/*", "tests/dbc-stand-in"]
+members = ["programs/*", "tests/dbc-stand-in", "tests/lock-stand-in"]
 resolver = "2"
 
 [workspace.package]

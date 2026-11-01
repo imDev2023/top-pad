@@ -8,6 +8,149 @@
   },
   "instructions": [
     {
+      "name": "claim_fair_open_window_fees",
+      "docs": [
+        "The window claim of a Fair Open's coin (spec 2.1 step 14, 4): its pool's partner fees once its Tax window has ended,",
+        "less the pot's own fee, go to the launch's Tax Share, which the Fair Open program pays out to the depositors. The",
+        "pot's own fee stays in the pool, so the next Creator Earnings claim splits it 50/50 like any trade's. Only the",
+        "Fair Open program can send it, signing as its coin registrar from `collect_tax_share`, which anyone may send: it",
+        "opens the launch's pot to take the fees and unwraps them into the launch's vault in the same instruction."
+      ],
+      "discriminator": [
+        52,
+        254,
+        119,
+        71,
+        153,
+        30,
+        143,
+        36
+      ],
+      "accounts": [
+        {
+          "name": "fee_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "registrar",
+          "docs": [
+            "The Fair Open program's coin registrar, checked in the handler against the program the `FeeConfig` names."
+          ],
+          "signer": true
+        },
+        {
+          "name": "coin_record",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  105,
+                  110,
+                  95,
+                  114,
+                  101,
+                  99,
+                  111,
+                  114,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "tax_share_account",
+          "docs": [
+            "checked in the handler, its mint by SPL Token."
+          ],
+          "writable": true
+        },
+        {
+          "name": "fee_claimer",
+          "address": "4Garg7N38ShAr8z38ZKkHrgP9Lj5nRKiy3HGtNDqTpko"
+        },
+        {
+          "name": "fee_claimer_token_account",
+          "writable": true
+        },
+        {
+          "name": "pool_authority",
+          "address": "FhVo3mqL8PW5pH5U2CN4XE33DokiyZnUwuGpH2hmHLuM"
+        },
+        {
+          "name": "config"
+        },
+        {
+          "name": "pool",
+          "writable": true,
+          "relations": [
+            "coin_record"
+          ]
+        },
+        {
+          "name": "base_vault",
+          "writable": true
+        },
+        {
+          "name": "quote_vault",
+          "writable": true
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "quote_mint"
+        },
+        {
+          "name": "token_base_program"
+        },
+        {
+          "name": "token_quote_program"
+        },
+        {
+          "name": "dbc_event_authority",
+          "address": "8Ks12pbrD6PXxfty1hVQiE9sc289zgU1zHkvXhrSdriF"
+        },
+        {
+          "name": "dbc_program",
+          "address": "dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "claim_fees",
       "docs": [
         "Creator Earnings (spec 4): anyone may send it once the pool's window claim has run. It claims up to `max_amount`",
@@ -293,11 +436,11 @@
     {
       "name": "claim_window_fees",
       "docs": [
-        "The window claim of a Heat coin (spec 4, 5.2): the first claim of its pool's partner fees once its Tax window has",
-        "ended, which anyone may send and Heat's keeper sends at 60 s. Whatever the pool holds by then counts as the",
-        "window's fees, so a claim sent late also moves the normal fees of the seconds it was late by (ADR 0003). An",
-        "Instant launch's window fees go to the treasury; a Fair Open's go to its Tax Share, which comes with the Creator",
-        "lock and Tax Share ticket, so until then its window claim is refused."
+        "The window claim of an Instant launch's coin (spec 4, 5.2): the first claim of its pool's partner fees once its Tax",
+        "window has ended, which anyone may send and Heat's keeper sends at 60 s. Whatever the pool holds by then counts as",
+        "the window's fees, so a claim sent late also moves the normal fees of the seconds it was late by (ADR 0003), and",
+        "all of it goes to the treasury. A Fair Open's window fees go to its Tax Share instead",
+        "(`claim_fair_open_window_fees`)."
       ],
       "discriminator": [
         74,
@@ -1103,8 +1246,8 @@
     },
     {
       "code": 6012,
-      "name": "TaxShareNotBuilt",
-      "msg": "A Fair Open's window fees go to its Tax Share, which this program cannot pay yet"
+      "name": "FairOpenTaxShare",
+      "msg": "A Fair Open's window fees go to its Tax Share, through the Fair Open program's collect_tax_share"
     },
     {
       "code": 6013,
@@ -1129,7 +1272,17 @@
     {
       "code": 6017,
       "name": "NotTheFairOpenProgram",
-      "msg": "Only the Fair Open program's open registers a Fair Open's coin"
+      "msg": "Only the Fair Open program registers a Fair Open's coin or collects its Tax Share"
+    },
+    {
+      "code": 6018,
+      "name": "NotAFairOpen",
+      "msg": "The coin is not a Fair Open's"
+    },
+    {
+      "code": 6019,
+      "name": "NotTheTaxShare",
+      "msg": "A Fair Open's window fees go to its launch's pot, its Tax Share"
     }
   ],
   "types": [
@@ -1421,14 +1574,15 @@
           {
             "name": "destination",
             "docs": [
-              "The quote account paid: the treasury's, for an Instant launch and for a pool made around Heat's flow."
+              "The quote account paid: the treasury's, for an Instant launch and for a pool made around Heat's flow; a Fair",
+              "Open's pot, for its Tax Share."
             ],
             "type": "pubkey"
           },
           {
             "name": "amount",
             "docs": [
-              "In the quote's raw units."
+              "In the quote's raw units: a Fair Open's leaves out the pot's own fee, which stays in the pool."
             ],
             "type": "u64"
           },

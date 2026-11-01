@@ -136,8 +136,10 @@
     {
       "name": "close_launch",
       "docs": [
-        "Closes a failed launch once every seat has been returned, giving the creator back the rent of the launch and its",
-        "vault. Anyone may send it; it pays only the creator."
+        "Closes a launch once it is done, giving the creator back the rent of the launch and its vault, with what is left of",
+        "the rent they prepaid (spec 2.1 step 7): a failed launch once every seat has been returned, an opened one once its",
+        "Tax Share is collected and every seat, the creator's with the Creator lock, has closed. Anyone may send it; it pays",
+        "only the creator."
       ],
       "discriminator": [
         27,
@@ -202,6 +204,223 @@
           "relations": [
             "launch"
           ]
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "collect_tax_share",
+      "docs": [
+        "The Tax Share's collection (spec 2.1 step 14, 4): anyone may send it once the coin's Tax window has ended, and our",
+        "keeper does at 60 s. It opens the launch's pot again, has the fee program's window claim pay the window's fees,",
+        "less the pot's own fee, into it, and unwraps them into the vault, all in this instruction. The Tax Share is those",
+        "fees and the lamport dust the open's rounding gathered, paid to every seat but the creator's in proportion to its",
+        "fill, which is in proportion to the SOL it spent. With no seat but the creator's, nobody may take it, so it goes",
+        "to Heat's treasury, as an Instant launch's window fees do."
+      ],
+      "discriminator": [
+        138,
+        12,
+        73,
+        1,
+        136,
+        55,
+        85,
+        138
+      ],
+      "accounts": [
+        {
+          "name": "program_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  103,
+                  114,
+                  97,
+                  109,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "launch",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  97,
+                  117,
+                  110,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "launch.nonce",
+                "account": "Launch"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "launch"
+              }
+            ]
+          }
+        },
+        {
+          "name": "pot",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "launch"
+              }
+            ]
+          }
+        },
+        {
+          "name": "quote_mint"
+        },
+        {
+          "name": "treasury",
+          "writable": true
+        },
+        {
+          "name": "coin_registrar",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  105,
+                  110,
+                  95,
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  97,
+                  114
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "fee_config"
+        },
+        {
+          "name": "coin_record",
+          "writable": true
+        },
+        {
+          "name": "fee_claimer"
+        },
+        {
+          "name": "fee_claimer_token_account",
+          "writable": true
+        },
+        {
+          "name": "pool_authority"
+        },
+        {
+          "name": "dbc_config"
+        },
+        {
+          "name": "pool",
+          "writable": true
+        },
+        {
+          "name": "base_vault",
+          "writable": true
+        },
+        {
+          "name": "quote_vault",
+          "writable": true
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "token_base_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "dbc_event_authority"
+        },
+        {
+          "name": "dbc_program"
+        },
+        {
+          "name": "fee_event_authority"
+        },
+        {
+          "name": "fee_program",
+          "relations": [
+            "program_config"
+          ]
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
         },
         {
           "name": "event_authority"
@@ -667,6 +886,247 @@
       ]
     },
     {
+      "name": "lock_creator",
+      "docs": [
+        "The Creator lock (spec 2.1 step 13, ADR 0004): anyone may send it once the launch has opened, and our keeper does at",
+        "once. The creator's seat's coins go from the pot into a Jupiter Lock escrow, nothing released for 7 days after the",
+        "open and all of it by day 30, the Creator wallet its recipient and the only one who can change that, and nobody,",
+        "Heat included, able to cancel it. The pot approves the creator locker for exactly those coins and the locker sends",
+        "them, so they can leave the pot for the escrow alone. The escrow's rent comes out of the creator's prepaid rent,",
+        "or, for a launch scheduled before the prepayment covered it, out of the seat's refund; the rest of the seat's",
+        "refund, its prepaid coin-account rent and the seat's own rent go back to the Creator wallet, and the seat closes:",
+        "it gets no Tax Share."
+      ],
+      "discriminator": [
+        68,
+        25,
+        135,
+        252,
+        161,
+        20,
+        52,
+        207
+      ],
+      "accounts": [
+        {
+          "name": "launch",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  97,
+                  117,
+                  110,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "launch.nonce",
+                "account": "Launch"
+              }
+            ]
+          },
+          "relations": [
+            "seat"
+          ]
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "launch"
+              }
+            ]
+          }
+        },
+        {
+          "name": "seat",
+          "docs": [
+            "The Creator wallet's seat, which closes into the Creator wallet."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  97,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "launch"
+              },
+              {
+                "kind": "account",
+                "path": "seat.person",
+                "account": "Seat"
+              }
+            ]
+          }
+        },
+        {
+          "name": "creator",
+          "docs": [
+            "The Creator wallet: the escrow's recipient, and paid the seat's refund and rents."
+          ],
+          "writable": true
+        },
+        {
+          "name": "pool"
+        },
+        {
+          "name": "pot_coins",
+          "writable": true
+        },
+        {
+          "name": "mint",
+          "writable": true
+        },
+        {
+          "name": "locker",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  114,
+                  101,
+                  97,
+                  116,
+                  111,
+                  114,
+                  95,
+                  108,
+                  111,
+                  99,
+                  107
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "launch"
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrow",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "locker"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                5,
+                18,
+                190,
+                249,
+                122,
+                143,
+                91,
+                113,
+                125,
+                243,
+                237,
+                214,
+                198,
+                237,
+                66,
+                192,
+                226,
+                79,
+                18,
+                223,
+                229,
+                190,
+                135,
+                238,
+                63,
+                236,
+                94,
+                116,
+                63,
+                93,
+                108,
+                185
+              ]
+            }
+          }
+        },
+        {
+          "name": "escrow_coins",
+          "writable": true
+        },
+        {
+          "name": "lock_event_authority",
+          "address": "AqUDk3wybxjZujrNbKmjr2YTUZ8RA1a1nyGgs1zSmvTG"
+        },
+        {
+          "name": "lock_program",
+          "address": "LocpQgucEQHbqNABEYvBvwoxCPsSbG91A1QaQhQQqjn"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "mark_failed",
       "docs": [
         "Marks a launch that cannot open as failed, so no coin is ever created and every deposit comes back (spec 2.1",
@@ -956,6 +1416,80 @@
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "push_tax_share",
+      "docs": [
+        "Pays seats their Tax Share and closes them, returning each seat's rent (spec 2.1 step 14): anyone may send it once",
+        "the Tax Share is collected, and our keeper does at once. Each seat comes as two remaining accounts, the seat and",
+        "its wallet; a seat whose coins and refund have not been delivered yet waits, since closing it would lose them, and",
+        "the creator's seat, which gets no Tax Share, closes with the Creator lock."
+      ],
+      "discriminator": [
+        111,
+        131,
+        146,
+        233,
+        19,
+        207,
+        196,
+        202
+      ],
+      "accounts": [
+        {
+          "name": "launch",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  97,
+                  117,
+                  110,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "launch.nonce",
+                "account": "Launch"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "launch"
+              }
+            ]
+          }
         },
         {
           "name": "event_authority"
@@ -1603,6 +2137,19 @@
       ]
     },
     {
+      "name": "CreatorLocked",
+      "discriminator": [
+        236,
+        6,
+        11,
+        225,
+        235,
+        131,
+        19,
+        250
+      ]
+    },
+    {
       "name": "Deposited",
       "discriminator": [
         111,
@@ -1704,6 +2251,32 @@
         107,
         87,
         50
+      ]
+    },
+    {
+      "name": "TaxShareCollected",
+      "discriminator": [
+        170,
+        193,
+        207,
+        40,
+        100,
+        110,
+        38,
+        253
+      ]
+    },
+    {
+      "name": "TaxSharePaid",
+      "discriminator": [
+        184,
+        205,
+        226,
+        217,
+        55,
+        86,
+        156,
+        69
       ]
     },
     {
@@ -1975,6 +2548,41 @@
       "code": 6050,
       "name": "NotYourCoinAccount",
       "msg": "The coins go to an account of the coin the seat's wallet owns"
+    },
+    {
+      "code": 6051,
+      "name": "NotTheCreatorsSeat",
+      "msg": "That is not the Creator wallet's seat"
+    },
+    {
+      "code": 6052,
+      "name": "LockNotFunded",
+      "msg": "The Creator lock's rent is more than the creator's prepaid rent and refund"
+    },
+    {
+      "code": 6053,
+      "name": "TaxShareCollected",
+      "msg": "The Tax Share is collected already"
+    },
+    {
+      "code": 6054,
+      "name": "TaxShareNotCollected",
+      "msg": "The Tax Share is not collected yet"
+    },
+    {
+      "code": 6055,
+      "name": "NotTheTreasury",
+      "msg": "That is not Heat's treasury"
+    },
+    {
+      "code": 6056,
+      "name": "NotDone",
+      "msg": "The launch is neither failed nor opened"
+    },
+    {
+      "code": 6057,
+      "name": "CreatorCoinsNotLocked",
+      "msg": "The Creator lock did not take exactly the creator's coins"
     }
   ],
   "types": [
@@ -2042,6 +2650,92 @@
           },
           {
             "name": "amount",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CreatorLocked",
+      "docs": [
+        "The Creator lock (spec 2.1 step 13): the creator's coins in a Jupiter Lock escrow, and their seat closed."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "launch",
+            "type": "pubkey"
+          },
+          {
+            "name": "creator",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "escrow",
+            "docs": [
+              "The escrow, none when the creator's fill bought no coins."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "deposit",
+            "type": "u64"
+          },
+          {
+            "name": "fill",
+            "type": "u64"
+          },
+          {
+            "name": "spent",
+            "type": "u64"
+          },
+          {
+            "name": "coins",
+            "type": "u64"
+          },
+          {
+            "name": "opened_at",
+            "docs": [
+              "When trading opened, when the release starts and when all of it is free, Unix timestamps."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "cliff_time",
+            "type": "i64"
+          },
+          {
+            "name": "end_time",
+            "type": "i64"
+          },
+          {
+            "name": "rent",
+            "docs": [
+              "What the escrow and its coin account cost, and the part of it that came out of the seat's refund."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "rent_from_seat",
+            "type": "u64"
+          },
+          {
+            "name": "paid",
+            "docs": [
+              "The seat's refund and prepaid coin-account rent, less that part, paid to the Creator wallet; and the seat's own",
+              "rent, which it gets back as the seat closes."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "seat_rent",
             "type": "u64"
           }
         ]
@@ -2377,7 +3071,8 @@
           {
             "name": "refunded",
             "docs": [
-              "The refunds pushes and claims have paid, and how many seats have had their coins and refund."
+              "The refunds pushes and claims have paid, and from the Tax Share's collection on, the lamport dust the rounding",
+              "gathered too, which the Tax Share holds since; and how many seats still open have had their coins and refund."
             ],
             "type": "u64"
           },
@@ -2386,14 +3081,49 @@
             "type": "u32"
           },
           {
+            "name": "creator_deposit",
+            "docs": [
+              "What the Creator wallet's own seat asks and its tier, while it holds one (spec 2.1 step 13): its coins go only into",
+              "the Creator lock, and it gets no Tax Share."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "creator_tier",
+            "type": {
+              "defined": {
+                "name": "Tier"
+              }
+            }
+          },
+          {
+            "name": "tax_collected",
+            "docs": [
+              "Whether the window's fees are collected into the Tax Share (spec 2.1 step 14), and the Tax Share, in the quote's",
+              "raw units: those fees and the lamport dust of the open's rounding, what the seats are paid from."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "tax_share",
+            "type": "u64"
+          },
+          {
+            "name": "tax_fills_paid",
+            "docs": [
+              "The fills of the seats paid their Tax Share so far, from which each next seat's share is found to the lamport."
+            ],
+            "type": "u64"
+          },
+          {
             "name": "reserved",
             "docs": [
-              "Room for what the Creator lock and the Tax Share will record."
+              "Room kept, so the account keeps its size."
             ],
             "type": {
               "array": [
                 "u8",
-                28
+                2
               ]
             }
           },
@@ -2925,6 +3655,105 @@
       }
     },
     {
+      "name": "TaxShareCollected",
+      "docs": [
+        "The Tax Share collected (spec 2.1 step 14), in the quote's raw units: the window's fees less the pot's own fee, and the",
+        "lamport dust of the open's rounding."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "launch",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "fees",
+            "type": "u64"
+          },
+          {
+            "name": "dust",
+            "type": "u64"
+          },
+          {
+            "name": "tax_share",
+            "type": "u64"
+          },
+          {
+            "name": "basis",
+            "docs": [
+              "The fills it is shared by: every seat's but the creator's."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "treasury",
+            "docs": [
+              "Heat's treasury, when no seat but the creator's could take it and it went there."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "TaxSharePaid",
+      "docs": [
+        "A seat paid its Tax Share and closed, its rent returned to its wallet."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "launch",
+            "type": "pubkey"
+          },
+          {
+            "name": "wallet",
+            "type": "pubkey"
+          },
+          {
+            "name": "person",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "fill",
+            "type": "u64"
+          },
+          {
+            "name": "spent",
+            "type": "u64"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "seat_rent",
+            "type": "u64"
+          },
+          {
+            "name": "seats",
+            "docs": [
+              "Seats left open."
+            ],
+            "type": "u32"
+          }
+        ]
+      }
+    },
+    {
       "name": "Tier",
       "docs": [
         "A person's Depositor tier (spec 2.1 step 9, 6.3): how strongly they have shown they are one person."
@@ -3009,6 +3838,20 @@
     }
   ],
   "constants": [
+    {
+      "name": "CREATOR_LOCK_CLIFF_SECONDS",
+      "docs": [
+        "The Creator lock (spec 2.1 step 13, 12): nothing released for 7 days after the open, then a straight-line release,",
+        "second by second, until all of it is free 30 days after the open."
+      ],
+      "type": "i64",
+      "value": "604800"
+    },
+    {
+      "name": "CREATOR_LOCK_END_SECONDS",
+      "type": "i64",
+      "value": "2592000"
+    },
     {
       "name": "DEPOSIT_STEP",
       "docs": [

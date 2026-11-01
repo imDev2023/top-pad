@@ -1,8 +1,8 @@
 //! The fee program (spec 5.2): the partner and fee claimer on every config, forever, so it should rarely change.
 //! It holds Heat's settings (`FeeConfig`) and the on-chain list of Heat coins: one `CoinRecord` per coin our launch key
 //! co-signed or a Fair Open opened. It pays out every curve fee by ADR 0003's rules: the window claim sends a pool's Tax
-//! window fees to the treasury, and every later claim splits the pool's partner fees 50/50 between whoever holds its DBC
-//! creator role and the treasury. DBC pays each share straight from the pool to its owner's quote account, so no fee
+//! window fees to the treasury, or a Fair Open's, less the pot's own fee, to its launch's Tax Share; and every later claim
+//! splits the pool's partner fees 50/50 between whoever holds its DBC creator role and the treasury. DBC pays each share straight from the pool to its owner's quote account, so no fee
 //! ever rests here.
 use anchor_lang::{
     prelude::*,
@@ -29,8 +29,11 @@ pub const COIN_RECORD_SEED: &[u8] = b"coin_record";
 /// The seed of a `WindowClaim`, followed by its pool.
 pub const WINDOW_CLAIM_SEED: &[u8] = b"window_claim";
 /// The seed of the Fair Open program's coin registrar, a PDA of that program alone: its signature is how a CPI proves it
-/// comes from the Fair Open program's open.
+/// comes from the Fair Open program, registering a coin at its open or collecting its Tax Share.
 pub const COIN_REGISTRAR_SEED: &[u8] = b"coin_registrar";
+/// The seed of a Fair Open's pot, followed by its launch: the Fair Open program's wrapped-SOL account, which holds the
+/// pot's buy inside the creation transaction and the window's fees inside the Tax Share's collection, and nothing between.
+pub const POT_SEED: &[u8] = b"pot";
 /// The Tax window (spec 3.2, 12): Heat's configs charge the sniper tax for 60 one-second periods from a pool's activation
 /// point, so the window's fees are those of its first 60 seconds. `@top-pad/chain` checks it against the configs' tax.
 #[constant]
@@ -203,15 +206,15 @@ pub mod fee {
         Ok(())
     }
 
-    /// The window claim of a Heat coin (spec 4, 5.2): the first claim of its pool's partner fees once its Tax window has
-    /// ended, which anyone may send and Heat's keeper sends at 60 s. Whatever the pool holds by then counts as the
-    /// window's fees, so a claim sent late also moves the normal fees of the seconds it was late by (ADR 0003). An
-    /// Instant launch's window fees go to the treasury; a Fair Open's go to its Tax Share, which comes with the Creator
-    /// lock and Tax Share ticket, so until then its window claim is refused.
+    /// The window claim of an Instant launch's coin (spec 4, 5.2): the first claim of its pool's partner fees once its Tax
+    /// window has ended, which anyone may send and Heat's keeper sends at 60 s. Whatever the pool holds by then counts as
+    /// the window's fees, so a claim sent late also moves the normal fees of the seconds it was late by (ADR 0003), and
+    /// all of it goes to the treasury. A Fair Open's window fees go to its Tax Share instead
+    /// (`claim_fair_open_window_fees`).
     pub fn claim_window_fees(ctx: Context<ClaimWindowFees>) -> Result<()> {
         let record = &mut ctx.accounts.coin_record;
         require!(!record.window_claimed, FeeError::WindowAlreadyClaimed);
-        require!(record.launch_mode == LaunchMode::Instant, FeeError::TaxShareNotBuilt);
+        require!(record.launch_mode == LaunchMode::Instant, FeeError::FairOpenTaxShare);
         record.window_claimed = true;
         let a = &ctx.accounts;
         let claim = DbcClaim {
@@ -229,7 +232,49 @@ pub mod fee {
             dbc_event_authority: &a.dbc_event_authority,
             dbc_program: &a.dbc_program,
         };
-        let claimed = claim.window(&a.fee_config, &a.treasury_token_account)?;
+        let quote = QuoteAccounts::new(&a.quote_mint, &a.token_quote_program);
+        quote.check(&a.treasury_token_account, &a.fee_config.treasury, FeeError::NotTheTreasurysAccount)?;
+        let claimed = claim.window(&a.treasury_token_account, 0)?;
+        emit_cpi!(claimed.event(true));
+        Ok(())
+    }
+
+    /// The window claim of a Fair Open's coin (spec 2.1 step 14, 4): its pool's partner fees once its Tax window has ended,
+    /// less the pot's own fee, go to the launch's Tax Share, which the Fair Open program pays out to the depositors. The
+    /// pot's own fee stays in the pool, so the next Creator Earnings claim splits it 50/50 like any trade's. Only the
+    /// Fair Open program can send it, signing as its coin registrar from `collect_tax_share`, which anyone may send: it
+    /// opens the launch's pot to take the fees and unwraps them into the launch's vault in the same instruction.
+    pub fn claim_fair_open_window_fees(ctx: Context<ClaimFairOpenWindowFees>) -> Result<()> {
+        let a = &ctx.accounts;
+        let fair_open_program = a.fee_config.fair_open_program;
+        let (registrar, _) = Pubkey::find_program_address(&[COIN_REGISTRAR_SEED], &fair_open_program);
+        require_keys_eq!(a.registrar.key(), registrar, FeeError::NotTheFairOpenProgram);
+        let record = &a.coin_record;
+        require!(!record.window_claimed, FeeError::WindowAlreadyClaimed);
+        let launch = match (record.launch_mode, record.fair_open_launch) {
+            (LaunchMode::FairOpen, Some(launch)) => launch,
+            _ => return err!(FeeError::NotAFairOpen),
+        };
+        let (pot, _) = Pubkey::find_program_address(&[POT_SEED, launch.as_ref()], &fair_open_program);
+        require_keys_eq!(a.tax_share_account.key(), pot, FeeError::NotTheTaxShare);
+        let pot_fee = record.pot_fee;
+        let claim = DbcClaim {
+            fee_claimer: &a.fee_claimer,
+            fee_claimer_token_account: &a.fee_claimer_token_account,
+            pool_authority: &a.pool_authority,
+            config: &a.config,
+            pool: &a.pool,
+            base_vault: &a.base_vault,
+            quote_vault: &a.quote_vault,
+            mint: &a.mint,
+            quote_mint: &a.quote_mint,
+            token_base_program: &a.token_base_program,
+            token_quote_program: &a.token_quote_program,
+            dbc_event_authority: &a.dbc_event_authority,
+            dbc_program: &a.dbc_program,
+        };
+        let claimed = claim.window(&a.tax_share_account, pot_fee)?;
+        ctx.accounts.coin_record.window_claimed = true;
         emit_cpi!(claimed.event(true));
         Ok(())
     }
@@ -256,7 +301,9 @@ pub mod fee {
             dbc_event_authority: &a.dbc_event_authority,
             dbc_program: &a.dbc_program,
         };
-        let claimed = claim.window(&a.fee_config, &a.treasury_token_account)?;
+        let quote = QuoteAccounts::new(&a.quote_mint, &a.token_quote_program);
+        quote.check(&a.treasury_token_account, &a.fee_config.treasury, FeeError::NotTheTreasurysAccount)?;
+        let claimed = claim.window(&a.treasury_token_account, 0)?;
         emit_cpi!(claimed.event(false));
         Ok(())
     }
@@ -416,8 +463,9 @@ impl WindowClaimed {
 }
 
 impl<'info> DbcClaim<'_, 'info> {
-    /// Pays everything the pool's partner fees hold to the treasury, once the pool's Tax window has ended.
-    fn window(&self, fee_config: &FeeConfig, treasury_token_account: &AccountInfo<'info>) -> Result<WindowClaimed> {
+    /// Pays what the pool's partner fees hold, less `keep`, to `destination`, once the pool's Tax window has ended: the
+    /// window's fees, all of them to the treasury, or a Fair Open's to its Tax Share, keeping back the pot's own fee.
+    fn window(&self, destination: &AccountInfo<'info>, keep: u64) -> Result<WindowClaimed> {
         let pool = dbc::Pool::read(self.pool)?;
         require_keys_eq!(pool.base_mint, self.mint.key(), FeeError::PoolMintMismatch);
         let window_ended_at = i64::try_from(pool.activation_point)
@@ -427,17 +475,18 @@ impl<'info> DbcClaim<'_, 'info> {
         let claimed_at = Clock::get()?.unix_timestamp;
         require_gte!(claimed_at, window_ended_at, FeeError::TaxWindowOpen);
         let quote = QuoteAccounts::new(self.quote_mint, self.token_quote_program);
-        quote.check(treasury_token_account, &fee_config.treasury, FeeError::NotTheTreasurysAccount)?;
         quote.check(self.fee_claimer_token_account, &FEE_CLAIMER, FeeError::NotTheFeeClaimersAccount)?;
-        if pool.partner_quote_fee > 0 {
-            self.pay(treasury_token_account, pool.partner_quote_fee)?;
+        // No claim can run before the window claim, so the pool still holds at least the pot's own fee.
+        let amount = pool.partner_quote_fee.saturating_sub(keep);
+        if amount > 0 {
+            self.pay(destination, amount)?;
         }
         Ok(WindowClaimed {
             pool: self.pool.key(),
             mint: pool.base_mint,
             config: pool.config,
-            destination: treasury_token_account.key(),
-            amount: pool.partner_quote_fee,
+            destination: destination.key(),
+            amount,
             window_ended_at,
             claimed_at,
         })
@@ -695,6 +744,60 @@ pub struct ClaimWindowFees<'info> {
 
 #[event_cpi]
 #[derive(Accounts)]
+pub struct ClaimFairOpenWindowFees<'info> {
+    #[account(seeds = [FEE_CONFIG_SEED], bump = fee_config.bump)]
+    pub fee_config: Account<'info, FeeConfig>,
+    /// The Fair Open program's coin registrar, checked in the handler against the program the `FeeConfig` names.
+    pub registrar: Signer<'info>,
+    #[account(
+        mut,
+        seeds = [COIN_RECORD_SEED, mint.key().as_ref()],
+        bump = coin_record.bump,
+        has_one = pool @ FeeError::PoolMismatch,
+    )]
+    pub coin_record: Account<'info, CoinRecord>,
+    /// CHECK: the launch's pot, the Fair Open program's wrapped-SOL account the Tax Share is collected in; its address is
+    /// checked in the handler, its mint by SPL Token.
+    #[account(mut)]
+    pub tax_share_account: UncheckedAccount<'info>,
+    /// CHECK: the fee program's `fee_claimer` PDA, which signs DBC's claim.
+    #[account(address = FEE_CLAIMER)]
+    pub fee_claimer: UncheckedAccount<'info>,
+    /// CHECK: the fee claimer's own associated quote account, checked in the handler; DBC never pays into it.
+    #[account(mut)]
+    pub fee_claimer_token_account: UncheckedAccount<'info>,
+    /// CHECK: DBC's pool authority, owner of the pool's vaults.
+    #[account(address = dbc::POOL_AUTHORITY)]
+    pub pool_authority: UncheckedAccount<'info>,
+    /// CHECK: the pool's config; DBC checks it.
+    pub config: UncheckedAccount<'info>,
+    /// CHECK: owned by DBC; its discriminator and base mint are checked in the handler, the rest by DBC.
+    #[account(mut, owner = dbc::PROGRAM_ID @ FeeError::NotADbcPool)]
+    pub pool: UncheckedAccount<'info>,
+    /// CHECK: the pool's coin vault; DBC checks it.
+    #[account(mut)]
+    pub base_vault: UncheckedAccount<'info>,
+    /// CHECK: the pool's quote vault, which DBC pays from; DBC checks it.
+    #[account(mut)]
+    pub quote_vault: UncheckedAccount<'info>,
+    /// CHECK: the coin, the pool's base mint; checked in the handler and by DBC.
+    pub mint: UncheckedAccount<'info>,
+    /// CHECK: the config's quote mint; DBC checks it.
+    pub quote_mint: UncheckedAccount<'info>,
+    /// CHECK: the coin's token program; DBC checks it.
+    pub token_base_program: UncheckedAccount<'info>,
+    /// CHECK: the quote's token program; DBC checks it.
+    pub token_quote_program: UncheckedAccount<'info>,
+    /// CHECK: DBC's event authority.
+    #[account(address = dbc::EVENT_AUTHORITY)]
+    pub dbc_event_authority: UncheckedAccount<'info>,
+    /// CHECK: DBC itself.
+    #[account(address = dbc::PROGRAM_ID)]
+    pub dbc_program: UncheckedAccount<'info>,
+}
+
+#[event_cpi]
+#[derive(Accounts)]
 pub struct ClaimUnlistedWindowFees<'info> {
     #[account(seeds = [FEE_CONFIG_SEED], bump = fee_config.bump)]
     pub fee_config: Account<'info, FeeConfig>,
@@ -826,9 +929,10 @@ pub struct WindowFeesClaimed {
     pub config: Pubkey,
     /// Whether our launch key co-signed the coin: false for a pool made around Heat's flow.
     pub heat: bool,
-    /// The quote account paid: the treasury's, for an Instant launch and for a pool made around Heat's flow.
+    /// The quote account paid: the treasury's, for an Instant launch and for a pool made around Heat's flow; a Fair
+    /// Open's pot, for its Tax Share.
     pub destination: Pubkey,
-    /// In the quote's raw units.
+    /// In the quote's raw units: a Fair Open's leaves out the pot's own fee, which stays in the pool.
     pub amount: u64,
     /// When the Tax window ended and when the claim ran, Unix timestamps: it also paid the normal fees of the seconds
     /// between (spec 4).
@@ -875,8 +979,8 @@ pub enum FeeError {
     WindowAlreadyClaimed,
     #[msg("The pool's window claim has not run yet")]
     WindowNotClaimed,
-    #[msg("A Fair Open's window fees go to its Tax Share, which this program cannot pay yet")]
-    TaxShareNotBuilt,
+    #[msg("A Fair Open's window fees go to its Tax Share, through the Fair Open program's collect_tax_share")]
+    FairOpenTaxShare,
     #[msg("The creator's half goes to the creator role holder's associated quote account")]
     NotTheCreatorsAccount,
     #[msg("The treasury's share goes to the treasury's associated quote account")]
@@ -885,6 +989,10 @@ pub enum FeeError {
     NotTheFeeClaimersAccount,
     #[msg("The fee claimer holds the pool's creator role, so its creator's half has nowhere to go")]
     CreatorRoleHeldByFeeClaimer,
-    #[msg("Only the Fair Open program's open registers a Fair Open's coin")]
+    #[msg("Only the Fair Open program registers a Fair Open's coin or collects its Tax Share")]
     NotTheFairOpenProgram,
+    #[msg("The coin is not a Fair Open's")]
+    NotAFairOpen,
+    #[msg("A Fair Open's window fees go to its launch's pot, its Tax Share")]
+    NotTheTaxShare,
 }

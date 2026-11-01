@@ -32,6 +32,8 @@ solana-sha256-hasher.workspace = true
 fee = { path = "../fee", features = ["no-entrypoint"] }
 # Our stand-in for DBC, whose made-up price and fees the open's tests check against.
 dbc_stand_in = { path = "../../tests/dbc-stand-in", features = ["no-entrypoint"] }
+# Our stand-in for Jupiter Lock, whose escrow layout the Creator lock's tests read.
+lock_stand_in = { path = "../../tests/lock-stand-in", features = ["no-entrypoint"] }
 # The precompiles, so a deposit's admission is verified by the real Ed25519 precompile.
 litesvm = { workspace = true, features = ["precompiles"] }
 solana-message.workspace = true

@@ -149,7 +149,7 @@ fn refunds_nothing_before_the_launch_fails() {
 #[test]
 fn returns_the_creators_rent_once_every_seat_is_back() {
     let (mut t, launch, depositors) = closed_window(SOL, &[(Tier::Scored, 20 * STEP), (Tier::Verified, 30 * STEP)]);
-    refused(t.close_launch(&launch), Code::NotFailed);
+    refused(t.close_launch(&launch), Code::NotDone);
     t.mark_failed(&launch).unwrap();
     let wallet = depositors[0].wallet.insecure_clone();
     t.withdraw_failed(&launch, &depositors[0], &wallet).unwrap();

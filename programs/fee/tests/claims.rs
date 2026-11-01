@@ -337,25 +337,80 @@ fn a_tax_window_ends_only_by_the_clock() {
     assert_error(t.claim_window(&market, &payees), FeeErrorCode::TaxWindowOpen);
 }
 
-#[test]
-fn a_fair_open_coins_window_claim_waits_for_the_tax_share() {
-    // A Fair Open's window fees are its depositors' Tax Share (spec 4), which comes with the Creator lock and Tax Share
-    // ticket; until then its window claim is refused, so they never reach the treasury instead.
-    let mut t = Test::initialized();
-    let market = t.heat_coin();
-    let payees = t.payees(&market);
-    let address = coin_record_address(&market.coin.mint);
-    let mut record = t.read::<CoinRecord>(&address);
-    record.launch_mode = LaunchMode::FairOpen;
-    let mut account = t.svm.get_account(&address).unwrap();
-    let mut data = Vec::with_capacity(8 + CoinRecord::INIT_SPACE);
-    record.try_serialize(&mut data).unwrap();
-    account.data[..data.len()].copy_from_slice(&data);
-    t.svm.set_account(address, account).unwrap();
+impl Test {
+    /// A Fair Open's coin: a Heat coin whose record names `launch` and the pot's own fee, as the Fair Open program's open
+    /// registers it.
+    fn fair_open_coin(&mut self, launch: Pubkey, pot_fee: u64) -> Market {
+        let market = self.heat_coin();
+        let address = coin_record_address(&market.coin.mint);
+        let mut record = self.read::<CoinRecord>(&address);
+        record.launch_mode = LaunchMode::FairOpen;
+        record.fair_open_launch = Some(launch);
+        record.pot_fee = pot_fee;
+        let mut account = self.svm.get_account(&address).unwrap();
+        let mut data = Vec::with_capacity(8 + CoinRecord::INIT_SPACE);
+        record.try_serialize(&mut data).unwrap();
+        account.data[..data.len()].copy_from_slice(&data);
+        self.svm.set_account(address, account).unwrap();
+        market
+    }
 
+    /// `claim_fair_open_window_fees`, signed by `registrar`, paying into `tax_share_account`.
+    fn claim_fair_open_window(&mut self, market: &Market, registrar: &Keypair, tax_share_account: Pubkey) -> Sent {
+        let c = market.coin;
+        let fee_claimer = self.quote_account(market, &FEE_CLAIMER);
+        let accounts = fee::accounts::ClaimFairOpenWindowFees {
+            fee_config: fee_config_address(),
+            registrar: registrar.pubkey(),
+            coin_record: coin_record_address(&c.mint),
+            tax_share_account,
+            fee_claimer: FEE_CLAIMER,
+            fee_claimer_token_account: fee_claimer,
+            pool_authority: dbc::POOL_AUTHORITY,
+            config: c.config,
+            pool: c.pool,
+            base_vault: market.base_vault,
+            quote_vault: market.quote_vault,
+            mint: c.mint,
+            quote_mint: market.quote_mint,
+            token_base_program: TOKEN_PROGRAM,
+            token_quote_program: TOKEN_PROGRAM,
+            dbc_event_authority: dbc::EVENT_AUTHORITY,
+            dbc_program: dbc::PROGRAM_ID,
+            event_authority: event_authority(),
+            program: fee::id(),
+        };
+        let ix = instruction(accounts.to_account_metas(None), fee::instruction::ClaimFairOpenWindowFees {}.data());
+        self.send(&[ix], &[registrar])
+    }
+}
+
+#[test]
+fn a_fair_open_coins_window_fees_never_reach_the_treasury() {
+    // A Fair Open's window fees are its depositors' Tax Share (spec 4): the Instant launch's window claim refuses its coin,
+    // so they never reach the treasury instead. The Fair Open program's tests run its own window claim, signed by its
+    // coin registrar, end to end.
+    let mut t = Test::initialized();
+    let market = t.fair_open_coin(Pubkey::new_unique(), 100);
+    let payees = t.payees(&market);
     t.accrue(&market, 1_000);
     t.at(TAX_WINDOW_SECONDS);
-    assert_error(t.claim_window(&market, &payees), FeeErrorCode::TaxShareNotBuilt);
+    assert_error(t.claim_window(&market, &payees), FeeErrorCode::FairOpenTaxShare);
+    assert_eq!(t.partner_quote_fee(&market), 1_000);
+}
+
+#[test]
+fn only_the_fair_open_program_collects_a_fair_opens_window_fees() {
+    let mut t = Test::initialized();
+    let launch = Pubkey::new_unique();
+    let market = t.fair_open_coin(launch, 100);
+    t.accrue(&market, 1_000);
+    t.at(TAX_WINDOW_SECONDS);
+    let fair_open_program = t.settings().fair_open_program;
+    let pot = Pubkey::find_program_address(&[fee::POT_SEED, launch.as_ref()], &fair_open_program).0;
+    // A plain key cannot stand in for the coin registrar, a PDA only the Fair Open program signs for.
+    let impostor = Keypair::new();
+    assert_error(t.claim_fair_open_window(&market, &impostor, pot), FeeErrorCode::NotTheFairOpenProgram);
     assert_eq!(t.partner_quote_fee(&market), 1_000);
 }
 

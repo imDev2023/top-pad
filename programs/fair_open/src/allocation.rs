@@ -153,9 +153,69 @@ pub fn share(fill: u64, spend: u64, spent: u64, coins: u64) -> (u64, u64) {
     ((fill * spent as u128).div_ceil(spend) as u64, (fill * coins as u128 / spend) as u64)
 }
 
+/// What every seat spent of the rung `spent`, added up (spec 2.1 step 11): each seat's share rounded up, so it is the rung
+/// plus the lamport dust the rounding gathered, which joins the launch's Tax Share. Found from the counts per step, as the
+/// allocation is, so no seat need be read.
+pub fn seats_spent(others: &[u32], unverified: &[u32], step: u64, levels: (u64, u64), spend: u64, spent: u64) -> u64 {
+    let tier = |counts: &[u32], level: u64| -> u128 {
+        (0..counts.len())
+            .map(|k| counts.at(k) * share(((k as u64 + 1) * step).min(level), spend, spent, 0).0 as u128)
+            .sum()
+    };
+    (tier(others, levels.0) + tier(unverified, levels.1)) as u64
+}
+
+/// A seat's Tax Share (spec 2.1 step 14): the Tax Share `total` is paid in proportion to each seat's fill, which is in
+/// proportion to what it spent, among seats whose fills add up to `basis`. Each seat paid moves `paid` on by its fill,
+/// and gets what that move adds to the total's share rounded down, so the shares add up to the total to the lamport once
+/// every seat is paid, whatever order they are paid in.
+pub fn tax_share(total: u64, basis: u64, paid: u64, fill: u64) -> u64 {
+    if basis == 0 {
+        return 0;
+    }
+    let upto = |fills: u64| (total as u128 * fills.min(basis) as u128 / basis as u128) as u64;
+    upto(paid + fill) - upto(paid)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pays_the_tax_share_to_the_lamport_in_any_order() {
+        let fills = [425_000_000u64, 425_000_000, 70_833_333, 70_833_333, 1];
+        let basis: u64 = fills.iter().sum();
+        for total in [0, 1, 7, 990_000, 123_456_789_011] {
+            for order in [[0, 1, 2, 3, 4], [4, 3, 2, 1, 0], [2, 4, 0, 3, 1]] {
+                let mut paid = 0;
+                let mut out = 0;
+                for i in order {
+                    let share = tax_share(total, basis, paid, fills[i]);
+                    // Within a lamport of its exact share.
+                    let exact = total as f64 * fills[i] as f64 / basis as f64;
+                    assert!((share as f64 - exact).abs() < 1.0, "{share} vs {exact}");
+                    paid += fills[i];
+                    out += share;
+                }
+                assert_eq!(out, total);
+            }
+        }
+        assert_eq!(tax_share(100, 0, 0, 5), 0);
+    }
+
+    #[test]
+    fn adds_up_what_the_seats_spent() {
+        // Spec 2.1 step 11's devnet pot: 3 Verified seats asking 0.6 SOL and 6 Unverified asking 0.1 SOL, opened on the
+        // 1.615 SOL rung; each seat's share is rounded up, so they add up to a little more than the rung.
+        let others = counts(200, &[(60, 3)]);
+        let unverified = counts(10, &[(10, 6)]);
+        let a = allocate(&others, &unverified, STEP, 1_700_000_000);
+        let rung = 1_615_000_000;
+        let total = seats_spent(&others, &unverified, STEP, (a.others.level, a.unverified.level), a.spend, rung);
+        let each = |level: u64| share(level, a.spend, rung, 0).0;
+        assert_eq!(total, 3 * each(a.others.level) + 6 * each(a.unverified.level));
+        assert!(total >= rung && total - rung < 9);
+    }
 
     const STEP: u64 = 10_000_000;
     const SOL: u64 = 1_000_000_000;

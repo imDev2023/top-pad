@@ -50,12 +50,14 @@ pub enum FeeErrorCode {
     TaxWindowOpen,
     WindowAlreadyClaimed,
     WindowNotClaimed,
-    TaxShareNotBuilt,
+    FairOpenTaxShare,
     NotTheCreatorsAccount,
     NotTheTreasurysAccount,
     NotTheFeeClaimersAccount,
     CreatorRoleHeldByFeeClaimer,
     NotTheFairOpenProgram,
+    NotAFairOpen,
+    NotTheTaxShare,
 }
 
 /// A pool and config written with DBC's layout and owner, as DBC would have left them.

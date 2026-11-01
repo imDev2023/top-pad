@@ -2,8 +2,9 @@
 //! person admitted by our admission server; at the scheduled time opens it in the coin's creation transaction, where the
 //! pot's buy is the pool's first swap and every depositor buys at its one price; then delivers every seat its coins and
 //! refund. A launch that cannot open fails on chain, after which every depositor takes back their deposit and both rents
-//! with no Heat server running (spec 2.1 steps 7 and 9 to 12, and 15). The Creator lock and the Tax Share come with a
-//! later slice (spec 14); the launch and seat accounts keep room for what they will record.
+//! with no Heat server running (spec 2.1 steps 7 and 9 to 12, and 15). After the open the creator's coins go into a
+//! Jupiter Lock escrow nobody can cancel, and the Tax window's sniper tax is paid out to the depositors as their Tax
+//! Share, closing their seats (spec 2.1 steps 13 and 14).
 use {
     anchor_lang::{
         prelude::*,
@@ -39,8 +40,11 @@ pub const SEAT_SEED: &[u8] = b"seat";
 /// closed once DBC's swap has spent it, in the same transaction.
 pub const POT_SEED: &[u8] = b"pot";
 /// The seed of the coin registrar, the PDA whose signature tells the fee program a coin's registration comes from the
-/// open (`fee::COIN_REGISTRAR_SEED`).
+/// open, and a window claim from the Tax Share's collection (`fee::COIN_REGISTRAR_SEED`).
 pub const COIN_REGISTRAR_SEED: &[u8] = b"coin_registrar";
+/// The seed of a launch's creator locker, followed by the launch: a system account of this program's that funds the
+/// Creator lock's escrow and sends it the creator's coins, as the escrow's `base` and `sender` (`jupiter_lock`).
+pub const CREATOR_LOCK_SEED: &[u8] = b"creator_lock";
 
 /// The deposit window (spec 2.1 step 4): a fixed 10 minutes, ending at the scheduled open.
 #[constant]
@@ -67,6 +71,12 @@ pub const VERIFIED_CAP_STEPS: u64 = 200;
 /// The pot's cap, as a share of the config's Graduation Target (spec 12): 20%.
 #[constant]
 pub const POT_CAP_PERCENT: u64 = 20;
+/// The Creator lock (spec 2.1 step 13, 12): nothing released for 7 days after the open, then a straight-line release,
+/// second by second, until all of it is free 30 days after the open.
+#[constant]
+pub const CREATOR_LOCK_CLIFF_SECONDS: i64 = 7 * 24 * 3600;
+#[constant]
+pub const CREATOR_LOCK_END_SECONDS: i64 = 30 * 24 * 3600;
 /// A coin account (an SPL token account), whose rent each depositor prepays for the push to create (spec 2.1 step 9).
 pub const TOKEN_ACCOUNT_LEN: usize = 165;
 /// Wrapped SOL: the only quote a Fair Open takes until a non-SOL quote's deposits are built (spec 5.1, 11.2).
@@ -78,7 +88,8 @@ pub const TOKEN_PROGRAM: Pubkey = pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss62
 /// the open, paid back from the prepayment exactly what they cost it: DBC's mint, pool and two vaults, the coin's
 /// Metaplex metadata with Metaplex's creation fee, the pot's coin account, and the coin's record in the fee program.
 /// Measured on devnet (2026-10-31): DBC's pool creation cost its payer the metadata's 607 bytes and 0.01 SOL fee on top of
-/// its own accounts' rent.
+/// its own accounts' rent. The prepayment also covers the Creator lock's escrow and its coin account, which come out of
+/// what is left of it after the open, so the creator's deposit never has to (#49).
 pub mod open_rent {
     pub const MINT_LEN: usize = 82;
     /// DBC's `VirtualPool`, zero-copy: 416 bytes after its discriminator.
@@ -89,7 +100,7 @@ pub mod open_rent {
     pub const COIN_RECORD_LEN: usize = 157;
 }
 
-/// What the open's accounts cost at `rent`, prepaid by the creator (`open_rent`).
+/// What the open's accounts cost at `rent`, prepaid by the creator (`open_rent`), with the Creator lock's.
 pub fn open_rent(rent: &Rent) -> u64 {
     use open_rent::*;
     rent.minimum_balance(MINT_LEN)
@@ -98,6 +109,87 @@ pub fn open_rent(rent: &Rent) -> u64 {
         + rent.minimum_balance(METADATA_LEN)
         + METAPLEX_CREATE_FEE
         + rent.minimum_balance(COIN_RECORD_LEN)
+        + lock_rent(rent)
+}
+
+/// What the Creator lock's accounts cost at `rent`: Jupiter Lock's escrow and the escrow's account of the coin.
+pub fn lock_rent(rent: &Rent) -> u64 {
+    rent.minimum_balance(jupiter_lock::ESCROW_LEN) + rent.minimum_balance(TOKEN_ACCOUNT_LEN)
+}
+
+/// Jupiter Lock (spec 5.3, ADR 0004), which holds the Creator lock, and the one instruction this program calls, from the
+/// IDL of release 0.5.0 that `@meteora-ag/met-lock-sdk` ships: `create_vesting_escrow_v2` makes an escrow at the PDA of
+/// its `base` key, which must sign, and moves its coins in from `sender_token` with `sender`'s signature, which may be the
+/// account's delegate (checked on devnet on 2026-11-01); `sender` pays the escrow's rent and is recorded as its creator,
+/// a creator with no power over it once `cancel_mode` is 0. Lock unlocks `cliff_unlock_amount` at `cliff_time`, then
+/// `amount_per_period` every `frequency` seconds, `number_of_period` times.
+pub mod jupiter_lock {
+    use anchor_lang::prelude::*;
+
+    pub const PROGRAM_ID: Pubkey = pubkey!("LocpQgucEQHbqNABEYvBvwoxCPsSbG91A1QaQhQQqjn");
+    /// Lock's event authority, the PDA its `emit_cpi!` events are signed by; the tests derive it.
+    pub const EVENT_AUTHORITY: Pubkey = pubkey!("AqUDk3wybxjZujrNbKmjr2YTUZ8RA1a1nyGgs1zSmvTG");
+    pub const CREATE_VESTING_ESCROW_V2: [u8; 8] = [181, 155, 104, 183, 182, 128, 35, 47];
+    pub const ESCROW_SEED: &[u8] = b"escrow";
+    /// `VestingEscrow`: its discriminator and 288 bytes.
+    pub const ESCROW_LEN: usize = 8 + 288;
+    /// Nobody, Heat included, can cancel the escrow; only its recipient can say who receives it.
+    pub const CANCEL_NOBODY: u8 = 0;
+    pub const UPDATE_RECIPIENT_ONLY: u8 = 2;
+
+    /// `CreateVestingEscrowParameters`, in its order.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct Schedule {
+        pub vesting_start_time: u64,
+        pub cliff_time: u64,
+        pub frequency: u64,
+        pub cliff_unlock_amount: u64,
+        pub amount_per_period: u64,
+        pub number_of_period: u64,
+    }
+
+    impl Schedule {
+        /// The Creator lock of `coins` for a coin opened at `opened_at` (spec 2.1 step 13): nothing until 7 days after
+        /// the open, then one equal part every second until 30 days after it. The part that does not divide evenly,
+        /// less than one coin's worth of seconds, is released at the cliff, so every coin is in the schedule.
+        pub fn creator_lock(opened_at: i64, coins: u64) -> Schedule {
+            let cliff = opened_at + super::CREATOR_LOCK_CLIFF_SECONDS;
+            let periods = (super::CREATOR_LOCK_END_SECONDS - super::CREATOR_LOCK_CLIFF_SECONDS) as u64;
+            let per_period = coins / periods;
+            Schedule {
+                vesting_start_time: opened_at as u64,
+                cliff_time: cliff as u64,
+                frequency: 1,
+                cliff_unlock_amount: coins - per_period * periods,
+                amount_per_period: per_period,
+                number_of_period: periods,
+            }
+        }
+
+        /// When the last part is released.
+        pub fn end_time(&self) -> u64 {
+            self.cliff_time + self.frequency * self.number_of_period
+        }
+
+        /// `create_vesting_escrow_v2(params, None)`'s instruction data.
+        pub fn data(&self) -> Vec<u8> {
+            let mut data = CREATE_VESTING_ESCROW_V2.to_vec();
+            for n in [
+                self.vesting_start_time,
+                self.cliff_time,
+                self.frequency,
+                self.cliff_unlock_amount,
+                self.amount_per_period,
+                self.number_of_period,
+            ] {
+                data.extend_from_slice(&n.to_le_bytes());
+            }
+            data.extend_from_slice(&[UPDATE_RECIPIENT_ONLY, CANCEL_NOBODY]);
+            // No remaining accounts: Heat coins are classic SPL tokens, with no transfer hook.
+            data.push(0);
+            data
+        }
+    }
 }
 
 /// Meteora's DBC program and the parts of a config this program reads, from the IDL of release 0.2.2 that the generated
@@ -117,15 +209,22 @@ pub mod dbc {
     pub const POOL_CONFIG_OFFSET: usize = 72;
     pub const POOL_BASE_MINT_OFFSET: usize = 136;
     pub const POOL_PARTNER_QUOTE_FEE_OFFSET: usize = 272;
+    /// When trading opened, a Unix timestamp on Heat's configs: the Creator lock counts from it.
+    pub const POOL_ACTIVATION_POINT_OFFSET: usize = 296;
     /// The instructions of the creation transaction (`creation`).
     pub const INITIALIZE_POOL_WITH_SPL_TOKEN: [u8; 8] = [140, 85, 215, 176, 102, 54, 104, 79];
     pub const SWAP2: [u8; 8] = [65, 75, 63, 76, 235, 91, 91, 136];
 }
 
-/// The fee program's `register_fair_open_coin(launch, pot_fee)`, which the open calls signed by the coin registrar;
-/// the tests check the discriminator against the fee program's own.
+/// The fee program's `register_fair_open_coin(launch, pot_fee)`, which the open calls, and its
+/// `claim_fair_open_window_fees`, which the Tax Share's collection calls, both signed by the coin registrar; and where
+/// its `FeeConfig` keeps the treasury. The tests check these against the fee program's own.
 pub mod fee {
     pub const REGISTER_FAIR_OPEN_COIN_DISCRIMINATOR: [u8; 8] = [192, 62, 175, 159, 158, 240, 43, 24];
+    pub const CLAIM_FAIR_OPEN_WINDOW_FEES_DISCRIMINATOR: [u8; 8] = [52, 254, 119, 71, 153, 30, 143, 36];
+    pub const FEE_CONFIG_DISCRIMINATOR: [u8; 8] = [143, 52, 146, 187, 219, 123, 76, 155];
+    /// `FeeConfig`: the discriminator, then the treasury.
+    pub const FEE_CONFIG_TREASURY_OFFSET: usize = 8;
 }
 
 /// A durable nonce account as the system program keeps it (`nonce::state::Versions`): the version and state tags, each a
@@ -247,7 +346,12 @@ pub mod fair_open {
             coins: 0,
             refunded: 0,
             delivered: 0,
-            reserved: [0; 28],
+            creator_deposit: 0,
+            creator_tier: Tier::Unverified,
+            tax_collected: false,
+            tax_share: 0,
+            tax_fills_paid: 0,
+            reserved: [0; 2],
             bump: ctx.bumps.launch,
             vault_bump: ctx.bumps.vault,
         });
@@ -328,6 +432,10 @@ pub mod fair_open {
         transfer_in(depositor, &ctx.accounts.vault, &ctx.accounts.system_program, amount)?;
         seat.deposit = deposit;
         launch.count_in(seat.tier, deposit)?;
+        if seat.wallet == launch.creator {
+            launch.creator_deposit = deposit;
+            launch.creator_tier = seat.tier;
+        }
         check_vault(&ctx.accounts.vault, launch)?;
         emit_cpi!(Deposited {
             launch: launch.key(),
@@ -364,6 +472,9 @@ pub mod fair_open {
             paid += seat.coin_rent;
             launch.coin_rent -= seat.coin_rent;
             launch.seats -= 1;
+        }
+        if seat.wallet == launch.creator {
+            launch.creator_deposit = deposit;
         }
         pay(&ctx.accounts.vault, &ctx.accounts.wallet, paid)?;
         check_vault(&ctx.accounts.vault, launch)?;
@@ -430,14 +541,7 @@ pub mod fair_open {
         let vault = ctx.accounts.vault.to_account_info();
         pay(&ctx.accounts.vault, &pot, rent.saturating_sub(pot.lamports()) + rung)?;
         let pot_seeds: &[&[u8]] = &[POT_SEED, launch_key.as_ref(), &[ctx.bumps.pot]];
-        let mut data = 8u32.to_le_bytes().to_vec();
-        data.extend_from_slice(&(TOKEN_ACCOUNT_LEN as u64).to_le_bytes());
-        let allocate = Instruction {
-            program_id: system_program::ID,
-            accounts: vec![AccountMeta::new(pot.key(), true), AccountMeta::new(vault.key(), false)],
-            data,
-        };
-        invoke_signed(&allocate, &[pot.clone(), vault], &[pot_seeds])?;
+        allocate_pot(&pot, &vault, pot_seeds)?;
         let system = ctx.accounts.system_program.key();
         let assign = system_program::Assign { account_to_assign: pot.clone() };
         system_program::assign(CpiContext::new_with_signer(system, assign, &[pot_seeds]), &TOKEN_PROGRAM)?;
@@ -608,6 +712,228 @@ pub mod fair_open {
         check_vault(&ctx.accounts.vault, &ctx.accounts.launch)
     }
 
+    /// The Creator lock (spec 2.1 step 13, ADR 0004): anyone may send it once the launch has opened, and our keeper does at
+    /// once. The creator's seat's coins go from the pot into a Jupiter Lock escrow, nothing released for 7 days after the
+    /// open and all of it by day 30, the Creator wallet its recipient and the only one who can change that, and nobody,
+    /// Heat included, able to cancel it. The pot approves the creator locker for exactly those coins and the locker sends
+    /// them, so they can leave the pot for the escrow alone. The escrow's rent comes out of the creator's prepaid rent,
+    /// or, for a launch scheduled before the prepayment covered it, out of the seat's refund; the rest of the seat's
+    /// refund, its prepaid coin-account rent and the seat's own rent go back to the Creator wallet, and the seat closes:
+    /// it gets no Tax Share.
+    pub fn lock_creator(ctx: Context<LockCreator>) -> Result<()> {
+        let launch = &mut ctx.accounts.launch;
+        require!(launch.status == LaunchStatus::Opened, FairOpenError::NotOpened);
+        let seat = &ctx.accounts.seat;
+        require!(!seat.delivered, FairOpenError::AlreadyDelivered);
+        check_pot_coins(launch, &ctx.accounts.pot_coins, &ctx.accounts.mint)?;
+        // A launch scheduled before the creator's seat was tracked learns it here, unless its Tax Share's basis is set.
+        if !launch.tax_collected {
+            launch.creator_deposit = seat.deposit;
+            launch.creator_tier = seat.tier;
+        }
+        let outcome = launch.outcome(seat.tier, seat.deposit);
+        let opened_at = activation_point(&ctx.accounts.pool, launch)?;
+        let schedule = jupiter_lock::Schedule::creator_lock(opened_at, outcome.coins);
+        let launch_key = launch.key();
+        let (nonce, bump) = (launch.nonce, launch.bump);
+        let launch_seeds: &[&[u8]] = &[LAUNCH_SEED, nonce.as_ref(), &[bump]];
+        let locker_seeds: &[&[u8]] = &[CREATOR_LOCK_SEED, launch_key.as_ref(), &[ctx.bumps.locker]];
+
+        let mut rent = 0;
+        if outcome.coins > 0 {
+            // The locker pays for the escrow and its coin account; whatever it holds already counts toward that.
+            let a = &ctx.accounts;
+            let locker = a.locker.to_account_info();
+            let funded = lock_rent(&Rent::get()?).saturating_sub(locker.lamports());
+            pay(&a.vault, &locker, funded)?;
+            create_escrow_coins(a, locker_seeds)?;
+            token::approve(&a.pot_coins, &locker, &a.launch.to_account_info(), outcome.coins, launch_seeds)?;
+            create_vesting_escrow(a, &schedule, locker_seeds)?;
+            // The locker sent exactly the creator's coins: SPL Token clears a delegate once its allowance is spent.
+            require!(!TokenAccount::read(&a.pot_coins)?.delegated, FairOpenError::CreatorCoinsNotLocked);
+            // Anything the locker did not spend, such as the escrow's coin account's rent if someone made that account
+            // first, goes back to the vault.
+            let left = locker.lamports();
+            if left > 0 {
+                let back = system_program::Transfer { from: locker.clone(), to: a.vault.to_account_info() };
+                system_program::transfer(
+                    CpiContext::new_with_signer(a.system_program.key(), back, &[locker_seeds]),
+                    left,
+                )?;
+            }
+            rent = funded.saturating_sub(left);
+        }
+
+        // The lock's rent comes out of the creator's prepaid rent first, then out of the seat's refund.
+        let launch = &mut ctx.accounts.launch;
+        let seat = &mut ctx.accounts.seat;
+        let from_prepaid = rent.min(launch.open_rent);
+        let from_seat = rent - from_prepaid;
+        let owed_to_seat = outcome.refund + seat.coin_rent;
+        require_gte!(owed_to_seat, from_seat, FairOpenError::LockNotFunded);
+        launch.open_rent -= from_prepaid;
+        launch.refunded += outcome.refund;
+        launch.coin_rent -= seat.coin_rent;
+        launch.delivered += 1;
+        seat.spent = outcome.spent;
+        seat.coins = outcome.coins;
+        seat.refund = outcome.refund;
+        seat.coin_rent = 0;
+        seat.delivered = true;
+        let burnt = finish(launch, &ctx.accounts.vault, &ctx.accounts.pot_coins, &ctx.accounts.mint)?;
+        if let Some(event) = burnt {
+            emit_cpi!(event);
+        }
+        // The seat closes as the instruction ends, its rent going to the Creator wallet.
+        let launch = &mut ctx.accounts.launch;
+        launch.seats -= 1;
+        launch.delivered -= 1;
+        let paid = owed_to_seat - from_seat;
+        let escrow = (outcome.coins > 0).then(|| ctx.accounts.escrow.key());
+        emit_cpi!(CreatorLocked {
+            launch: launch_key,
+            creator: launch.creator,
+            mint: launch.mint,
+            escrow,
+            deposit: ctx.accounts.seat.deposit,
+            fill: outcome.fill,
+            spent: outcome.spent,
+            coins: outcome.coins,
+            opened_at,
+            cliff_time: schedule.cliff_time as i64,
+            end_time: schedule.end_time() as i64,
+            rent,
+            rent_from_seat: from_seat,
+            paid,
+            seat_rent: ctx.accounts.seat.to_account_info().lamports(),
+        });
+        // After the last CPI, as in a push.
+        pay(&ctx.accounts.vault, &ctx.accounts.creator, paid)?;
+        check_vault(&ctx.accounts.vault, &ctx.accounts.launch)
+    }
+
+    /// The Tax Share's collection (spec 2.1 step 14, 4): anyone may send it once the coin's Tax window has ended, and our
+    /// keeper does at 60 s. It opens the launch's pot again, has the fee program's window claim pay the window's fees,
+    /// less the pot's own fee, into it, and unwraps them into the vault, all in this instruction. The Tax Share is those
+    /// fees and the lamport dust the open's rounding gathered, paid to every seat but the creator's in proportion to its
+    /// fill, which is in proportion to the SOL it spent. With no seat but the creator's, nobody may take it, so it goes
+    /// to Heat's treasury, as an Instant launch's window fees do.
+    pub fn collect_tax_share(ctx: Context<CollectTaxShare>) -> Result<()> {
+        let launch = &ctx.accounts.launch;
+        require!(launch.status == LaunchStatus::Opened, FairOpenError::NotOpened);
+        require!(!launch.tax_collected, FairOpenError::TaxShareCollected);
+        let launch_key = launch.key();
+        let nonce = launch.nonce;
+        let launch_seeds: &[&[u8]] = &[LAUNCH_SEED, nonce.as_ref(), &[launch.bump]];
+
+        // The pot's wrapped-SOL account again, made as the open makes it, holding nothing but its rent.
+        let pot = ctx.accounts.pot.to_account_info();
+        let vault = ctx.accounts.vault.to_account_info();
+        let rent = Rent::get()?.minimum_balance(TOKEN_ACCOUNT_LEN);
+        pay(&ctx.accounts.vault, &pot, rent.saturating_sub(pot.lamports()))?;
+        let pot_seeds: &[&[u8]] = &[POT_SEED, launch_key.as_ref(), &[ctx.bumps.pot]];
+        allocate_pot(&pot, &vault, pot_seeds)?;
+        let system = ctx.accounts.system_program.key();
+        let assign = system_program::Assign { account_to_assign: pot.clone() };
+        system_program::assign(CpiContext::new_with_signer(system, assign, &[pot_seeds]), &TOKEN_PROGRAM)?;
+        token::initialize_account(&pot, &ctx.accounts.quote_mint, &launch_key)?;
+
+        claim_window_fees(ctx.accounts, ctx.bumps.coin_registrar)?;
+        let fees = TokenAccount::read(&pot)?.amount;
+        token::close(&pot, &vault, &ctx.accounts.launch.to_account_info(), launch_seeds)?;
+
+        let launch = &mut ctx.accounts.launch;
+        let levels = (launch.others_level, launch.unverified_level);
+        let spent = allocation::seats_spent(
+            &launch.counts,
+            &launch.unverified_counts,
+            launch.step,
+            levels,
+            launch.spend,
+            launch.spent,
+        );
+        let dust = spent - launch.spent;
+        // What the seats spent beyond the rung is the Tax Share's now: the deposits owe only the refunds still unpaid.
+        launch.refunded += dust;
+        launch.tax_share = fees + dust;
+        launch.tax_collected = true;
+        let basis = launch.tax_basis();
+        let to_treasury = basis == 0 && launch.tax_share > 0;
+        let treasury = if to_treasury {
+            let config = ctx.accounts.fee_config.try_borrow_data()?;
+            let treasury =
+                address_at(&config, fee::FEE_CONFIG_TREASURY_OFFSET).ok_or(FairOpenError::NotTheFeeProgram)?;
+            require_keys_eq!(ctx.accounts.treasury.key(), treasury, FairOpenError::NotTheTreasury);
+            Some(treasury)
+        } else {
+            None
+        };
+        emit_cpi!(TaxShareCollected {
+            launch: launch_key,
+            mint: launch.mint,
+            fees,
+            dust,
+            tax_share: launch.tax_share,
+            basis,
+            treasury,
+        });
+        if to_treasury {
+            // After the last CPI.
+            let amount = launch.tax_share;
+            launch.tax_fills_paid = basis;
+            launch.tax_share = 0;
+            pay(&ctx.accounts.vault, &ctx.accounts.treasury, amount)?;
+        }
+        check_vault(&ctx.accounts.vault, &ctx.accounts.launch)
+    }
+
+    /// Pays seats their Tax Share and closes them, returning each seat's rent (spec 2.1 step 14): anyone may send it once
+    /// the Tax Share is collected, and our keeper does at once. Each seat comes as two remaining accounts, the seat and
+    /// its wallet; a seat whose coins and refund have not been delivered yet waits, since closing it would lose them, and
+    /// the creator's seat, which gets no Tax Share, closes with the Creator lock.
+    pub fn push_tax_share<'info>(ctx: Context<'info, PushTaxShare<'info>>) -> Result<()> {
+        let launch = &mut ctx.accounts.launch;
+        require!(launch.status == LaunchStatus::Opened, FairOpenError::NotOpened);
+        require!(launch.tax_collected, FairOpenError::TaxShareNotCollected);
+        let basis = launch.tax_basis();
+        let launch_key = launch.key();
+        // Lamports leave the vault and the seats by hand after the events, the instruction's last CPIs.
+        let mut payments: Vec<(Account<'info, Seat>, &AccountInfo<'info>, u64)> = vec![];
+        for accounts in ctx.remaining_accounts.chunks(2) {
+            let [seat, wallet] = accounts else { return err!(FairOpenError::SeatAccounts) };
+            let seat: Account<'info, Seat> = Account::try_from(seat)?;
+            require_keys_eq!(seat.launch, launch_key, FairOpenError::NotThisLaunchsSeat);
+            require_keys_eq!(seat.wallet, wallet.key(), FairOpenError::NotYourSeat);
+            if !seat.delivered
+                || seat.wallet == launch.creator
+                || payments.iter().any(|(s, _, _)| s.key() == seat.key())
+            {
+                continue;
+            }
+            let fill = launch.outcome(seat.tier, seat.deposit).fill;
+            let amount = allocation::tax_share(launch.tax_share, basis, launch.tax_fills_paid, fill);
+            launch.tax_fills_paid += fill;
+            launch.seats -= 1;
+            launch.delivered -= 1;
+            emit_cpi!(TaxSharePaid {
+                launch: launch_key,
+                wallet: seat.wallet,
+                person: seat.person,
+                fill,
+                spent: seat.spent,
+                amount,
+                seat_rent: seat.to_account_info().lamports(),
+                seats: launch.seats,
+            });
+            payments.push((seat, wallet, amount));
+        }
+        for (seat, wallet, amount) in payments {
+            pay(&ctx.accounts.vault, wallet, amount)?;
+            seat.close(wallet.clone())?;
+        }
+        check_vault(&ctx.accounts.vault, &ctx.accounts.launch)
+    }
+
     /// Marks a launch that cannot open as failed, so no coin is ever created and every deposit comes back (spec 2.1
     /// step 15). Anyone may send it once the window has closed: at once when the pot would spend less than the lowest
     /// rung or the minimum raise, and from 15 minutes after the scheduled open whatever the pot holds.
@@ -658,11 +984,17 @@ pub mod fair_open {
         Ok(())
     }
 
-    /// Closes a failed launch once every seat has been returned, giving the creator back the rent of the launch and its
-    /// vault. Anyone may send it; it pays only the creator.
+    /// Closes a launch once it is done, giving the creator back the rent of the launch and its vault, with what is left of
+    /// the rent they prepaid (spec 2.1 step 7): a failed launch once every seat has been returned, an opened one once its
+    /// Tax Share is collected and every seat, the creator's with the Creator lock, has closed. Anyone may send it; it pays
+    /// only the creator.
     pub fn close_launch(ctx: Context<CloseLaunch>) -> Result<()> {
         let launch = &ctx.accounts.launch;
-        require!(launch.status == LaunchStatus::Failed, FairOpenError::NotFailed);
+        match launch.status {
+            LaunchStatus::Failed => {}
+            LaunchStatus::Opened => require!(launch.tax_collected, FairOpenError::TaxShareNotCollected),
+            _ => return err!(FairOpenError::NotDone),
+        }
         require_eq!(launch.seats, 0, FairOpenError::SeatsLeft);
         emit_cpi!(LaunchClosed {
             launch: launch.key(),
@@ -742,6 +1074,138 @@ fn register_coin(a: &Settle, launch: Pubkey, pot_fee: u64, registrar_bump: u8) -
     let instruction = Instruction { program_id: a.fee_program.key(), accounts: metas, data };
     invoke_signed(&instruction, &infos, &[&[COIN_REGISTRAR_SEED, &[registrar_bump]]])?;
     Ok(())
+}
+
+/// Has the fee program's window claim pay a Fair Open's window fees, less the pot's own fee, into the launch's pot,
+/// signed by the coin registrar.
+fn claim_window_fees(a: &CollectTaxShare, registrar_bump: u8) -> Result<()> {
+    let accounts = [
+        (a.fee_config.to_account_info(), false, false),
+        (a.coin_registrar.to_account_info(), false, true),
+        (a.coin_record.to_account_info(), true, false),
+        (a.pot.to_account_info(), true, false),
+        (a.fee_claimer.to_account_info(), false, false),
+        (a.fee_claimer_token_account.to_account_info(), true, false),
+        (a.pool_authority.to_account_info(), false, false),
+        (a.dbc_config.to_account_info(), false, false),
+        (a.pool.to_account_info(), true, false),
+        (a.base_vault.to_account_info(), true, false),
+        (a.quote_vault.to_account_info(), true, false),
+        (a.mint.to_account_info(), false, false),
+        (a.quote_mint.to_account_info(), false, false),
+        (a.token_base_program.to_account_info(), false, false),
+        (a.token_program.to_account_info(), false, false),
+        (a.dbc_event_authority.to_account_info(), false, false),
+        (a.dbc_program.to_account_info(), false, false),
+        (a.fee_event_authority.to_account_info(), false, false),
+        (a.fee_program.to_account_info(), false, false),
+    ];
+    let metas = accounts
+        .iter()
+        .map(|(info, writable, signs)| match writable {
+            true => AccountMeta::new(info.key(), *signs),
+            false => AccountMeta::new_readonly(info.key(), *signs),
+        })
+        .collect();
+    let infos: Vec<AccountInfo> = accounts.into_iter().map(|(info, _, _)| info).collect();
+    let data = fee::CLAIM_FAIR_OPEN_WINDOW_FEES_DISCRIMINATOR.to_vec();
+    let instruction = Instruction { program_id: a.fee_program.key(), accounts: metas, data };
+    invoke_signed(&instruction, &infos, &[&[COIN_REGISTRAR_SEED, &[registrar_bump]]])?;
+    Ok(())
+}
+
+/// The system program's `Allocate` of a token account's bytes for the pot, signed by its PDA. The vault rides along,
+/// ignored by the system program, so the runtime sees both sides of the rent the vault has just moved to the pot by hand.
+fn allocate_pot<'info>(pot: &AccountInfo<'info>, vault: &AccountInfo<'info>, pot_seeds: &[&[u8]]) -> Result<()> {
+    let mut data = 8u32.to_le_bytes().to_vec();
+    data.extend_from_slice(&(TOKEN_ACCOUNT_LEN as u64).to_le_bytes());
+    let allocate = Instruction {
+        program_id: system_program::ID,
+        accounts: vec![AccountMeta::new(pot.key(), true), AccountMeta::new(vault.key(), false)],
+        data,
+    };
+    invoke_signed(&allocate, &[pot.clone(), vault.clone()], &[pot_seeds])?;
+    Ok(())
+}
+
+/// The Associated Token Account program's `CreateIdempotent` of the escrow's account of the coin, the creator locker
+/// paying its rent. The vault, which has just funded the locker by hand, rides along, ignored by the program.
+fn create_escrow_coins(a: &LockCreator, locker_seeds: &[&[u8]]) -> Result<()> {
+    let instruction = Instruction {
+        program_id: creation::ASSOCIATED_TOKEN_PROGRAM,
+        accounts: vec![
+            AccountMeta::new(a.locker.key(), true),
+            AccountMeta::new(a.escrow_coins.key(), false),
+            AccountMeta::new_readonly(a.escrow.key(), false),
+            AccountMeta::new_readonly(a.mint.key(), false),
+            AccountMeta::new_readonly(system_program::ID, false),
+            AccountMeta::new_readonly(TOKEN_PROGRAM, false),
+            AccountMeta::new(a.vault.key(), false),
+        ],
+        data: vec![1],
+    };
+    let infos = [
+        a.locker.to_account_info(),
+        a.escrow_coins.to_account_info(),
+        a.escrow.to_account_info(),
+        a.mint.to_account_info(),
+        a.system_program.to_account_info(),
+        a.token_program.to_account_info(),
+        a.vault.to_account_info(),
+        a.associated_token_program.to_account_info(),
+    ];
+    invoke_signed(&instruction, &infos, &[locker_seeds])?;
+    Ok(())
+}
+
+/// Jupiter Lock's `create_vesting_escrow_v2`: the escrow at the PDA of the creator locker, which signs as its `base` and
+/// as its `sender`, the pot's delegate for exactly the creator's coins; the Creator wallet its recipient.
+fn create_vesting_escrow(a: &LockCreator, schedule: &jupiter_lock::Schedule, locker_seeds: &[&[u8]]) -> Result<()> {
+    let instruction = Instruction {
+        program_id: jupiter_lock::PROGRAM_ID,
+        accounts: vec![
+            AccountMeta::new(a.locker.key(), true),
+            AccountMeta::new(a.escrow.key(), false),
+            AccountMeta::new_readonly(a.mint.key(), false),
+            AccountMeta::new(a.escrow_coins.key(), false),
+            AccountMeta::new(a.locker.key(), true),
+            AccountMeta::new(a.pot_coins.key(), false),
+            AccountMeta::new_readonly(a.creator.key(), false),
+            AccountMeta::new_readonly(TOKEN_PROGRAM, false),
+            AccountMeta::new_readonly(system_program::ID, false),
+            AccountMeta::new_readonly(a.lock_event_authority.key(), false),
+            AccountMeta::new_readonly(jupiter_lock::PROGRAM_ID, false),
+        ],
+        data: schedule.data(),
+    };
+    let infos = [
+        a.locker.to_account_info(),
+        a.escrow.to_account_info(),
+        a.mint.to_account_info(),
+        a.escrow_coins.to_account_info(),
+        a.pot_coins.to_account_info(),
+        a.creator.to_account_info(),
+        a.token_program.to_account_info(),
+        a.system_program.to_account_info(),
+        a.lock_event_authority.to_account_info(),
+        a.lock_program.to_account_info(),
+    ];
+    invoke_signed(&instruction, &infos, &[locker_seeds])?;
+    Ok(())
+}
+
+/// When the coin's pool began trading, by the pool itself, which must be the launch's coin's on its config: the Creator
+/// lock counts from it.
+fn activation_point(pool: &AccountInfo, launch: &Launch) -> Result<i64> {
+    let data = pool.try_borrow_data()?;
+    require!(data.get(..8) == Some(&dbc::VIRTUAL_POOL_DISCRIMINATOR[..]), FairOpenError::NotThePool);
+    require!(
+        address_at(&data, dbc::POOL_BASE_MINT_OFFSET) == Some(launch.mint)
+            && address_at(&data, dbc::POOL_CONFIG_OFFSET) == Some(launch.dbc_config),
+        FairOpenError::NotThePool
+    );
+    let activation = u64_at(&data, dbc::POOL_ACTIVATION_POINT_OFFSET).ok_or(FairOpenError::NotThePool)?;
+    i64::try_from(activation).map_err(|_| FairOpenError::NotThePool.into())
 }
 
 /// Checks the pot's coin account is the launch's own account of its coin, and returns the coin's decimals.
@@ -980,11 +1444,22 @@ pub struct Launch {
     /// The rung: what the pot spent, in the quote's raw units; and the coins it bought.
     pub spent: u64,
     pub coins: u64,
-    /// The refunds pushes and claims have paid, and how many seats have had their coins and refund.
+    /// The refunds pushes and claims have paid, and from the Tax Share's collection on, the lamport dust the rounding
+    /// gathered too, which the Tax Share holds since; and how many seats still open have had their coins and refund.
     pub refunded: u64,
     pub delivered: u32,
-    /// Room for what the Creator lock and the Tax Share will record.
-    pub reserved: [u8; 28],
+    /// What the Creator wallet's own seat asks and its tier, while it holds one (spec 2.1 step 13): its coins go only into
+    /// the Creator lock, and it gets no Tax Share.
+    pub creator_deposit: u64,
+    pub creator_tier: Tier,
+    /// Whether the window's fees are collected into the Tax Share (spec 2.1 step 14), and the Tax Share, in the quote's
+    /// raw units: those fees and the lamport dust of the open's rounding, what the seats are paid from.
+    pub tax_collected: bool,
+    pub tax_share: u64,
+    /// The fills of the seats paid their Tax Share so far, from which each next seat's share is found to the lamport.
+    pub tax_fills_paid: u64,
+    /// Room kept, so the account keeps its size.
+    pub reserved: [u8; 2],
     pub bump: u8,
     pub vault_bump: u8,
 }
@@ -1038,13 +1513,33 @@ impl Launch {
 
     /// What the vault owes: every deposit, the coin-account rent the seats prepaid, and what is left of the open's rent.
     /// After the open the pot has spent the rung, and the refunds paid out are gone; what the deposits still owe is then
-    /// every refund not yet paid and the lamports the rounding gathered for the Tax Share.
+    /// every refund not yet paid and the lamports the rounding gathered for the Tax Share, and from the Tax Share's
+    /// collection on, the Tax Share not yet paid.
     pub fn owed(&self) -> u64 {
         let deposits = match self.status {
-            LaunchStatus::Opened => self.pot() - self.spent - self.refunded,
+            LaunchStatus::Opened => self.pot() - self.spent - self.refunded + self.tax_unpaid(),
             _ => self.pot(),
         };
         deposits + self.coin_rent + self.open_rent
+    }
+
+    /// The fill of the Creator wallet's own seat, if it holds one.
+    pub fn creator_fill(&self) -> u64 {
+        match self.creator_deposit {
+            0 => 0,
+            deposit => self.outcome(self.creator_tier, deposit).fill,
+        }
+    }
+
+    /// What the Tax Share is shared by: every seat's fill but the creator's.
+    pub fn tax_basis(&self) -> u64 {
+        self.spend - self.creator_fill()
+    }
+
+    /// The Tax Share not yet paid.
+    pub fn tax_unpaid(&self) -> u64 {
+        let basis = self.tax_basis();
+        self.tax_share - allocation::tax_share(self.tax_share, basis, 0, self.tax_fills_paid.min(basis))
     }
 
     /// How the pot would buy if its window closed now.
@@ -1370,6 +1865,138 @@ pub struct Claim<'info> {
 
 #[event_cpi]
 #[derive(Accounts)]
+pub struct LockCreator<'info> {
+    #[account(mut, seeds = [LAUNCH_SEED, launch.nonce.as_ref()], bump = launch.bump)]
+    pub launch: Box<Account<'info, Launch>>,
+    #[account(mut, seeds = [VAULT_SEED, launch.key().as_ref()], bump = launch.vault_bump)]
+    pub vault: Account<'info, Vault>,
+    /// The Creator wallet's seat, which closes into the Creator wallet.
+    #[account(
+        mut,
+        close = creator,
+        seeds = [SEAT_SEED, launch.key().as_ref(), seat.person.as_ref()],
+        bump = seat.bump,
+        has_one = launch @ FairOpenError::NotThisLaunchsSeat,
+        constraint = seat.wallet == launch.creator @ FairOpenError::NotTheCreatorsSeat,
+    )]
+    pub seat: Box<Account<'info, Seat>>,
+    /// The Creator wallet: the escrow's recipient, and paid the seat's refund and rents.
+    #[account(mut, address = launch.creator @ FairOpenError::NotTheCreator)]
+    pub creator: SystemAccount<'info>,
+    /// CHECK: the coin's pool: its owner, discriminator, config and coin are checked in the handler.
+    #[account(owner = dbc::PROGRAM_ID @ FairOpenError::NotThePool)]
+    pub pool: UncheckedAccount<'info>,
+    /// CHECK: the pot's coin account, the launch's own account of its coin; checked in the handler.
+    #[account(mut)]
+    pub pot_coins: UncheckedAccount<'info>,
+    /// CHECK: the coin, the launch's.
+    #[account(mut, address = launch.mint @ FairOpenError::NotTheCoin)]
+    pub mint: UncheckedAccount<'info>,
+    /// CHECK: the creator locker, a system account at this program's PDA, which signs as the escrow's base and sender.
+    #[account(mut, seeds = [CREATOR_LOCK_SEED, launch.key().as_ref()], bump)]
+    pub locker: UncheckedAccount<'info>,
+    /// CHECK: the escrow, at Jupiter Lock's PDA of the locker, which Jupiter Lock makes and checks.
+    #[account(
+        mut,
+        seeds = [jupiter_lock::ESCROW_SEED, locker.key().as_ref()],
+        bump,
+        seeds::program = jupiter_lock::PROGRAM_ID,
+    )]
+    pub escrow: UncheckedAccount<'info>,
+    /// CHECK: the escrow's associated account of the coin, which the Associated Token Account program makes and checks.
+    #[account(mut)]
+    pub escrow_coins: UncheckedAccount<'info>,
+    /// CHECK: Jupiter Lock's event authority.
+    #[account(address = jupiter_lock::EVENT_AUTHORITY)]
+    pub lock_event_authority: UncheckedAccount<'info>,
+    /// CHECK: Jupiter Lock.
+    #[account(address = jupiter_lock::PROGRAM_ID)]
+    pub lock_program: UncheckedAccount<'info>,
+    /// CHECK: SPL Token.
+    #[account(address = TOKEN_PROGRAM)]
+    pub token_program: UncheckedAccount<'info>,
+    /// CHECK: the Associated Token Account program.
+    #[account(address = creation::ASSOCIATED_TOKEN_PROGRAM)]
+    pub associated_token_program: UncheckedAccount<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[event_cpi]
+#[derive(Accounts)]
+pub struct CollectTaxShare<'info> {
+    #[account(seeds = [PROGRAM_CONFIG_SEED], bump = program_config.bump, has_one = fee_program @ FairOpenError::NotTheFeeProgram)]
+    pub program_config: Account<'info, ProgramConfig>,
+    #[account(mut, seeds = [LAUNCH_SEED, launch.nonce.as_ref()], bump = launch.bump)]
+    pub launch: Box<Account<'info, Launch>>,
+    #[account(mut, seeds = [VAULT_SEED, launch.key().as_ref()], bump = launch.vault_bump)]
+    pub vault: Account<'info, Vault>,
+    /// CHECK: the pot's wrapped-SOL account, at its PDA, made and closed in the handler.
+    #[account(mut, seeds = [POT_SEED, launch.key().as_ref()], bump)]
+    pub pot: UncheckedAccount<'info>,
+    /// CHECK: the launch's quote.
+    #[account(address = launch.quote_mint @ FairOpenError::QuoteNotSupported)]
+    pub quote_mint: UncheckedAccount<'info>,
+    /// CHECK: Heat's treasury, which takes the Tax Share only when no seat but the creator's may; checked in the handler.
+    #[account(mut)]
+    pub treasury: UncheckedAccount<'info>,
+    /// CHECK: the coin registrar, this program's PDA, which signs the window claim.
+    #[account(seeds = [COIN_REGISTRAR_SEED], bump)]
+    pub coin_registrar: UncheckedAccount<'info>,
+    /// CHECK: the fee program's `FeeConfig`, which the fee program checks.
+    pub fee_config: UncheckedAccount<'info>,
+    /// CHECK: the coin's record, which the fee program checks and marks claimed.
+    #[account(mut)]
+    pub coin_record: UncheckedAccount<'info>,
+    /// CHECK: the fee program's fee claimer, which the fee program checks.
+    pub fee_claimer: UncheckedAccount<'info>,
+    /// CHECK: the fee claimer's own quote account, which the fee program checks.
+    #[account(mut)]
+    pub fee_claimer_token_account: UncheckedAccount<'info>,
+    /// CHECK: DBC's pool authority, which the fee program checks.
+    pub pool_authority: UncheckedAccount<'info>,
+    /// CHECK: Heat's Fair Open config, the launch's.
+    #[account(address = launch.dbc_config @ FairOpenError::NotTheFairOpenConfig)]
+    pub dbc_config: UncheckedAccount<'info>,
+    /// CHECK: the coin's pool, which the fee program and DBC check.
+    #[account(mut)]
+    pub pool: UncheckedAccount<'info>,
+    /// CHECK: the pool's coin vault, which DBC checks.
+    #[account(mut)]
+    pub base_vault: UncheckedAccount<'info>,
+    /// CHECK: the pool's quote vault, which DBC pays from and checks.
+    #[account(mut)]
+    pub quote_vault: UncheckedAccount<'info>,
+    /// CHECK: the coin, the launch's.
+    #[account(address = launch.mint @ FairOpenError::NotTheCoin)]
+    pub mint: UncheckedAccount<'info>,
+    /// CHECK: the coin's token program, SPL Token.
+    #[account(address = TOKEN_PROGRAM)]
+    pub token_base_program: UncheckedAccount<'info>,
+    /// CHECK: DBC's event authority, which the fee program checks.
+    pub dbc_event_authority: UncheckedAccount<'info>,
+    /// CHECK: DBC, which the fee program checks.
+    pub dbc_program: UncheckedAccount<'info>,
+    /// CHECK: the fee program's event authority, which the fee program checks.
+    pub fee_event_authority: UncheckedAccount<'info>,
+    /// CHECK: the fee program, by the program config.
+    pub fee_program: UncheckedAccount<'info>,
+    /// CHECK: SPL Token, the quote's token program.
+    #[account(address = TOKEN_PROGRAM)]
+    pub token_program: UncheckedAccount<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[event_cpi]
+#[derive(Accounts)]
+pub struct PushTaxShare<'info> {
+    #[account(mut, seeds = [LAUNCH_SEED, launch.nonce.as_ref()], bump = launch.bump)]
+    pub launch: Box<Account<'info, Launch>>,
+    #[account(mut, seeds = [VAULT_SEED, launch.key().as_ref()], bump = launch.vault_bump)]
+    pub vault: Account<'info, Vault>,
+}
+
+#[event_cpi]
+#[derive(Accounts)]
 pub struct MarkFailed<'info> {
     #[account(mut, seeds = [LAUNCH_SEED, launch.nonce.as_ref()], bump = launch.bump)]
     pub launch: Box<Account<'info, Launch>>,
@@ -1559,6 +2186,60 @@ pub struct CoinDustBurnt {
     pub amount: u64,
 }
 
+/// The Creator lock (spec 2.1 step 13): the creator's coins in a Jupiter Lock escrow, and their seat closed.
+#[event]
+pub struct CreatorLocked {
+    pub launch: Pubkey,
+    pub creator: Pubkey,
+    pub mint: Pubkey,
+    /// The escrow, none when the creator's fill bought no coins.
+    pub escrow: Option<Pubkey>,
+    pub deposit: u64,
+    pub fill: u64,
+    pub spent: u64,
+    pub coins: u64,
+    /// When trading opened, when the release starts and when all of it is free, Unix timestamps.
+    pub opened_at: i64,
+    pub cliff_time: i64,
+    pub end_time: i64,
+    /// What the escrow and its coin account cost, and the part of it that came out of the seat's refund.
+    pub rent: u64,
+    pub rent_from_seat: u64,
+    /// The seat's refund and prepaid coin-account rent, less that part, paid to the Creator wallet; and the seat's own
+    /// rent, which it gets back as the seat closes.
+    pub paid: u64,
+    pub seat_rent: u64,
+}
+
+/// The Tax Share collected (spec 2.1 step 14), in the quote's raw units: the window's fees less the pot's own fee, and the
+/// lamport dust of the open's rounding.
+#[event]
+pub struct TaxShareCollected {
+    pub launch: Pubkey,
+    pub mint: Pubkey,
+    pub fees: u64,
+    pub dust: u64,
+    pub tax_share: u64,
+    /// The fills it is shared by: every seat's but the creator's.
+    pub basis: u64,
+    /// Heat's treasury, when no seat but the creator's could take it and it went there.
+    pub treasury: Option<Pubkey>,
+}
+
+/// A seat paid its Tax Share and closed, its rent returned to its wallet.
+#[event]
+pub struct TaxSharePaid {
+    pub launch: Pubkey,
+    pub wallet: Pubkey,
+    pub person: [u8; 32],
+    pub fill: u64,
+    pub spent: u64,
+    pub amount: u64,
+    pub seat_rent: u64,
+    /// Seats left open.
+    pub seats: u32,
+}
+
 #[error_code]
 pub enum FairOpenError {
     #[msg("Only the program's upgrade authority can change its settings")]
@@ -1663,4 +2344,18 @@ pub enum FairOpenError {
     CreatorsSeat,
     #[msg("The coins go to an account of the coin the seat's wallet owns")]
     NotYourCoinAccount,
+    #[msg("That is not the Creator wallet's seat")]
+    NotTheCreatorsSeat,
+    #[msg("The Creator lock's rent is more than the creator's prepaid rent and refund")]
+    LockNotFunded,
+    #[msg("The Tax Share is collected already")]
+    TaxShareCollected,
+    #[msg("The Tax Share is not collected yet")]
+    TaxShareNotCollected,
+    #[msg("That is not Heat's treasury")]
+    NotTheTreasury,
+    #[msg("The launch is neither failed nor opened")]
+    NotDone,
+    #[msg("The Creator lock did not take exactly the creator's coins")]
+    CreatorCoinsNotLocked,
 }

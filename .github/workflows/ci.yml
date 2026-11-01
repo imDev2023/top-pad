@@ -66,9 +66,11 @@ jobs:
           chmod +x "$HOME/.local/bin/anchor"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - run: cargo fmt --all --check
-      # Our stand-in for DBC's partner fee claim, which the fee program's claim tests load in DBC's place; never deployed.
-      # Before `anchor build`, whose IDL build compiles those tests, and they embed it.
+      # Our stand-ins for DBC's partner fee claim, pool creation and swap, and for Jupiter Lock's escrow, which the
+      # programs' tests load in their places; never deployed. Before `anchor build`, whose IDL build compiles those tests,
+      # and they embed them.
       - run: cargo build-sbf --manifest-path tests/dbc-stand-in/Cargo.toml --tools-version v1.57 --arch v2
+      - run: cargo build-sbf --manifest-path tests/lock-stand-in/Cargo.toml --tools-version v1.57 --arch v2
       - run: anchor build
       # The committed IDLs are what the generated clients came from: the programs' own build must not change them.
       - run: cp target/idl/fee.json target/idl/fair_open.json packages/clients/idl/ && git diff --exit-code packages/clients/idl
