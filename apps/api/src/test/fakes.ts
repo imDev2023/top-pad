@@ -337,7 +337,12 @@ export function fairOpenLaunch(p: {
     coins: p.opened?.coins ?? 0n,
     refunded: 0n,
     delivered: p.opened?.delivered ?? 0,
-    reserved: new Uint8Array(28),
+    creatorDeposit: 0n,
+    creatorTier: Tier.Unverified,
+    taxCollected: false,
+    taxShare: 0n,
+    taxFillsPaid: 0n,
+    reserved: new Uint8Array(2),
     bump: 255,
     vaultBump: 254,
   };

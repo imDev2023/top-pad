@@ -3,7 +3,7 @@
 import type { Coin, LiveBatch, Trade } from "@top-pad/contract";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { coinLiveUrl, getCoin, getCoinTrades } from "@/lib/api";
-import { ago, compactNumber, shortAddress, sol, solAmount } from "@/lib/format";
+import { ago, coinAmount, compactNumber, shortAddress, sol, solAmount } from "@/lib/format";
 import { CandleChart, type ChartFeed } from "./CandleChart";
 import styles from "./Coin.module.css";
 import { TaxBand } from "./TaxBand";
@@ -94,7 +94,14 @@ export function CoinPage({ initial }: { initial: Coin }) {
       const landed = batch.events.flatMap((e) => (e.type === "trade" && e.mint === mint ? [e.trade] : []));
       merge(landed, true);
       chart.current?.add(landed);
-      for (const e of batch.events) if (e.type === "window_claim" && e.mint === mint) setCoin((c) => ({ ...c, windowClaim: e.windowClaim }));
+      for (const e of batch.events) {
+        if (e.type !== "window_claim" || e.mint !== mint) continue;
+        setCoin((c) => ({ ...c, windowClaim: e.windowClaim }));
+        // A Fair Open's window claim is its Tax Share's collection: the coin again, for what it came to.
+        void getCoin(mint)
+          .then((latest) => setCoin((c) => ({ ...c, fairOpen: latest.fairOpen })))
+          .catch(() => undefined);
+      }
     },
     [mint, merge],
   );
@@ -214,12 +221,24 @@ export function CoinPage({ initial }: { initial: Coin }) {
             <span className="eyebrow">Launch</span>
             {coin.heat ? (
               <span>
-                {coin.launchMode === "fair_open" ? "Fair Open" : "Instant launch, no creator buy"}
+                {coin.fairOpen ? (
+                  <a href={`/fair-open/${coin.fairOpen.launch}`}>Fair Open</a>
+                ) : coin.launchMode === "fair_open" ? (
+                  "Fair Open"
+                ) : (
+                  "Instant launch, no creator buy"
+                )}
               </span>
             ) : (
               <span>Not through Heat</span>
             )}
           </div>
+          {coin.fairOpen && (
+            <div className={styles.fact} data-testid="coin-creator-lock">
+              <span className="eyebrow">Creator lock</span>
+              <CreatorLockFact lock={coin.fairOpen.lock} ticker={coin.ticker} decimals={coin.decimals} />
+            </div>
+          )}
           <div className={styles.fact}>
             <span className="eyebrow">Creator</span>
             <span>
@@ -267,4 +286,23 @@ export function CoinPage({ initial }: { initial: Coin }) {
       </section>
     </div>
   );
+}
+
+/** The Creator lock as a fact of the coin (spec 9): what it holds and until when, with its escrow. */
+function CreatorLockFact({ lock, ticker, decimals }: { lock: NonNullable<Coin["fairOpen"]>["lock"]; ticker: string; decimals: number }) {
+  if (lock.status === "locked" && lock.coins && lock.cliffAt && lock.endsAt) {
+    const day = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+    return (
+      <span>
+        <span className="num">{coinAmount(lock.coins, decimals)}</span> {ticker} locked until {day(lock.cliffAt)}, all free {day(lock.endsAt)}.{" "}
+        {lock.explorer && (
+          <a href={lock.explorer} target="_blank" rel="noreferrer">
+            Escrow
+          </a>
+        )}
+      </span>
+    );
+  }
+  if (lock.status === "none") return <span>The creator bought nothing in the Fair Open, so nothing is locked.</span>;
+  return <span>The creator&apos;s coins go into a Jupiter Lock escrow right after the open, released from day 7 to day 30.</span>;
 }

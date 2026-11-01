@@ -49,6 +49,7 @@ import {
   withdrawInstructions,
 } from "@top-pad/chain";
 import { fetchMaybeLaunch, getSeatDecoder, getSeatSize, LaunchStatus, type Launch, type Seat } from "@top-pad/clients/fair-open";
+import { TAX_WINDOW_SECONDS } from "@top-pad/clients/fee";
 import {
   Address,
   FairOpenMove,
@@ -65,6 +66,7 @@ import {
 } from "@top-pad/contract";
 import { creators, creatorWallets, fairOpenRungs, fairOpens, launches, pools, type Db } from "@top-pad/db";
 import { admit, AdmissionRefused, loadAdmissionKey, personOf, refusalOf, tierName } from "./admission";
+import { closedSeatOf, creatorLockOf, deliveredSeats, taxShareOf } from "./afterOpen";
 import { sessionCreator } from "./auth";
 import { explorerUrl, fairOpenLaunchSetup, fairOpenSetup } from "./env";
 import { launchRow } from "./fairOpenKeeper";
@@ -118,9 +120,12 @@ async function seatOfWallet(rpc: Rpc, launch: KitAddress, wallet: KitAddress): P
   return { address: first.pubkey, seat: getSeatDecoder().decode(base64.encode(first.account.data[0])), lamports: first.account.lamports };
 }
 
-/** The phase a page shows: the chain's, and `closed` once the launch account is gone. */
+/**
+ * The phase a page shows: the chain's while the launch account lasts; once it is gone, `opened` for a launch that opened
+ * and is done, and `closed` for one that failed and has every deposit back.
+ */
 function phaseOf(launch: Launch | null, row: LaunchRow | undefined, at: bigint): { phase: FairOpenPhase; failure: FairOpen["failure"] } {
-  if (!launch) return { phase: "closed", failure: row?.failure ?? null };
+  if (!launch) return row?.status === "opened" ? { phase: "opened", failure: null } : { phase: "closed", failure: row?.failure ?? null };
   const p = fairOpenPhase(launch, at);
   return { phase: p.phase, failure: p.phase === "failing" || p.phase === "failed" ? p.failure : null };
 }
@@ -194,7 +199,10 @@ export async function getFairOpen(c: Context<AppEnv>) {
       ? { admitted: false, reason: refusal }
       : { admitted: true, tier: person.tier, cap: `${tierCap(tier, terms.step)}`, via: person.via, handle: person.handle };
     let seat: FairOpenSeat | null = null;
-    if (found) {
+    if (!found && (launch ? launch.status === LaunchStatus.Opened : row?.status === "opened")) {
+      // A seat closed after the open, by its Tax Share or the Creator lock.
+      seat = await closedSeatOf(db, address, wallet);
+    } else if (found) {
       // Once opened, what the seat bought, by the same reference the program delivers it by; before, what it would.
       const opened = launch?.status === LaunchStatus.Opened ? seatOutcome(launch, found.seat.tier, found.seat.deposit) : null;
       const spent = opened?.spent ?? (rung === null ? 0n : spentOf(a, rung, found.seat.tier, found.seat.deposit));
@@ -209,6 +217,8 @@ export async function getFairOpen(c: Context<AppEnv>) {
         refund: `${found.seat.deposit - spent}`,
         coins: opened ? `${opened.coins}` : null,
         delivered: found.seat.delivered,
+        taxShare: null,
+        closed: false,
       };
     }
     you = { wallet, admission, seat };
@@ -243,18 +253,7 @@ export async function getFairOpen(c: Context<AppEnv>) {
       verified: `${terms.verifiedDeposits}`,
     },
     allocation: { spend: `${a.spend}`, others: level(a.others), unverified: level(a.unverified), rung: rung === null ? null : `${rung}` },
-    open:
-      launch?.status === LaunchStatus.Opened
-        ? {
-            mint: launch.mint,
-            pool: await dbcPoolAddress(launch.dbcConfig, launch.mint, launch.quoteMint),
-            coin: (await db.select({ name: pools.name, ticker: pools.ticker }).from(pools).where(eq(pools.mint, launch.mint)))[0] ?? null,
-            spent: `${launch.spent}`,
-            coins: `${launch.coins}`,
-            coinDecimals: COIN_DECIMALS,
-            delivered: launch.delivered,
-          }
-        : null,
+    open: await openOf(c, launch, row),
     rent: { seat: `${rent.seat}`, coinAccount: `${rent.coinAccount}` },
     ladder: scheduled ? await ladderOf(db, scheduled) : null,
     you,
@@ -262,6 +261,43 @@ export async function getFairOpen(c: Context<AppEnv>) {
   };
   c.header("cache-control", "no-store");
   return c.json(body);
+}
+
+/**
+ * Once a launch has opened (spec 2.1 steps 10 to 14): its coin, what the pot bought, how many seats have their coins, and
+ * its Creator lock and Tax Share. The launch account says it while it lasts; the indexer once the launch is done and
+ * closed. Seats close as they are paid their Tax Share, so how many have their coins counts those too.
+ */
+async function openOf(c: Context<AppEnv>, launch: Launch | null, row: LaunchRow | undefined): Promise<FairOpen["open"]> {
+  const { cfg, db } = c.var;
+  const live = launch?.status === LaunchStatus.Opened ? launch : null;
+  if (!live && !(row?.status === "opened" && row.mint && row.pool && row.openedAt)) return null;
+  const mint = live?.mint ?? row!.mint!;
+  // The indexer may not have seen the open yet, a moment after it: the launch account alone answers then.
+  const indexed = row?.status === "opened" ? row : null;
+  const seats = indexed?.seats ?? live?.seats ?? 0;
+  const done = live ? null : await deliveredSeats(db, row!.launch);
+  const delivered = live ? live.delivered + Math.max(seats - live.seats, 0) : done!.seats;
+  const deposited = live ? live.unverifiedDeposits + live.scoredDeposits + live.verifiedDeposits : done!.deposited;
+  const openedAt = indexed?.openedAt ?? new Date();
+  return {
+    mint,
+    pool: live ? await dbcPoolAddress(live.dbcConfig, live.mint, live.quoteMint) : row!.pool!,
+    coin: (await db.select({ name: pools.name, ticker: pools.ticker }).from(pools).where(eq(pools.mint, mint)))[0] ?? null,
+    spent: `${live?.spent ?? row!.spent ?? 0n}`,
+    coins: `${live?.coins ?? row!.coins ?? 0n}`,
+    coinDecimals: COIN_DECIMALS,
+    delivered,
+    seats,
+    deposited: `${deposited}`,
+    openedAt: openedAt.toISOString(),
+    taxWindowEndsAt: new Date(openedAt.getTime() + Number(TAX_WINDOW_SECONDS) * 1000).toISOString(),
+    lock: indexed
+      ? await creatorLockOf(cfg, db, indexed)
+      : { status: live && live.creatorDeposit > 0n ? "pending" : "none", deposit: live && live.creatorDeposit > 0n ? `${live.creatorDeposit}` : null, coins: null, escrow: null, cliffAt: null, endsAt: null, explorer: null },
+    taxShare: indexed ? await taxShareOf(cfg, db, indexed) : null,
+    closed: !launch,
+  };
 }
 
 /** How a launch Heat scheduled has its open signed: the whole ladder in advance, or the one rung at the open. */

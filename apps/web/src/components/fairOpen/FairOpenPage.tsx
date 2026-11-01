@@ -1,6 +1,6 @@
 "use client";
 
-import type { FairOpen, LiveBatch } from "@top-pad/contract";
+import type { CreatorLock, FairOpen, LiveBatch } from "@top-pad/contract";
 import { useCallback, useEffect, useState } from "react";
 import { fairOpenLiveUrl, getFairOpen } from "@/lib/api";
 import { coinAmount, compactNumber, shortAddress, sol } from "@/lib/format";
@@ -160,7 +160,7 @@ export function FairOpenPage({ initial }: { initial: FairOpen }) {
             <SignOpenPanel view={view} account={account} chain={chain} at={at} onSigned={load} />
           )}
           <DepositPanel view={view} onChanged={load} />
-          {!ended && <IfClosedNow view={view} />}
+          {!ended && !open?.closed && <IfClosedNow view={view} />}
         </aside>
 
         <div className={styles.main}>
@@ -180,8 +180,8 @@ export function FairOpenPage({ initial }: { initial: FairOpen }) {
                   <span className={styles.unit}> SOL</span>
                 </span>
                 <span className="note">
-                  of the <span className="num">{sol(view.pot.total, 2)}</span>&nbsp;SOL {people} {people === 1 ? "person" : "people"} deposited; the rest was
-                  refunded
+                  of the <span className="num">{sol(open.deposited, 2)}</span>&nbsp;SOL {open.seats} {open.seats === 1 ? "person" : "people"} deposited; the rest
+                  was refunded
                 </span>
               </div>
             ) : (
@@ -233,9 +233,9 @@ export function FairOpenPage({ initial }: { initial: FairOpen }) {
             </div>
           </section>
 
-          <PotMeter view={view} />
+          {!open?.closed && <PotMeter view={view} />}
 
-          {open ? <AfterOpen view={view} /> : ended ? <AfterFailure view={view} /> : <OpenSteps view={view} at={at} />}
+          {open ? <AfterOpen view={view} at={at} /> : ended ? <AfterFailure view={view} /> : <OpenSteps view={view} at={at} />}
         </div>
       </div>
     </div>
@@ -286,12 +286,15 @@ function OpenSteps({ view, at }: { view: FairOpen; at: number }) {
   );
 }
 
-/** After the open (spec 2.1 steps 10 to 12): what the pot bought and at what price, and every seat's coins and refund. */
-function AfterOpen({ view }: { view: FairOpen }) {
+/**
+ * After the open (spec 2.1 steps 10 to 14): what the pot bought and at what price, every seat's coins and refund, the
+ * Creator lock and the Tax Share.
+ */
+function AfterOpen({ view, at }: { view: FairOpen; at: number }) {
   const open = view.open!;
   const coins = Number(BigInt(open.coins)) / 10 ** open.coinDecimals;
   const price = coins > 0 ? Number(BigInt(open.spent)) / 1e9 / coins : 0;
-  const seats = view.pot.seats;
+  const seats = open.seats;
   const name = open.coin?.ticker ?? "coins";
   return (
     <section className={`panel ${styles.steps}`} aria-labelledby="after-open">
@@ -321,18 +324,108 @@ function AfterOpen({ view }: { view: FairOpen }) {
           </b>{" "}
           <span className="muted">Heat&apos;s keeper sends them to each depositor&apos;s wallet; anyone can, and a depositor can claim their own here.</span>
         </li>
+        <li data-testid="fair-open-lock">
+          <CreatorLockStep lock={open.lock} ticker={name} decimals={open.coinDecimals} at={at} />
+        </li>
+        <li data-testid="fair-open-tax-share">
+          <TaxShareStep open={open} at={at} />
+        </li>
       </ol>
       <a className={`btn btn-go ${styles.trade}`} href={`/coin/${open.mint}`}>
         Trade {open.coin ? open.coin.ticker : "the coin"} on its page
       </a>
-      <div className="verdict verdict-info">
-        <b>Devnet build</b>
-        <span className="note">
-          The Tax Share and the Creator lock come in Heat&apos;s next build. Until then, the sniper tax of this coin&apos;s first minute waits in its pool,
-          and a creator&apos;s own coins wait in the pot.
-        </span>
-      </div>
     </section>
+  );
+}
+
+/** The Creator lock (spec 2.1 step 13), as a step of what happened at the open. */
+export function CreatorLockStep({ lock, ticker, decimals, at }: { lock: CreatorLock; ticker: string; decimals: number; at: number }) {
+  if (lock.status === "locked" && lock.coins && lock.cliffAt && lock.endsAt) {
+    return (
+      <>
+        <b>
+          The creator&apos;s <span className="num">{coinAmount(lock.coins, decimals)}</span> {ticker} are locked until {clock(lock.cliffAt, at)}.
+        </b>{" "}
+        <span className="muted">
+          Bought in the pot{lock.deposit ? <> with their <span className="num">{sol(lock.deposit, 2)}</span>&nbsp;SOL deposit</> : null}, at everyone&apos;s
+          price, they sit in a Jupiter Lock escrow and are released second by second until {clock(lock.endsAt, at)}. Nobody can cancel it, Heat included.{" "}
+          {lock.explorer && (
+            <a href={lock.explorer} target="_blank" rel="noreferrer">
+              See the escrow
+            </a>
+          )}
+        </span>
+      </>
+    );
+  }
+  if (lock.status === "locked" || lock.status === "pending") {
+    return (
+      <>
+        <b>The creator&apos;s coins go into a Jupiter Lock escrow.</b>{" "}
+        <span className="muted">
+          {lock.status === "pending" && lock.deposit ? (
+            <>
+              They bought in the pot with their <span className="num">{sol(lock.deposit, 2)}</span>&nbsp;SOL deposit, at everyone&apos;s price.{" "}
+            </>
+          ) : null}
+          Nothing is released for 7 days, then they come free second by second until day 30. Heat&apos;s keeper locks them right after the open.
+        </span>
+      </>
+    );
+  }
+  return (
+    <>
+      <b>The creator bought nothing in the pot, so nothing is locked.</b>{" "}
+      <span className="muted">Coins a creator buys later, on the curve, are theirs to sell; the coin page shows them.</span>
+    </>
+  );
+}
+
+/** The Tax Share (spec 2.1 step 14), as a step of what happened at the open. */
+function TaxShareStep({ open, at }: { open: NonNullable<FairOpen["open"]>; at: number }) {
+  const share = open.taxShare;
+  if (!share) {
+    return (
+      <>
+        <b>The first minute&apos;s sniper tax becomes the depositors&apos; Tax Share at {clock(open.taxWindowEndsAt, at)}.</b>{" "}
+        <span className="muted">
+          Every buy and sell in the coin&apos;s first 60 seconds pays the falling sniper tax. All of it but the pot&apos;s own fee goes to the depositors, in
+          proportion to what each spent; the creator&apos;s seat gets none.
+        </span>
+      </>
+    );
+  }
+  if (share.toTreasury) {
+    return (
+      <>
+        <b>
+          The first minute&apos;s sniper tax, <span className="num">{sol(share.total, 9)}</span>&nbsp;SOL, went to Heat&apos;s treasury.
+        </b>{" "}
+        <span className="muted">
+          The creator was the only depositor, and the creator&apos;s seat gets no Tax Share.{" "}
+          <a href={share.explorer} target="_blank" rel="noreferrer">
+            See the claim
+          </a>
+        </span>
+      </>
+    );
+  }
+  const owed = open.seats - (open.lock.status === "none" ? 0 : 1);
+  return (
+    <>
+      <b>
+        <span className="num">{sol(share.total, 9)}</span>&nbsp;SOL of sniper tax is the depositors&apos; Tax Share.
+      </b>{" "}
+      <span className="muted">
+        {share.paidSeats >= owed
+          ? `Every depositor has been paid theirs, in proportion to what they spent, and their seat's rent with it.`
+          : `${share.paidSeats} of ${owed} depositors have been paid theirs, in proportion to what they spent; Heat's keeper sends the rest.`}{" "}
+        The creator&apos;s seat gets none.{" "}
+        <a href={share.explorer} target="_blank" rel="noreferrer">
+          See the claim
+        </a>
+      </span>
+    </>
   );
 }
 

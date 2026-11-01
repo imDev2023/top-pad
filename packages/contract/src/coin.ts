@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { WindowClaim } from "./earnings";
+import { CreatorLock, TaxShare } from "./fairOpen";
 import { Address, RawAmount } from "./launch";
 
 /** An exact decimal number, such as a price or a market cap in whole quote units. */
@@ -77,6 +78,8 @@ export const Coin = z.object({
   tax: TaxSchedule,
   /** The coin's window claim once it has run: where its Tax window's fees went is told openly (spec 2.2, 4). */
   windowClaim: WindowClaim.nullable(),
+  /** A Fair Open's coin: the launch it opened from, its Creator lock and its Tax Share (spec 2.1 steps 13 and 14). */
+  fairOpen: z.object({ launch: Address, lock: CreatorLock, taxShare: TaxShare.nullable() }).nullable(),
   explorer: z.object({ mint: z.string().url(), pool: z.string().url() }),
   /** The API's clock as it answered, which a page counts the sniper tax by rather than its own. */
   servedAt: z.iso.datetime(),
@@ -123,7 +126,7 @@ export const LiveEvent = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("fair_open"),
     launch: Address,
-    change: z.enum(["created", "deposit", "withdraw", "opened", "delivery", "refund", "failed", "closed"]),
+    change: z.enum(["created", "deposit", "withdraw", "opened", "delivery", "lock", "tax_share", "tax_share_collected", "refund", "failed", "closed"]),
   }),
 ]);
 export type LiveEvent = z.infer<typeof LiveEvent>;

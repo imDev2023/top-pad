@@ -2672,6 +2672,18 @@
             "type": "pubkey"
           },
           {
+            "name": "person",
+            "docs": [
+              "The creator's pseudonym in this launch, their seat's."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
             "name": "mint",
             "type": "pubkey"
           },

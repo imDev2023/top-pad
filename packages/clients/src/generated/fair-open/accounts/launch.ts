@@ -19,6 +19,8 @@ import {
   getAddressEncoder,
   getArrayDecoder,
   getArrayEncoder,
+  getBooleanDecoder,
+  getBooleanEncoder,
   getBytesDecoder,
   getBytesEncoder,
   getI64Decoder,
@@ -57,10 +59,14 @@ import {
   getFailureEncoder,
   getLaunchStatusDecoder,
   getLaunchStatusEncoder,
+  getTierDecoder,
+  getTierEncoder,
   type Failure,
   type FailureArgs,
   type LaunchStatus,
   type LaunchStatusArgs,
+  type Tier,
+  type TierArgs,
 } from "../types";
 
 export const LAUNCH_DISCRIMINATOR: ReadonlyUint8Array = new Uint8Array([
@@ -124,10 +130,27 @@ export type Launch = {
   /** The rung: what the pot spent, in the quote's raw units; and the coins it bought. */
   spent: bigint;
   coins: bigint;
-  /** The refunds pushes and claims have paid, and how many seats have had their coins and refund. */
+  /**
+   * The refunds pushes and claims have paid, and from the Tax Share's collection on, the lamport dust the rounding
+   * gathered too, which the Tax Share holds since; and how many seats still open have had their coins and refund.
+   */
   refunded: bigint;
   delivered: number;
-  /** Room for what the Creator lock and the Tax Share will record. */
+  /**
+   * What the Creator wallet's own seat asks and its tier, while it holds one (spec 2.1 step 13): its coins go only into
+   * the Creator lock, and it gets no Tax Share.
+   */
+  creatorDeposit: bigint;
+  creatorTier: Tier;
+  /**
+   * Whether the window's fees are collected into the Tax Share (spec 2.1 step 14), and the Tax Share, in the quote's
+   * raw units: those fees and the lamport dust of the open's rounding, what the seats are paid from.
+   */
+  taxCollected: boolean;
+  taxShare: bigint;
+  /** The fills of the seats paid their Tax Share so far, from which each next seat's share is found to the lamport. */
+  taxFillsPaid: bigint;
+  /** Room kept, so the account keeps its size. */
   reserved: ReadonlyUint8Array;
   bump: number;
   vaultBump: number;
@@ -185,10 +208,27 @@ export type LaunchArgs = {
   /** The rung: what the pot spent, in the quote's raw units; and the coins it bought. */
   spent: number | bigint;
   coins: number | bigint;
-  /** The refunds pushes and claims have paid, and how many seats have had their coins and refund. */
+  /**
+   * The refunds pushes and claims have paid, and from the Tax Share's collection on, the lamport dust the rounding
+   * gathered too, which the Tax Share holds since; and how many seats still open have had their coins and refund.
+   */
   refunded: number | bigint;
   delivered: number;
-  /** Room for what the Creator lock and the Tax Share will record. */
+  /**
+   * What the Creator wallet's own seat asks and its tier, while it holds one (spec 2.1 step 13): its coins go only into
+   * the Creator lock, and it gets no Tax Share.
+   */
+  creatorDeposit: number | bigint;
+  creatorTier: TierArgs;
+  /**
+   * Whether the window's fees are collected into the Tax Share (spec 2.1 step 14), and the Tax Share, in the quote's
+   * raw units: those fees and the lamport dust of the open's rounding, what the seats are paid from.
+   */
+  taxCollected: boolean;
+  taxShare: number | bigint;
+  /** The fills of the seats paid their Tax Share so far, from which each next seat's share is found to the lamport. */
+  taxFillsPaid: number | bigint;
+  /** Room kept, so the account keeps its size. */
   reserved: ReadonlyUint8Array;
   bump: number;
   vaultBump: number;
@@ -230,7 +270,12 @@ export function getLaunchEncoder(): Encoder<LaunchArgs> {
       ["coins", getU64Encoder()],
       ["refunded", getU64Encoder()],
       ["delivered", getU32Encoder()],
-      ["reserved", fixEncoderSize(getBytesEncoder(), 28)],
+      ["creatorDeposit", getU64Encoder()],
+      ["creatorTier", getTierEncoder()],
+      ["taxCollected", getBooleanEncoder()],
+      ["taxShare", getU64Encoder()],
+      ["taxFillsPaid", getU64Encoder()],
+      ["reserved", fixEncoderSize(getBytesEncoder(), 2)],
       ["bump", getU8Encoder()],
       ["vaultBump", getU8Encoder()],
     ]),
@@ -273,7 +318,12 @@ export function getLaunchDecoder(): Decoder<Launch> {
     ["coins", getU64Decoder()],
     ["refunded", getU64Decoder()],
     ["delivered", getU32Decoder()],
-    ["reserved", fixDecoderSize(getBytesDecoder(), 28)],
+    ["creatorDeposit", getU64Decoder()],
+    ["creatorTier", getTierDecoder()],
+    ["taxCollected", getBooleanDecoder()],
+    ["taxShare", getU64Decoder()],
+    ["taxFillsPaid", getU64Decoder()],
+    ["reserved", fixDecoderSize(getBytesDecoder(), 2)],
     ["bump", getU8Decoder()],
     ["vaultBump", getU8Decoder()],
   ]);

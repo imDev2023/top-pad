@@ -47,6 +47,7 @@ import {
   type WindowClaimArgs,
 } from "../accounts";
 import {
+  getClaimFairOpenWindowFeesInstructionAsync,
   getClaimFeesInstructionAsync,
   getClaimUnlistedWindowFeesInstructionAsync,
   getClaimWindowFeesInstructionAsync,
@@ -54,6 +55,7 @@ import {
   getRegisterCoinInstructionAsync,
   getRegisterFairOpenCoinInstructionAsync,
   getUpdateFeeConfigInstructionAsync,
+  parseClaimFairOpenWindowFeesInstruction,
   parseClaimFeesInstruction,
   parseClaimUnlistedWindowFeesInstruction,
   parseClaimWindowFeesInstruction,
@@ -61,10 +63,12 @@ import {
   parseRegisterCoinInstruction,
   parseRegisterFairOpenCoinInstruction,
   parseUpdateFeeConfigInstruction,
+  type ClaimFairOpenWindowFeesAsyncInput,
   type ClaimFeesAsyncInput,
   type ClaimUnlistedWindowFeesAsyncInput,
   type ClaimWindowFeesAsyncInput,
   type InitializeAsyncInput,
+  type ParsedClaimFairOpenWindowFeesInstruction,
   type ParsedClaimFeesInstruction,
   type ParsedClaimUnlistedWindowFeesInstruction,
   type ParsedClaimWindowFeesInstruction,
@@ -193,6 +197,7 @@ export function identifyFeeEvent(
 }
 
 export enum FeeInstruction {
+  ClaimFairOpenWindowFees,
   ClaimFees,
   ClaimUnlistedWindowFees,
   ClaimWindowFees,
@@ -206,6 +211,17 @@ export function identifyFeeInstruction(
   instruction: { data: ReadonlyUint8Array } | ReadonlyUint8Array,
 ): FeeInstruction {
   const data = "data" in instruction ? instruction.data : instruction;
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([52, 254, 119, 71, 153, 30, 143, 36]),
+      ),
+      0,
+    )
+  ) {
+    return FeeInstruction.ClaimFairOpenWindowFees;
+  }
   if (
     containsBytes(
       data,
@@ -293,6 +309,9 @@ export type ParsedFeeInstruction<
   TProgram extends string = "HeatFEzySQiaWqxR7cDza9WP2B15AxMfsgSS5p6Bdn97",
 > =
   | ({
+      instructionType: FeeInstruction.ClaimFairOpenWindowFees;
+    } & ParsedClaimFairOpenWindowFeesInstruction<TProgram>)
+  | ({
       instructionType: FeeInstruction.ClaimFees;
     } & ParsedClaimFeesInstruction<TProgram>)
   | ({
@@ -319,6 +338,13 @@ export function parseFeeInstruction<TProgram extends string>(
 ): ParsedFeeInstruction<TProgram> {
   const instructionType = identifyFeeInstruction(instruction);
   switch (instructionType) {
+    case FeeInstruction.ClaimFairOpenWindowFees: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: FeeInstruction.ClaimFairOpenWindowFees,
+        ...parseClaimFairOpenWindowFeesInstruction(instruction),
+      };
+    }
     case FeeInstruction.ClaimFees: {
       assertIsInstructionWithAccounts(instruction);
       return {
@@ -395,6 +421,11 @@ export type FeePluginAccounts = {
 };
 
 export type FeePluginInstructions = {
+  claimFairOpenWindowFees: (
+    input: ClaimFairOpenWindowFeesAsyncInput,
+    config?: { programAddress?: Address | HasAddress },
+  ) => ReturnType<typeof getClaimFairOpenWindowFeesInstructionAsync> &
+    SelfPlanAndSendFunctions;
   claimFees: (
     input: ClaimFeesAsyncInput,
     config?: { programAddress?: Address | HasAddress },
@@ -459,6 +490,14 @@ export function feeProgram(
           windowClaim: addSelfFetchFunctions(client, getWindowClaimCodec()),
         },
         instructions: {
+          claimFairOpenWindowFees: (input, instructionConfig) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getClaimFairOpenWindowFeesInstructionAsync(input, {
+                programAddress:
+                  instructionConfig?.programAddress ?? config.programAddress,
+              }),
+            ),
           claimFees: (input, instructionConfig) =>
             addSelfPlanAndSendFunctions(
               client,

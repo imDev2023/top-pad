@@ -8,6 +8,7 @@
 
 export * from "./coinRegistrar";
 export * from "./launch";
+export * from "./locker";
 export * from "./pot";
 export * from "./programConfig";
 export * from "./vault";

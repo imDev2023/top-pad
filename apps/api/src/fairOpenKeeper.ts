@@ -1,7 +1,8 @@
-// The keeper's work for a Fair Open (spec 10.2, keeper steps 1, 2, 4 and 7): the coin's metadata uploaded 15 s before
-// the open, the rung the pot covers broadcast at the open, every seat pushed its coins and refund in parallel batches,
-// or, if the open cannot run, the launch marked failed and every seat refunded; then the nonce's rent back to the
-// creator and the ticker released. The Workflow in ./keeperWorkflow runs each as a step, and every step is safe to
+// The keeper's work for a Fair Open (spec 10.2, keeper steps 1 to 7): the coin's metadata uploaded 15 s before the open,
+// the rung the pot covers broadcast at the open, every seat pushed its coins and refund in parallel batches, the
+// creator's coins locked, the Tax Share collected once the Tax window ends and pushed to every seat, closing it, and the
+// launch closed; or, if the open cannot run, the launch marked failed and every seat refunded; then the nonce's rent back
+// to the creator and the ticker released. The Workflow in ./keeperWorkflow runs each as a step, and every step is safe to
 // repeat: each reads the chain first and does only what is still undone, so a step tried again does nothing twice.
 import {
   address,
@@ -24,22 +25,30 @@ import {
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import {
   allocate,
+  claimablePool,
   closeLaunchInstructions,
+  collectTaxShareInstructions,
+  dbcPoolAddress,
   closeNonceInstruction,
   FAIR_OPEN_PROGRAM_ADDRESS,
   fairOpenPhase,
   fetchLookupTable,
   LATE_OPEN_SECONDS,
+  lockCreatorInstructions,
   markFailedInstructions,
   pushInstructions,
+  pushTaxShareInstructions,
   PUSH_SEATS,
   REFUND_SEATS,
   refundsInstructions,
   rungAtOrBelow,
   SEAT_LAYOUT,
+  TAX_SHARE_SEATS,
   type LookupTable,
 } from "@top-pad/chain";
+import { fetchVirtualPool } from "@top-pad/clients/dbc";
 import { fetchMaybeLaunch, getSeatDecoder, getSeatSize, LaunchStatus, type Launch } from "@top-pad/clients/fair-open";
+import { fetchMaybeCoinRecord, findCoinRecordPda } from "@top-pad/clients/fee";
 import { fairOpenRungs, launches, metadataItems, type Db } from "@top-pad/db";
 import type { BlobStore, Bindings, Config, SecretBinding } from "./env";
 import { loadKeeper, type Keeper } from "./keeper";
@@ -310,6 +319,113 @@ export async function pushSeats(db: Db, cfg: Config, keeperKey: SecretBinding, l
   const remaining = (await seatsOf(rpc, launch)).filter((s) => !s.delivered && s.wallet !== account.creator).length;
   if (remaining > 0) throw new Error(`${remaining} seats of ${launch} are still owed their coins after 10 rounds`);
   return { transactions, seats, remaining };
+}
+
+/** What a step after the open sent: its transactions' signatures, for the indexer, and what it did. */
+export type AfterOpenSent = { signatures: string[] };
+
+/**
+ * Step 3: the Creator lock (spec 2.1 step 13), once every other seat has its coins: the creator's seat's coins go into
+ * their Jupiter Lock escrow and the seat closes. Nothing to do when the Creator wallet holds no seat, or it is locked.
+ */
+export async function lockCreator(cfg: Config, keeperKey: SecretBinding, launch: Address): Promise<AfterOpenSent & { locked: boolean }> {
+  const heat = cfg.heat;
+  if (!heat?.keys) throw new Error(`Heat has no keeper on ${cfg.cluster}`);
+  const rpc = createSolanaRpc(cfg.rpcUrl);
+  const found = await fetchMaybeLaunch(rpc, launch, { commitment: "confirmed", ...limited() });
+  if (!found.exists) return { signatures: [], locked: false };
+  if (found.data.status !== LaunchStatus.Opened) throw new Error(`${launch} has not opened`);
+  const creator = found.data.creator;
+  const seat = (await seatsOf(rpc, launch)).find((s) => s.wallet === creator && !s.delivered);
+  if (!seat) return { signatures: [], locked: false };
+  const keeper = await loadKeeper(keeperKey, heat.keys.keeper);
+  const pool = await dbcPoolAddress(found.data.dbcConfig, found.data.mint, found.data.quoteMint);
+  const instructions = await lockCreatorInstructions({ launch, creator, seat: seat.seat, mint: found.data.mint, pool, computeUnitPrice: cfg.computeUnitPrice });
+  return { signatures: [await keeperSends(cfg, rpc, keeper, instructions)], locked: true };
+}
+
+/** When a Fair Open's coin's Tax window ends, in milliseconds since the epoch, from its pool's activation point. */
+export async function taxWindowEnd(cfg: Config, launch: Address): Promise<number> {
+  const heat = cfg.heat;
+  if (!heat) throw new Error(`Heat has no configs on ${cfg.cluster}`);
+  const rpc = createSolanaRpc(cfg.rpcUrl);
+  const found = await fetchMaybeLaunch(rpc, launch, { commitment: "confirmed", ...limited() });
+  if (!found.exists || found.data.status !== LaunchStatus.Opened) throw new Error(`${launch} has not opened`);
+  const pool = await dbcPoolAddress(found.data.dbcConfig, found.data.mint, found.data.quoteMint);
+  const state = await fetchVirtualPool(rpc, pool, limited());
+  return Number(claimablePool(pool, state.data.poolState, heat.quote.mint).windowEndsAt) * 1000;
+}
+
+/**
+ * Step 5: the Tax Share's collection (spec 2.1 step 14), the first window claim of the coin's pool, at 60 s. Throws while
+ * the chain's clock is still inside the window, so the Workflow's step tries again a second later. Nothing to do once it
+ * is collected, by this keeper or anyone.
+ */
+export async function collectTaxShare(cfg: Config, keeperKey: SecretBinding, launch: Address): Promise<AfterOpenSent & { sentLateMs: number | null }> {
+  const heat = cfg.heat;
+  if (!heat?.keys) throw new Error(`Heat has no keeper on ${cfg.cluster}`);
+  const rpc = createSolanaRpc(cfg.rpcUrl);
+  const found = await fetchMaybeLaunch(rpc, launch, { commitment: "confirmed", ...limited() });
+  if (!found.exists || found.data.taxCollected) return { signatures: [], sentLateMs: null };
+  if (found.data.status !== LaunchStatus.Opened) throw new Error(`${launch} has not opened`);
+  const record = await fetchMaybeCoinRecord(rpc, (await findCoinRecordPda({ mint: found.data.mint }))[0], limited());
+  if (!record.exists) throw new Error(`${found.data.mint} has no CoinRecord on chain yet`);
+  const state = await fetchVirtualPool(rpc, record.data.pool, limited());
+  const pool = claimablePool(record.data.pool, state.data.poolState, heat.quote.mint);
+  const keeper = await loadKeeper(keeperKey, heat.keys.keeper);
+  const sentAt = Date.now();
+  try {
+    const signature = await keeperSends(cfg, rpc, keeper, await collectTaxShareInstructions({ launch, pool, treasury: heat.keys.treasury, computeUnitPrice: cfg.computeUnitPrice }));
+    return { signatures: [signature], sentLateMs: sentAt - Number(pool.windowEndsAt) * 1000 };
+  } catch (e) {
+    // Most often "The pool's Tax window has not ended": the chain's clock trails this Worker's by a second or so.
+    throw new Error(`the Tax Share's collection of ${launch} was refused: ${preflightRefusal(e)}`, { cause: e });
+  }
+}
+
+/**
+ * Step 6: every seat but the creator's is paid its Tax Share and closes, its rent back to its wallet (spec 2.1 step 14),
+ * 13 seats a push and 10 pushes at a time, round after round; then the launch closes, its rent and what is left of the
+ * creator's prepaid rent going back to the creator. A push names only seats still open, so a step tried again sends
+ * nothing for those paid.
+ */
+export async function pushTaxShare(cfg: Config, keeperKey: SecretBinding, launch: Address): Promise<AfterOpenSent & { seats: number; closed: boolean }> {
+  const heat = cfg.heat;
+  if (!heat?.keys) throw new Error(`Heat has no keeper on ${cfg.cluster}`);
+  const rpc = createSolanaRpc(cfg.rpcUrl);
+  const keeper = await loadKeeper(keeperKey, heat.keys.keeper);
+  const signatures: string[] = [];
+  let seats = 0;
+  for (let round = 0; round < 10; round++) {
+    const found = await fetchMaybeLaunch(rpc, launch, { commitment: "confirmed", ...limited() });
+    if (!found.exists) return { signatures, seats, closed: true };
+    if (!found.data.taxCollected) throw new Error(`${launch} has not collected its Tax Share`);
+    const waiting = (await seatsOf(rpc, launch)).filter((s) => s.delivered && s.wallet !== found.data.creator);
+    if (waiting.length === 0) {
+      // Every seat has closed, the creator's with the Creator lock: the launch is done.
+      if (found.data.seats > 0) throw new Error(`${found.data.seats} seats of ${launch} are still open, owed their coins or the Creator lock`);
+      signatures.push(await keeperSends(cfg, rpc, keeper, await closeLaunchInstructions({ launch, creator: found.data.creator, computeUnitPrice: cfg.computeUnitPrice })));
+      return { signatures, seats, closed: true };
+    }
+    const batches: SeatAccount[][] = [];
+    for (let i = 0; i < waiting.length; i += TAX_SHARE_SEATS) batches.push(waiting.slice(i, i + TAX_SHARE_SEATS));
+    for (let i = 0; i < batches.length; i += PUSHES_AT_ONCE) {
+      const sent = await Promise.allSettled(
+        batches.slice(i, i + PUSHES_AT_ONCE).map(async (batch) =>
+          keeperSends(cfg, rpc, keeper, await pushTaxShareInstructions({ launch, seats: batch, computeUnitPrice: cfg.computeUnitPrice })),
+        ),
+      );
+      for (const [j, result] of sent.entries()) {
+        if (result.status === "fulfilled") {
+          signatures.push(result.value);
+          seats += batches[i + j]!.length;
+        } else {
+          console.warn(`a Tax Share push of ${launch} failed; the next round sends it again`, (result.reason as Error).message);
+        }
+      }
+    }
+  }
+  throw new Error(`the Tax Share of ${launch} is still owed after 10 rounds`);
 }
 
 /**

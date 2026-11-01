@@ -174,12 +174,14 @@ function Seated({ view, account, chain, onChanged }: { view: FairOpen; account: 
               <span className="num">{sol(seat.deposit, 2)}</span> SOL
             </dd>
           </div>
-          <div>
-            <dt className="eyebrow">Rent kept for you</dt>
-            <dd>
-              <span className="num">{sol(seatRent, 6)}</span> SOL
-            </dd>
-          </div>
+          {!seat.closed && (
+            <div>
+              <dt className="eyebrow">Rent kept for you</dt>
+              <dd>
+                <span className="num">{sol(seatRent, 6)}</span> SOL
+              </dd>
+            </div>
+          )}
         </dl>
       ) : (
         you.admission.admitted && (
@@ -259,16 +261,38 @@ function Seated({ view, account, chain, onChanged }: { view: FairOpen; account: 
               <span className="num">{sol(seat.refund, 9)}</span> SOL
             </dd>
           </div>
+          {you.wallet !== view.creator.wallet && (
+            <div>
+              <dt className="eyebrow">Your Tax Share</dt>
+              <dd data-testid="fair-open-your-tax-share">
+                {seat.taxShare !== null ? (
+                  <>
+                    <span className="num">{sol(seat.taxShare, 9)}</span> SOL
+                  </>
+                ) : (
+                  <span className="note">{view.open?.taxShare ? "On its way" : "Paid after the first minute"}</span>
+                )}
+              </dd>
+            </div>
+          )}
         </dl>
       )}
       {view.phase === "opened" &&
         seat &&
-        (seat.delivered ? (
-          <p className="note" data-testid="fair-open-in-wallet">
-            Delivered to your wallet.
+        (you.wallet === view.creator.wallet ? (
+          <p className="note" data-testid="fair-open-creator-lock">
+            {view.open?.lock.status === "locked"
+              ? "Your coins are in the Creator lock: nothing for 7 days, then released second by second until day 30. Your refund and rent are in your wallet."
+              : "As the creator, your coins go into the Creator lock right after the open, and your seat gets no Tax Share."}
           </p>
-        ) : you.wallet === view.creator.wallet ? (
-          <p className="note">As the creator, your coins go into the Creator lock, which comes in Heat&apos;s next build.</p>
+        ) : seat.closed ? (
+          <p className="note" data-testid="fair-open-in-wallet">
+            Your coins, refund and Tax Share are in your wallet, with your seat&apos;s rent.
+          </p>
+        ) : seat.delivered ? (
+          <p className="note" data-testid="fair-open-in-wallet">
+            Delivered to your wallet. Your Tax Share and your seat&apos;s rent follow after the first minute.
+          </p>
         ) : (
           <button type="button" className="btn btn-go" disabled={busy} onClick={() => void send("claim")}>
             Claim my coins and refund

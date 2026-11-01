@@ -52,48 +52,60 @@ import {
 import {
   getClaimInstructionAsync,
   getCloseLaunchInstructionAsync,
+  getCollectTaxShareInstructionAsync,
   getCreateLaunchInstructionAsync,
   getDepositInstructionAsync,
   getInitializeInstructionAsync,
+  getLockCreatorInstructionAsync,
   getMarkFailedInstruction,
   getOpenInstructionAsync,
   getPushInstructionAsync,
+  getPushTaxShareInstructionAsync,
   getSettleInstructionAsync,
   getUpdateProgramConfigInstructionAsync,
   getWithdrawFailedInstructionAsync,
   getWithdrawInstructionAsync,
   parseClaimInstruction,
   parseCloseLaunchInstruction,
+  parseCollectTaxShareInstruction,
   parseCreateLaunchInstruction,
   parseDepositInstruction,
   parseInitializeInstruction,
+  parseLockCreatorInstruction,
   parseMarkFailedInstruction,
   parseOpenInstruction,
   parsePushInstruction,
+  parsePushTaxShareInstruction,
   parseSettleInstruction,
   parseUpdateProgramConfigInstruction,
   parseWithdrawFailedInstruction,
   parseWithdrawInstruction,
   type ClaimAsyncInput,
   type CloseLaunchAsyncInput,
+  type CollectTaxShareAsyncInput,
   type CreateLaunchAsyncInput,
   type DepositAsyncInput,
   type InitializeAsyncInput,
+  type LockCreatorAsyncInput,
   type MarkFailedInput,
   type OpenAsyncInput,
   type ParsedClaimInstruction,
   type ParsedCloseLaunchInstruction,
+  type ParsedCollectTaxShareInstruction,
   type ParsedCreateLaunchInstruction,
   type ParsedDepositInstruction,
   type ParsedInitializeInstruction,
+  type ParsedLockCreatorInstruction,
   type ParsedMarkFailedInstruction,
   type ParsedOpenInstruction,
   type ParsedPushInstruction,
+  type ParsedPushTaxShareInstruction,
   type ParsedSettleInstruction,
   type ParsedUpdateProgramConfigInstruction,
   type ParsedWithdrawFailedInstruction,
   type ParsedWithdrawInstruction,
   type PushAsyncInput,
+  type PushTaxShareAsyncInput,
   type SettleAsyncInput,
   type UpdateProgramConfigAsyncInput,
   type WithdrawAsyncInput,
@@ -102,6 +114,7 @@ import {
 import {
   findCoinRegistrarPda,
   findLaunchPda,
+  findLockerPda,
   findPotPda,
   findProgramConfigPda,
   findVaultPda,
@@ -173,6 +186,7 @@ export function identifyFairOpenAccount(
 
 export enum FairOpenEvent {
   CoinDustBurnt,
+  CreatorLocked,
   Deposited,
   FailedDepositReturned,
   LaunchClosed,
@@ -181,6 +195,8 @@ export enum FairOpenEvent {
   LaunchOpened,
   ProgramConfigChanged,
   SeatDelivered,
+  TaxShareCollected,
+  TaxSharePaid,
   Withdrawn,
 }
 
@@ -198,6 +214,17 @@ export function identifyFairOpenEvent(
     )
   ) {
     return FairOpenEvent.CoinDustBurnt;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([236, 6, 11, 225, 235, 131, 19, 250]),
+      ),
+      0,
+    )
+  ) {
+    return FairOpenEvent.CreatorLocked;
   }
   if (
     containsBytes(
@@ -291,6 +318,28 @@ export function identifyFairOpenEvent(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([170, 193, 207, 40, 100, 110, 38, 253]),
+      ),
+      0,
+    )
+  ) {
+    return FairOpenEvent.TaxShareCollected;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([184, 205, 226, 217, 55, 86, 156, 69]),
+      ),
+      0,
+    )
+  ) {
+    return FairOpenEvent.TaxSharePaid;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
         new Uint8Array([20, 89, 223, 198, 194, 124, 219, 13]),
       ),
       0,
@@ -306,12 +355,15 @@ export function identifyFairOpenEvent(
 export enum FairOpenInstruction {
   Claim,
   CloseLaunch,
+  CollectTaxShare,
   CreateLaunch,
   Deposit,
   Initialize,
+  LockCreator,
   MarkFailed,
   Open,
   Push,
+  PushTaxShare,
   Settle,
   UpdateProgramConfig,
   Withdraw,
@@ -343,6 +395,17 @@ export function identifyFairOpenInstruction(
     )
   ) {
     return FairOpenInstruction.CloseLaunch;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([138, 12, 73, 1, 136, 55, 85, 138]),
+      ),
+      0,
+    )
+  ) {
+    return FairOpenInstruction.CollectTaxShare;
   }
   if (
     containsBytes(
@@ -381,6 +444,17 @@ export function identifyFairOpenInstruction(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([68, 25, 135, 252, 161, 20, 52, 207]),
+      ),
+      0,
+    )
+  ) {
+    return FairOpenInstruction.LockCreator;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
         new Uint8Array([58, 234, 53, 63, 84, 15, 46, 105]),
       ),
       0,
@@ -409,6 +483,17 @@ export function identifyFairOpenInstruction(
     )
   ) {
     return FairOpenInstruction.Push;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([111, 131, 146, 233, 19, 207, 196, 202]),
+      ),
+      0,
+    )
+  ) {
+    return FairOpenInstruction.PushTaxShare;
   }
   if (
     containsBytes(
@@ -470,6 +555,9 @@ export type ParsedFairOpenInstruction<
       instructionType: FairOpenInstruction.CloseLaunch;
     } & ParsedCloseLaunchInstruction<TProgram>)
   | ({
+      instructionType: FairOpenInstruction.CollectTaxShare;
+    } & ParsedCollectTaxShareInstruction<TProgram>)
+  | ({
       instructionType: FairOpenInstruction.CreateLaunch;
     } & ParsedCreateLaunchInstruction<TProgram>)
   | ({
@@ -479,6 +567,9 @@ export type ParsedFairOpenInstruction<
       instructionType: FairOpenInstruction.Initialize;
     } & ParsedInitializeInstruction<TProgram>)
   | ({
+      instructionType: FairOpenInstruction.LockCreator;
+    } & ParsedLockCreatorInstruction<TProgram>)
+  | ({
       instructionType: FairOpenInstruction.MarkFailed;
     } & ParsedMarkFailedInstruction<TProgram>)
   | ({
@@ -487,6 +578,9 @@ export type ParsedFairOpenInstruction<
   | ({
       instructionType: FairOpenInstruction.Push;
     } & ParsedPushInstruction<TProgram>)
+  | ({
+      instructionType: FairOpenInstruction.PushTaxShare;
+    } & ParsedPushTaxShareInstruction<TProgram>)
   | ({
       instructionType: FairOpenInstruction.Settle;
     } & ParsedSettleInstruction<TProgram>)
@@ -519,6 +613,13 @@ export function parseFairOpenInstruction<TProgram extends string>(
         ...parseCloseLaunchInstruction(instruction),
       };
     }
+    case FairOpenInstruction.CollectTaxShare: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: FairOpenInstruction.CollectTaxShare,
+        ...parseCollectTaxShareInstruction(instruction),
+      };
+    }
     case FairOpenInstruction.CreateLaunch: {
       assertIsInstructionWithAccounts(instruction);
       return {
@@ -540,6 +641,13 @@ export function parseFairOpenInstruction<TProgram extends string>(
         ...parseInitializeInstruction(instruction),
       };
     }
+    case FairOpenInstruction.LockCreator: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: FairOpenInstruction.LockCreator,
+        ...parseLockCreatorInstruction(instruction),
+      };
+    }
     case FairOpenInstruction.MarkFailed: {
       assertIsInstructionWithAccounts(instruction);
       return {
@@ -559,6 +667,13 @@ export function parseFairOpenInstruction<TProgram extends string>(
       return {
         instructionType: FairOpenInstruction.Push,
         ...parsePushInstruction(instruction),
+      };
+    }
+    case FairOpenInstruction.PushTaxShare: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: FairOpenInstruction.PushTaxShare,
+        ...parsePushTaxShareInstruction(instruction),
       };
     }
     case FairOpenInstruction.Settle: {
@@ -626,6 +741,11 @@ export type FairOpenPluginInstructions = {
     config?: { programAddress?: Address | HasAddress },
   ) => ReturnType<typeof getCloseLaunchInstructionAsync> &
     SelfPlanAndSendFunctions;
+  collectTaxShare: (
+    input: CollectTaxShareAsyncInput,
+    config?: { programAddress?: Address | HasAddress },
+  ) => ReturnType<typeof getCollectTaxShareInstructionAsync> &
+    SelfPlanAndSendFunctions;
   createLaunch: (
     input: CreateLaunchAsyncInput,
     config?: { programAddress?: Address | HasAddress },
@@ -640,6 +760,11 @@ export type FairOpenPluginInstructions = {
     config?: { programAddress?: Address | HasAddress },
   ) => ReturnType<typeof getInitializeInstructionAsync> &
     SelfPlanAndSendFunctions;
+  lockCreator: (
+    input: LockCreatorAsyncInput,
+    config?: { programAddress?: Address | HasAddress },
+  ) => ReturnType<typeof getLockCreatorInstructionAsync> &
+    SelfPlanAndSendFunctions;
   markFailed: (
     input: MarkFailedInput,
     config?: { programAddress?: Address | HasAddress },
@@ -652,6 +777,11 @@ export type FairOpenPluginInstructions = {
     input: MakeOptional<PushAsyncInput, "payer">,
     config?: { programAddress?: Address | HasAddress },
   ) => ReturnType<typeof getPushInstructionAsync> & SelfPlanAndSendFunctions;
+  pushTaxShare: (
+    input: PushTaxShareAsyncInput,
+    config?: { programAddress?: Address | HasAddress },
+  ) => ReturnType<typeof getPushTaxShareInstructionAsync> &
+    SelfPlanAndSendFunctions;
   settle: (
     input: SettleAsyncInput,
     config?: { programAddress?: Address | HasAddress },
@@ -676,9 +806,10 @@ export type FairOpenPluginInstructions = {
 export type FairOpenPluginPdas = {
   vault: typeof findVaultPda;
   programConfig: typeof findProgramConfigPda;
-  launch: typeof findLaunchPda;
   pot: typeof findPotPda;
   coinRegistrar: typeof findCoinRegistrarPda;
+  launch: typeof findLaunchPda;
+  locker: typeof findLockerPda;
 };
 
 export type FairOpenPluginRequirements = ClientWithRpc<
@@ -719,6 +850,14 @@ export function fairOpenProgram(
                   instructionConfig?.programAddress ?? config.programAddress,
               }),
             ),
+          collectTaxShare: (input, instructionConfig) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getCollectTaxShareInstructionAsync(input, {
+                programAddress:
+                  instructionConfig?.programAddress ?? config.programAddress,
+              }),
+            ),
           createLaunch: (input, instructionConfig) =>
             addSelfPlanAndSendFunctions(
               client,
@@ -746,6 +885,14 @@ export function fairOpenProgram(
                 },
               ),
             ),
+          lockCreator: (input, instructionConfig) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getLockCreatorInstructionAsync(input, {
+                programAddress:
+                  instructionConfig?.programAddress ?? config.programAddress,
+              }),
+            ),
           markFailed: (input, instructionConfig) =>
             addSelfPlanAndSendFunctions(
               client,
@@ -772,6 +919,14 @@ export function fairOpenProgram(
                     instructionConfig?.programAddress ?? config.programAddress,
                 },
               ),
+            ),
+          pushTaxShare: (input, instructionConfig) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getPushTaxShareInstructionAsync(input, {
+                programAddress:
+                  instructionConfig?.programAddress ?? config.programAddress,
+              }),
             ),
           settle: (input, instructionConfig) =>
             addSelfPlanAndSendFunctions(
@@ -817,11 +972,6 @@ export function fairOpenProgram(
               programAddress:
                 pdaConfig?.programAddress ?? config.programAddress,
             }),
-          launch: (seeds, pdaConfig) =>
-            findLaunchPda(seeds, {
-              programAddress:
-                pdaConfig?.programAddress ?? config.programAddress,
-            }),
           pot: (seeds, pdaConfig) =>
             findPotPda(seeds, {
               programAddress:
@@ -829,6 +979,16 @@ export function fairOpenProgram(
             }),
           coinRegistrar: (pdaConfig) =>
             findCoinRegistrarPda({
+              programAddress:
+                pdaConfig?.programAddress ?? config.programAddress,
+            }),
+          launch: (seeds, pdaConfig) =>
+            findLaunchPda(seeds, {
+              programAddress:
+                pdaConfig?.programAddress ?? config.programAddress,
+            }),
+          locker: (seeds, pdaConfig) =>
+            findLockerPda(seeds, {
               programAddress:
                 pdaConfig?.programAddress ?? config.programAddress,
             }),

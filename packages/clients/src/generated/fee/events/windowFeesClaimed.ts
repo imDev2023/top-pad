@@ -48,9 +48,12 @@ export type WindowFeesClaimedEvent = {
   config: Address;
   /** Whether our launch key co-signed the coin: false for a pool made around Heat's flow. */
   heat: boolean;
-  /** The quote account paid: the treasury's, for an Instant launch and for a pool made around Heat's flow. */
+  /**
+   * The quote account paid: the treasury's, for an Instant launch and for a pool made around Heat's flow; a Fair
+   * Open's pot, for its Tax Share.
+   */
   destination: Address;
-  /** In the quote's raw units. */
+  /** In the quote's raw units: a Fair Open's leaves out the pot's own fee, which stays in the pool. */
   amount: bigint;
   /**
    * When the Tax window ended and when the claim ran, Unix timestamps: it also paid the normal fees of the seconds
@@ -66,9 +69,12 @@ export type WindowFeesClaimedEventArgs = {
   config: Address | HasAddress;
   /** Whether our launch key co-signed the coin: false for a pool made around Heat's flow. */
   heat: boolean;
-  /** The quote account paid: the treasury's, for an Instant launch and for a pool made around Heat's flow. */
+  /**
+   * The quote account paid: the treasury's, for an Instant launch and for a pool made around Heat's flow; a Fair
+   * Open's pot, for its Tax Share.
+   */
   destination: Address | HasAddress;
-  /** In the quote's raw units. */
+  /** In the quote's raw units: a Fair Open's leaves out the pot's own fee, which stays in the pool. */
   amount: number | bigint;
   /**
    * When the Tax window ended and when the claim ran, Unix timestamps: it also paid the normal fees of the seconds

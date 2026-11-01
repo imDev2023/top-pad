@@ -39,8 +39,8 @@ export const FEE_ERROR__TAX_WINDOW_OPEN = 0x1779; // 6009
 export const FEE_ERROR__WINDOW_ALREADY_CLAIMED = 0x177a; // 6010
 /** WindowNotClaimed: The pool's window claim has not run yet */
 export const FEE_ERROR__WINDOW_NOT_CLAIMED = 0x177b; // 6011
-/** TaxShareNotBuilt: A Fair Open's window fees go to its Tax Share, which this program cannot pay yet */
-export const FEE_ERROR__TAX_SHARE_NOT_BUILT = 0x177c; // 6012
+/** FairOpenTaxShare: A Fair Open's window fees go to its Tax Share, through the Fair Open program's collect_tax_share */
+export const FEE_ERROR__FAIR_OPEN_TAX_SHARE = 0x177c; // 6012
 /** NotTheCreatorsAccount: The creator's half goes to the creator role holder's associated quote account */
 export const FEE_ERROR__NOT_THE_CREATORS_ACCOUNT = 0x177d; // 6013
 /** NotTheTreasurysAccount: The treasury's share goes to the treasury's associated quote account */
@@ -49,25 +49,31 @@ export const FEE_ERROR__NOT_THE_TREASURYS_ACCOUNT = 0x177e; // 6014
 export const FEE_ERROR__NOT_THE_FEE_CLAIMERS_ACCOUNT = 0x177f; // 6015
 /** CreatorRoleHeldByFeeClaimer: The fee claimer holds the pool's creator role, so its creator's half has nowhere to go */
 export const FEE_ERROR__CREATOR_ROLE_HELD_BY_FEE_CLAIMER = 0x1780; // 6016
-/** NotTheFairOpenProgram: Only the Fair Open program's open registers a Fair Open's coin */
+/** NotTheFairOpenProgram: Only the Fair Open program registers a Fair Open's coin or collects its Tax Share */
 export const FEE_ERROR__NOT_THE_FAIR_OPEN_PROGRAM = 0x1781; // 6017
+/** NotAFairOpen: The coin is not a Fair Open's */
+export const FEE_ERROR__NOT_A_FAIR_OPEN = 0x1782; // 6018
+/** NotTheTaxShare: A Fair Open's window fees go to its launch's pot, its Tax Share */
+export const FEE_ERROR__NOT_THE_TAX_SHARE = 0x1783; // 6019
 
 export type FeeError =
   | typeof FEE_ERROR__CREATOR_ROLE_HELD_BY_FEE_CLAIMER
+  | typeof FEE_ERROR__FAIR_OPEN_TAX_SHARE
   | typeof FEE_ERROR__MISSING_SETTING
   | typeof FEE_ERROR__NOT_A_DBC_CONFIG
   | typeof FEE_ERROR__NOT_A_DBC_POOL
+  | typeof FEE_ERROR__NOT_A_FAIR_OPEN
   | typeof FEE_ERROR__NOT_A_HEAT_CONFIG
   | typeof FEE_ERROR__NOT_THE_CREATORS_ACCOUNT
   | typeof FEE_ERROR__NOT_THE_FAIR_OPEN_PROGRAM
   | typeof FEE_ERROR__NOT_THE_FEE_CLAIMERS_ACCOUNT
   | typeof FEE_ERROR__NOT_THE_LAUNCH_KEY
+  | typeof FEE_ERROR__NOT_THE_TAX_SHARE
   | typeof FEE_ERROR__NOT_THE_TREASURYS_ACCOUNT
   | typeof FEE_ERROR__NOT_UPGRADE_AUTHORITY
   | typeof FEE_ERROR__POOL_CONFIG_MISMATCH
   | typeof FEE_ERROR__POOL_MINT_MISMATCH
   | typeof FEE_ERROR__POOL_MISMATCH
-  | typeof FEE_ERROR__TAX_SHARE_NOT_BUILT
   | typeof FEE_ERROR__TAX_WINDOW_OPEN
   | typeof FEE_ERROR__WINDOW_ALREADY_CLAIMED
   | typeof FEE_ERROR__WINDOW_NOT_CLAIMED;
@@ -76,20 +82,22 @@ let feeErrorMessages: Record<FeeError, string> | undefined;
 if (process.env["NODE_ENV"] !== "production") {
   feeErrorMessages = {
     [FEE_ERROR__CREATOR_ROLE_HELD_BY_FEE_CLAIMER]: `The fee claimer holds the pool's creator role, so its creator's half has nowhere to go`,
+    [FEE_ERROR__FAIR_OPEN_TAX_SHARE]: `A Fair Open's window fees go to its Tax Share, through the Fair Open program's collect_tax_share`,
     [FEE_ERROR__MISSING_SETTING]: `A setting is the default address`,
     [FEE_ERROR__NOT_A_DBC_CONFIG]: `The config is not a DBC config`,
     [FEE_ERROR__NOT_A_DBC_POOL]: `The pool is not a DBC pool`,
+    [FEE_ERROR__NOT_A_FAIR_OPEN]: `The coin is not a Fair Open's`,
     [FEE_ERROR__NOT_A_HEAT_CONFIG]: `The config does not name the fee program's fee claimer`,
     [FEE_ERROR__NOT_THE_CREATORS_ACCOUNT]: `The creator's half goes to the creator role holder's associated quote account`,
-    [FEE_ERROR__NOT_THE_FAIR_OPEN_PROGRAM]: `Only the Fair Open program's open registers a Fair Open's coin`,
+    [FEE_ERROR__NOT_THE_FAIR_OPEN_PROGRAM]: `Only the Fair Open program registers a Fair Open's coin or collects its Tax Share`,
     [FEE_ERROR__NOT_THE_FEE_CLAIMERS_ACCOUNT]: `DBC's coin fee slot takes the fee claimer's associated quote account`,
     [FEE_ERROR__NOT_THE_LAUNCH_KEY]: `The launch key did not sign`,
+    [FEE_ERROR__NOT_THE_TAX_SHARE]: `A Fair Open's window fees go to its launch's pot, its Tax Share`,
     [FEE_ERROR__NOT_THE_TREASURYS_ACCOUNT]: `The treasury's share goes to the treasury's associated quote account`,
     [FEE_ERROR__NOT_UPGRADE_AUTHORITY]: `Only the program's upgrade authority can change Heat's settings`,
     [FEE_ERROR__POOL_CONFIG_MISMATCH]: `The pool is on another config`,
     [FEE_ERROR__POOL_MINT_MISMATCH]: `The pool trades another mint`,
     [FEE_ERROR__POOL_MISMATCH]: `The record or window claim is another pool's`,
-    [FEE_ERROR__TAX_SHARE_NOT_BUILT]: `A Fair Open's window fees go to its Tax Share, which this program cannot pay yet`,
     [FEE_ERROR__TAX_WINDOW_OPEN]: `The pool's Tax window has not ended`,
     [FEE_ERROR__WINDOW_ALREADY_CLAIMED]: `The pool's window claim has already run`,
     [FEE_ERROR__WINDOW_NOT_CLAIMED]: `The pool's window claim has not run yet`,

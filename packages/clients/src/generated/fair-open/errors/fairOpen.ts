@@ -117,6 +117,20 @@ export const FAIR_OPEN_ERROR__ALREADY_DELIVERED = 0x17a0; // 6048
 export const FAIR_OPEN_ERROR__CREATORS_SEAT = 0x17a1; // 6049
 /** NotYourCoinAccount: The coins go to an account of the coin the seat's wallet owns */
 export const FAIR_OPEN_ERROR__NOT_YOUR_COIN_ACCOUNT = 0x17a2; // 6050
+/** NotTheCreatorsSeat: That is not the Creator wallet's seat */
+export const FAIR_OPEN_ERROR__NOT_THE_CREATORS_SEAT = 0x17a3; // 6051
+/** LockNotFunded: The Creator lock's rent is more than the creator's prepaid rent and refund */
+export const FAIR_OPEN_ERROR__LOCK_NOT_FUNDED = 0x17a4; // 6052
+/** TaxShareCollected: The Tax Share is collected already */
+export const FAIR_OPEN_ERROR__TAX_SHARE_COLLECTED = 0x17a5; // 6053
+/** TaxShareNotCollected: The Tax Share is not collected yet */
+export const FAIR_OPEN_ERROR__TAX_SHARE_NOT_COLLECTED = 0x17a6; // 6054
+/** NotTheTreasury: That is not Heat's treasury */
+export const FAIR_OPEN_ERROR__NOT_THE_TREASURY = 0x17a7; // 6055
+/** NotDone: The launch is neither failed nor opened */
+export const FAIR_OPEN_ERROR__NOT_DONE = 0x17a8; // 6056
+/** CreatorCoinsNotLocked: The Creator lock did not take exactly the creator's coins */
+export const FAIR_OPEN_ERROR__CREATOR_COINS_NOT_LOCKED = 0x17a9; // 6057
 
 export type FairOpenError =
   | typeof FAIR_OPEN_ERROR__ADMISSION_EXPIRED
@@ -125,14 +139,17 @@ export type FairOpenError =
   | typeof FAIR_OPEN_ERROR__CANNOT_OPEN
   | typeof FAIR_OPEN_ERROR__CAN_STILL_OPEN
   | typeof FAIR_OPEN_ERROR__CAP_OVER_TIER
+  | typeof FAIR_OPEN_ERROR__CREATOR_COINS_NOT_LOCKED
   | typeof FAIR_OPEN_ERROR__CREATORS_SEAT
   | typeof FAIR_OPEN_ERROR__IDENTITY_MISMATCH
+  | typeof FAIR_OPEN_ERROR__LOCK_NOT_FUNDED
   | typeof FAIR_OPEN_ERROR__MIN_RAISE_ABOVE_CAP
   | typeof FAIR_OPEN_ERROR__MISSING_SETTING
   | typeof FAIR_OPEN_ERROR__NO_ADMISSION
   | typeof FAIR_OPEN_ERROR__NO_IDENTITY
   | typeof FAIR_OPEN_ERROR__NOT_A_DBC_CONFIG
   | typeof FAIR_OPEN_ERROR__NOT_A_TOKEN_ACCOUNT
+  | typeof FAIR_OPEN_ERROR__NOT_DONE
   | typeof FAIR_OPEN_ERROR__NOT_FAILED
   | typeof FAIR_OPEN_ERROR__NOT_OPENED
   | typeof FAIR_OPEN_ERROR__NOT_OPENING
@@ -142,11 +159,13 @@ export type FairOpenError =
   | typeof FAIR_OPEN_ERROR__NOT_THE_COIN
   | typeof FAIR_OPEN_ERROR__NOT_THE_CREATION_TRANSACTION
   | typeof FAIR_OPEN_ERROR__NOT_THE_CREATOR
+  | typeof FAIR_OPEN_ERROR__NOT_THE_CREATORS_SEAT
   | typeof FAIR_OPEN_ERROR__NOT_THE_FAIR_OPEN_CONFIG
   | typeof FAIR_OPEN_ERROR__NOT_THE_FEE_PROGRAM
   | typeof FAIR_OPEN_ERROR__NOT_THE_KEEPER
   | typeof FAIR_OPEN_ERROR__NOT_THE_POOL
   | typeof FAIR_OPEN_ERROR__NOT_THE_POTS_COINS
+  | typeof FAIR_OPEN_ERROR__NOT_THE_TREASURY
   | typeof FAIR_OPEN_ERROR__NOT_THIS_ADMISSION
   | typeof FAIR_OPEN_ERROR__NOT_THIS_LAUNCHS_SEAT
   | typeof FAIR_OPEN_ERROR__NOT_UPGRADE_AUTHORITY
@@ -160,6 +179,8 @@ export type FairOpenError =
   | typeof FAIR_OPEN_ERROR__SEAT_HELD_BY_ANOTHER_WALLET
   | typeof FAIR_OPEN_ERROR__SEAT_NOT_COUNTED
   | typeof FAIR_OPEN_ERROR__SEATS_LEFT
+  | typeof FAIR_OPEN_ERROR__TAX_SHARE_COLLECTED
+  | typeof FAIR_OPEN_ERROR__TAX_SHARE_NOT_COLLECTED
   | typeof FAIR_OPEN_ERROR__TOO_EARLY
   | typeof FAIR_OPEN_ERROR__TOO_FAR_AHEAD
   | typeof FAIR_OPEN_ERROR__TOO_LATE
@@ -180,14 +201,17 @@ if (process.env["NODE_ENV"] !== "production") {
     [FAIR_OPEN_ERROR__CANNOT_OPEN]: `The pot would spend less than the ladder's lowest rung or the minimum raise`,
     [FAIR_OPEN_ERROR__CAN_STILL_OPEN]: `The pot can still open: it may fail only 15 minutes after the scheduled open`,
     [FAIR_OPEN_ERROR__CAP_OVER_TIER]: `The admission's cap is above its tier's or off the step`,
+    [FAIR_OPEN_ERROR__CREATOR_COINS_NOT_LOCKED]: `The Creator lock did not take exactly the creator's coins`,
     [FAIR_OPEN_ERROR__CREATORS_SEAT]: `The creator's coins leave the pot only into the Creator lock`,
     [FAIR_OPEN_ERROR__IDENTITY_MISMATCH]: `The coin's name, ticker or metadata URI is not the one sealed at scheduling`,
+    [FAIR_OPEN_ERROR__LOCK_NOT_FUNDED]: `The Creator lock's rent is more than the creator's prepaid rent and refund`,
     [FAIR_OPEN_ERROR__MIN_RAISE_ABOVE_CAP]: `The minimum raise is more than the pot can spend`,
     [FAIR_OPEN_ERROR__MISSING_SETTING]: `A setting is the default address`,
     [FAIR_OPEN_ERROR__NO_ADMISSION]: `A deposit needs our admission server's signature, verified right before it`,
     [FAIR_OPEN_ERROR__NO_IDENTITY]: `The coin's identity hash is missing`,
     [FAIR_OPEN_ERROR__NOT_A_DBC_CONFIG]: `The config is not a DBC config`,
     [FAIR_OPEN_ERROR__NOT_A_TOKEN_ACCOUNT]: `That is not an SPL Token account`,
+    [FAIR_OPEN_ERROR__NOT_DONE]: `The launch is neither failed nor opened`,
     [FAIR_OPEN_ERROR__NOT_FAILED]: `The launch has not failed`,
     [FAIR_OPEN_ERROR__NOT_OPENED]: `The launch has not opened`,
     [FAIR_OPEN_ERROR__NOT_OPENING]: `Settling runs only right after the open, in the creation transaction`,
@@ -197,11 +221,13 @@ if (process.env["NODE_ENV"] !== "production") {
     [FAIR_OPEN_ERROR__NOT_THE_COIN]: `That is not the launch's coin`,
     [FAIR_OPEN_ERROR__NOT_THE_CREATION_TRANSACTION]: `The open runs only in the coin's creation transaction`,
     [FAIR_OPEN_ERROR__NOT_THE_CREATOR]: `That is not the launch's creator`,
+    [FAIR_OPEN_ERROR__NOT_THE_CREATORS_SEAT]: `That is not the Creator wallet's seat`,
     [FAIR_OPEN_ERROR__NOT_THE_FAIR_OPEN_CONFIG]: `A Fair Open runs on Heat's Fair Open config`,
     [FAIR_OPEN_ERROR__NOT_THE_FEE_PROGRAM]: `That is not the fee program the program config names`,
     [FAIR_OPEN_ERROR__NOT_THE_KEEPER]: `The keeper did not sign`,
     [FAIR_OPEN_ERROR__NOT_THE_POOL]: `That is not the coin's DBC pool`,
     [FAIR_OPEN_ERROR__NOT_THE_POTS_COINS]: `That is not the pot's coin account`,
+    [FAIR_OPEN_ERROR__NOT_THE_TREASURY]: `That is not Heat's treasury`,
     [FAIR_OPEN_ERROR__NOT_THIS_ADMISSION]: `The admission is for another wallet, launch, person, tier, cap or expiry`,
     [FAIR_OPEN_ERROR__NOT_THIS_LAUNCHS_SEAT]: `The seat is another launch's`,
     [FAIR_OPEN_ERROR__NOT_UPGRADE_AUTHORITY]: `Only the program's upgrade authority can change its settings`,
@@ -215,6 +241,8 @@ if (process.env["NODE_ENV"] !== "production") {
     [FAIR_OPEN_ERROR__SEAT_HELD_BY_ANOTHER_WALLET]: `This person's seat is held by another wallet`,
     [FAIR_OPEN_ERROR__SEAT_NOT_COUNTED]: `The seat is not counted in the launch`,
     [FAIR_OPEN_ERROR__SEATS_LEFT]: `Seats still hold deposits`,
+    [FAIR_OPEN_ERROR__TAX_SHARE_COLLECTED]: `The Tax Share is collected already`,
+    [FAIR_OPEN_ERROR__TAX_SHARE_NOT_COLLECTED]: `The Tax Share is not collected yet`,
     [FAIR_OPEN_ERROR__TOO_EARLY]: `The pot opens at its scheduled time`,
     [FAIR_OPEN_ERROR__TOO_FAR_AHEAD]: `A window starts at most 7 days ahead`,
     [FAIR_OPEN_ERROR__TOO_LATE]: `The open is refused from 15 minutes after the scheduled time`,

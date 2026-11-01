@@ -443,9 +443,10 @@ export const feeClaims = pgTable(
 );
 
 /**
- * Each Fair Open on chain (spec 2.1, 5.3), from the Fair Open program's events: its terms as scheduled, and whether it
- * failed or closed. What its pot holds is read from its launch account, the one place it is always right; the teaser is
- * the calendar's text, which the scheduling flow sets (spec 2.1 step 4).
+ * Each Fair Open on chain (spec 2.1, 5.3), from the Fair Open program's events: its terms as scheduled, whether it
+ * failed or closed, and after an open, its Creator lock and its Tax Share. What its pot holds is read from its launch
+ * account, the one place it is always right, while it lasts; the teaser is the calendar's text, which the scheduling
+ * flow sets (spec 2.1 step 4).
  */
 export const fairOpens = pgTable(
   "fair_opens",
@@ -475,8 +476,34 @@ export const fairOpens = pgTable(
     pool: text("pool"),
     spent: bigint("spent", { mode: "bigint" }),
     coins: bigint("coins", { mode: "bigint" }),
+    /** How many seats the open filled, each owed its coins and refund. */
+    seats: integer("seats"),
     openedSignature: text("opened_signature"),
     openedAt: timestamp("opened_at", { withTimezone: true }),
+    /**
+     * The Creator lock (spec 2.1 step 13), once it has run: the Jupiter Lock escrow, none when the creator's seat bought
+     * no coins; the coins in it; when its release starts and when all of it is free; and when it ran.
+     */
+    lockEscrow: text("lock_escrow"),
+    lockCoins: bigint("lock_coins", { mode: "bigint" }),
+    lockCliffAt: timestamp("lock_cliff_at", { withTimezone: true }),
+    lockEndsAt: timestamp("lock_ends_at", { withTimezone: true }),
+    lockedAt: timestamp("locked_at", { withTimezone: true }),
+    lockSignature: text("lock_signature"),
+    /**
+     * The Tax Share (spec 2.1 step 14), once collected, in the quote's raw units: the window's fees less the pot's own
+     * fee, the lamport dust of the open's rounding, and their total; the fills it is shared by; and whether, with no seat
+     * but the creator's, it went to the treasury.
+     */
+    taxShare: bigint("tax_share", { mode: "bigint" }),
+    taxShareFees: bigint("tax_share_fees", { mode: "bigint" }),
+    taxShareDust: bigint("tax_share_dust", { mode: "bigint" }),
+    taxShareBasis: bigint("tax_share_basis", { mode: "bigint" }),
+    taxShareToTreasury: boolean("tax_share_to_treasury"),
+    taxShareCollectedAt: timestamp("tax_share_collected_at", { withTimezone: true }),
+    taxShareSignature: text("tax_share_signature"),
+    /** When its launch account closed, its rent back to the creator: a failed launch's status says closed too. */
+    closedAt: timestamp("closed_at", { withTimezone: true }),
     teaser: text("teaser"),
     createdSignature: text("created_signature").notNull(),
     createdSlot: bigint("created_slot", { mode: "number" }).notNull(),
@@ -486,9 +513,10 @@ export const fairOpens = pgTable(
 );
 
 /**
- * Every change to a Fair Open seat (spec 2.1 steps 9, 12 and 15), from the Fair Open program's events: a deposit, a
- * withdrawal in the window, its coins and refund delivered after the open, or a failed launch's refund. Keyed by its
- * transaction and its place among the transaction's seat events.
+ * Every change to a Fair Open seat (spec 2.1 steps 9, 12 to 15), from the Fair Open program's events: a deposit, a
+ * withdrawal in the window, its coins and refund delivered after the open, the creator's seat's coins locked, its Tax
+ * Share paid as it closed, or a failed launch's refund. Keyed by its transaction and its place among the transaction's
+ * seat events.
  */
 export const fairOpenSeatEvents = pgTable(
   "fair_open_seat_events",
@@ -502,16 +530,22 @@ export const fairOpenSeatEvents = pgTable(
     wallet: text("wallet").notNull(),
     /** The person's pseudonym in this launch, hex. */
     person: text("person").notNull(),
-    kind: text("kind", { enum: ["deposit", "withdraw", "delivery", "refund"] }).notNull(),
+    kind: text("kind", { enum: ["deposit", "withdraw", "delivery", "lock", "tax_share", "refund"] }).notNull(),
     /** The tier a deposit was admitted at; none on a withdrawal, delivery or refund. */
     tier: text("tier", { enum: ["unverified", "scored", "verified"] }),
-    /** What moved, in the quote's raw units: a refund's is the deposit alone, its rents apart; a delivery's, its refund. */
+    /**
+     * What moved, in the quote's raw units: a refund's is the deposit alone, its rents apart; a delivery's, its refund; a
+     * lock's, what the Creator wallet got back of its refund and its coin account's rent; a Tax Share's, the share.
+     */
     amount: bigint("amount", { mode: "bigint" }).notNull(),
-    /** What the seat held after it: a delivery's is the deposit it bought with. */
+    /** What the seat held after it: a delivery's or a lock's is the deposit it bought with; a Tax Share's, its fill. */
     deposit: bigint("deposit", { mode: "bigint" }).notNull(),
-    /** A refund's rents returned, the coin account's and the seat's; a delivery's, the coin account's when it existed. */
+    /**
+     * A refund's rents returned, the coin account's and the seat's; a delivery's, the coin account's when it existed; a
+     * lock's or a Tax Share's, the seat's as it closed.
+     */
     rent: bigint("rent", { mode: "bigint" }),
-    /** A delivery's spend of the rung and the coins it bought. */
+    /** A delivery's or a lock's spend of the rung and the coins it bought; a Tax Share's spend. */
     spent: bigint("spent", { mode: "bigint" }),
     coins: bigint("coins", { mode: "bigint" }),
   },

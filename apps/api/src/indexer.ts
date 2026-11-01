@@ -232,7 +232,7 @@ export class Indexer extends DurableObject<Bindings> {
    * Sends what a transaction added to its coins' rooms and the board's, and a Fair Open's changes to its room, and starts
    * the keeper for each Instant launch registered, which the launch's own landing may not have (a launch whose browser went away, or another deployment's).
    */
-  private async publish({ signature, pools, coins, trades, windowClaims, fairOpens, fairOpenOpens, seatEvents, fairOpenEnds }: Indexed) {
+  private async publish({ signature, pools, coins, trades, windowClaims, fairOpens, fairOpenOpens, seatEvents, fairOpenEnds, taxShares }: Indexed) {
     for (const coin of coins) {
       if (coin.launchMode === "instant") await startKeeper(this.env, coin.mint).catch((e) => console.error(`starting the keeper for ${coin.mint} failed`, e));
     }
@@ -270,6 +270,7 @@ export class Indexer extends DurableObject<Bindings> {
     for (const o of fairOpenOpens) fairOpen(o.launch, "opened");
     for (const e of seatEvents) fairOpen(e.launch, e.kind);
     for (const end of fairOpenEnds) fairOpen(end.launch, end.kind);
+    for (const x of taxShares) fairOpen(x.launch, "tax_share_collected");
     await Promise.all(
       [...events].map(([room, batch]) =>
         rooms

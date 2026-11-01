@@ -7,6 +7,7 @@
  */
 
 export * from "./coinDustBurnt";
+export * from "./creatorLocked";
 export * from "./deposited";
 export * from "./failedDepositReturned";
 export * from "./launchClosed";
@@ -15,4 +16,6 @@ export * from "./launchFailed";
 export * from "./launchOpened";
 export * from "./programConfigChanged";
 export * from "./seatDelivered";
+export * from "./taxShareCollected";
+export * from "./taxSharePaid";
 export * from "./withdrawn";

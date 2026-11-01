@@ -50,6 +50,25 @@ export function TaxBand({ coin, now }: { coin: Coin; now: number }) {
             ) : (
               <>Heat&apos;s claim of it shows here once it lands. </>
             ))}
+          {coin.fairOpen?.taxShare &&
+            (coin.fairOpen.taxShare.toTreasury ? (
+              <>
+                The creator was the only depositor, so Heat&apos;s treasury was paid it,{" "}
+                <b className="num">{sol(coin.fairOpen.taxShare.total, 9)}&nbsp;SOL</b> (
+                <a href={coin.fairOpen.taxShare.explorer} target="_blank" rel="noreferrer">
+                  see the claim
+                </a>
+                ).{" "}
+              </>
+            ) : (
+              <>
+                The depositors&apos; Tax Share came to <b className="num">{sol(coin.fairOpen.taxShare.total, 9)}&nbsp;SOL</b> (
+                <a href={coin.fairOpen.taxShare.explorer} target="_blank" rel="noreferrer">
+                  see the claim
+                </a>
+                ).{" "}
+              </>
+            ))}
           Every trade now pays the {percent(ending)} trading fee.
         </p>
       </section>

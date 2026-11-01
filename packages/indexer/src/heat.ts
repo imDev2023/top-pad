@@ -1,6 +1,6 @@
 // What the indexer writes for Heat (spec 10.2): the pools on Heat's configs, the coins the fee program registers, every
-// trade with its candles, the fee program's claims, and each Fair Open with its open and its seats' deposits,
-// withdrawals, deliveries and refunds.
+// trade with its candles, the fee program's claims, and each Fair Open with its open, its Creator lock, its Tax Share and
+// its seats' deposits, withdrawals, deliveries, Tax Shares and refunds.
 // Each transaction is written in one database transaction that first claims its signature, so the live source, the
 // browser's fast path and reconciliation can all hand it in and it is written once.
 import { and, eq, inArray, sql } from "drizzle-orm";
@@ -21,6 +21,7 @@ import { foldTrade } from "./candles";
 import {
   decodeTransaction,
   type CoinRegistered,
+  type CreatorLock,
   type FairOpenCreated,
   type FairOpenEnded,
   type FairOpenOpened,
@@ -28,6 +29,7 @@ import {
   type PoolCreated,
   type RawTransaction,
   type SeatEvent,
+  type TaxShareCollection,
   type WindowClaimed,
 } from "./decode";
 import type { IndexResult, TransactionHandler } from "./index";
@@ -47,6 +49,8 @@ export type Indexed = {
   fairOpenOpens: FairOpenOpened[];
   seatEvents: SeatEvent[];
   fairOpenEnds: FairOpenEnded[];
+  creatorLocks: CreatorLock[];
+  taxShares: TaxShareCollection[];
 };
 
 export type HeatHandlerOptions = {
@@ -198,7 +202,7 @@ export function heatHandler({ heat, blockIndexOf, onIndexed }: HeatHandlerOption
       for (const o of decoded.fairOpenOpens) {
         const [found] = await t
           .update(fairOpens)
-          .set({ status: "opened", mint: o.mint, pool: o.pool, spent: o.spent, coins: o.coins, openedSignature: signature, openedAt: blockTime })
+          .set({ status: "opened", mint: o.mint, pool: o.pool, spent: o.spent, coins: o.coins, seats: o.seats, openedSignature: signature, openedAt: blockTime })
           .where(eq(fairOpens.launch, o.launch))
           .returning({ launch: fairOpens.launch });
         if (!found) throw new Error(`Fair Open ${o.launch} opened, and the indexer has not seen it created`);
@@ -224,13 +228,46 @@ export function heatHandler({ heat, blockIndexOf, onIndexed }: HeatHandlerOption
           })
           .onConflictDoNothing();
       }
-      // A launch fails once, then may close, and a closed launch stays closed. One whose creation the indexer has not
-      // seen (the live source reporting a failure first) is left to reconciliation, which goes oldest first.
+      // After the open, the Creator lock and the Tax Share (spec 2.1 steps 13 and 14).
+      for (const l of decoded.creatorLocks) {
+        const [found] = await t
+          .update(fairOpens)
+          .set({
+            lockEscrow: l.escrow,
+            lockCoins: l.coins,
+            lockCliffAt: new Date(Number(l.cliffTime) * 1000),
+            lockEndsAt: new Date(Number(l.endTime) * 1000),
+            lockedAt: blockTime,
+            lockSignature: signature,
+          })
+          .where(eq(fairOpens.launch, l.launch))
+          .returning({ launch: fairOpens.launch });
+        if (!found) throw new Error(`Fair Open ${l.launch} locked its creator's coins, and the indexer has not seen it created`);
+      }
+      for (const x of decoded.taxShares) {
+        const [found] = await t
+          .update(fairOpens)
+          .set({
+            taxShare: x.taxShare,
+            taxShareFees: x.fees,
+            taxShareDust: x.dust,
+            taxShareBasis: x.basis,
+            taxShareToTreasury: x.toTreasury,
+            taxShareCollectedAt: blockTime,
+            taxShareSignature: signature,
+          })
+          .where(eq(fairOpens.launch, x.launch))
+          .returning({ launch: fairOpens.launch });
+        if (!found) throw new Error(`Fair Open ${x.launch} collected its Tax Share, and the indexer has not seen it created`);
+      }
+      // A launch fails once, then may close, and a closed launch stays closed; an opened one stays opened when its
+      // account closes. One whose creation the indexer has not seen (the live source reporting a failure first) is left
+      // to reconciliation, which goes oldest first.
       for (const end of decoded.fairOpenEnds) {
         const set =
           end.kind === "failed"
             ? { status: sql`case when ${fairOpens.status} = 'closed' then 'closed' else 'failed' end`, failure: end.failure, failedAt: blockTime }
-            : { status: "closed" as const };
+            : { status: sql`case when ${fairOpens.status} = 'opened' then 'opened' else 'closed' end`, closedAt: blockTime };
         const [found] = await t.update(fairOpens).set(set).where(eq(fairOpens.launch, end.launch)).returning({ launch: fairOpens.launch });
         if (!found) throw new Error(`Fair Open ${end.launch} ${end.kind}, and the indexer has not seen it created`);
       }
@@ -251,6 +288,8 @@ export function heatHandler({ heat, blockIndexOf, onIndexed }: HeatHandlerOption
         fairOpenOpens: decoded.fairOpenOpens,
         seatEvents: decoded.seatEvents,
         fairOpenEnds: decoded.fairOpenEnds,
+        creatorLocks: decoded.creatorLocks,
+        taxShares: decoded.taxShares,
       });
     }
     const result: IndexResult = { transactions: 1 };
@@ -259,7 +298,13 @@ export function heatHandler({ heat, blockIndexOf, onIndexed }: HeatHandlerOption
     if (added.length) result.trades = added.length;
     const claims = decoded.windowClaims.length + decoded.feeClaims.length;
     if (claims) result.claims = claims;
-    const fairOpen = decoded.fairOpens.length + decoded.fairOpenOpens.length + decoded.seatEvents.length + decoded.fairOpenEnds.length;
+    const fairOpen =
+      decoded.fairOpens.length +
+      decoded.fairOpenOpens.length +
+      decoded.seatEvents.length +
+      decoded.fairOpenEnds.length +
+      decoded.creatorLocks.length +
+      decoded.taxShares.length;
     if (fairOpen) result.fairOpen = fairOpen;
     return result;
   };

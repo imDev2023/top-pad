@@ -1,19 +1,23 @@
 // The keeper's Workflows (spec 10.2). An Instant launch's, keyed by its coin: it reads when the coin's Tax window ends,
 // sleeps until then, and sends the window claim. A Fair Open's, keyed by its launch account: the coin's metadata up 15 s
-// before the open, the rung the pot covers at the open, then every seat pushed its coins and refund, or, if the launch
-// cannot open, the launch failed and every seat refunded; then the nonce closed and the ticker released. The Creator
-// lock and the Tax Share join it in #49. Every step is safe to repeat.
+// before the open, the rung the pot covers at the open, then every seat pushed its coins and refund, the creator's coins
+// locked, the Tax Share collected at 60 s and pushed to every seat, and the launch closed; or, if the launch cannot open,
+// the launch failed and every seat refunded; then the nonce closed and the ticker released. Every step is safe to repeat.
 import { address } from "@solana/kit";
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers";
 import { createDb } from "@top-pad/db";
 import { config, type Bindings, type SecretBinding } from "./env";
 import {
   closeLaunchNonce,
+  collectTaxShare,
   failAndRefund,
+  lockCreator,
   pushSeats,
+  pushTaxShare,
   readSchedule,
   releaseTicker,
   sendOpen,
+  taxWindowEnd,
   uploadMetadata,
   type FairOpenKeeperParams,
 } from "./fairOpenKeeper";
@@ -116,10 +120,36 @@ export class FairOpenKeeper extends WorkflowEntrypoint<Bindings, FairOpenKeeperP
     }
 
     const now = await step.do("read where the launch stands", quick, () => withDb((db) => readSchedule(db, cfg, launch)));
+    // Each step after the open hands its transactions to the indexer, so the pages show them at once.
+    const indexed = (name: string, signatures: string[]) =>
+      signatures.length === 0
+        ? Promise.resolve()
+        : step.do(name, async () => {
+            await indexNow(this.env, signatures);
+            return signatures;
+          });
     if (now.status === "opened") {
       await step.do("push every seat", { retries: { limit: 10, delay: "5 seconds", backoff: "constant" }, timeout: "10 minutes" }, () =>
         withDb((db) => pushSeats(db, cfg, key, launch)),
       );
+      // The Creator lock, once every other seat has its coins (spec 2.1 step 13).
+      const lock = await step.do("lock the creator's coins", quick, () => lockCreator(cfg, key, launch));
+      await indexed("index the Creator lock", lock.signatures);
+      // The Tax Share at 60 s (spec 2.1 step 14): tried every second, since the chain's clock can trail this one and the
+      // collection's preflight refuses it inside the window.
+      const endsAt = await step.do("read when the Tax window ends", quick, () => taxWindowEnd(cfg, launch));
+      if (endsAt > Date.now()) await step.sleepUntil("wait for the Tax window to end", endsAt);
+      const collected = await step.do(
+        "collect the Tax Share",
+        { retries: { limit: 30, delay: "1 second", backoff: "constant" }, timeout: "2 minutes" },
+        () => collectTaxShare(cfg, key, launch),
+      );
+      await indexed("index the Tax Share's collection", collected.signatures);
+      console.log(`Tax Share of ${launch}: ${collected.signatures[0] ?? "already collected"}, sent ${collected.sentLateMs ?? "-"} ms after the window ended`);
+      const pushed = await step.do("push the Tax Share and close the launch", { retries: { limit: 10, delay: "5 seconds", backoff: "constant" }, timeout: "10 minutes" }, () =>
+        pushTaxShare(cfg, key, launch),
+      );
+      await indexed("index the Tax Share's pushes", pushed.signatures);
     } else if (now.status === "scheduled" || now.status === "failed") {
       // A launch that has not opened by now cannot: its pot fell short, which the open's step found, and it is failed at
       // once; otherwise it is failed once the open is late.

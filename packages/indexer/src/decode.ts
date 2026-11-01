@@ -2,7 +2,7 @@
 // Anchor's event CPI, as an inner instruction carrying the event, so a transaction's logs say nothing and the indexer
 // decodes the transaction itself: each event belongs to the instruction that emitted it, the nearest instruction of the
 // same program before it that is not itself an event.
-import { getBase58Encoder, type ReadonlyUint8Array } from "@solana/kit";
+import { getBase58Encoder, unwrapOption, type ReadonlyUint8Array } from "@solana/kit";
 import { FAIR_OPEN_PROGRAM_ADDRESS, FEE_PROGRAM_ADDRESS } from "@top-pad/chain";
 import {
   DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS,
@@ -24,12 +24,14 @@ import {
   WINDOW_FEES_CLAIMED_EVENT_DISCRIMINATOR,
 } from "@top-pad/clients/fee";
 import {
+  CREATOR_LOCKED_EVENT_DISCRIMINATOR,
   DEPOSITED_EVENT_DISCRIMINATOR,
   FAILED_DEPOSIT_RETURNED_EVENT_DISCRIMINATOR,
   LAUNCH_CLOSED_EVENT_DISCRIMINATOR,
   LAUNCH_CREATED_EVENT_DISCRIMINATOR,
   LAUNCH_FAILED_EVENT_DISCRIMINATOR,
   LAUNCH_OPENED_EVENT_DISCRIMINATOR,
+  parseCreatorLockedEvent,
   parseDepositedEvent,
   parseFailedDepositReturnedEvent,
   parseLaunchClosedEvent,
@@ -37,8 +39,12 @@ import {
   parseLaunchFailedEvent,
   parseLaunchOpenedEvent,
   parseSeatDeliveredEvent,
+  parseTaxShareCollectedEvent,
+  parseTaxSharePaidEvent,
   parseWithdrawnEvent,
   SEAT_DELIVERED_EVENT_DISCRIMINATOR,
+  TAX_SHARE_COLLECTED_EVENT_DISCRIMINATOR,
+  TAX_SHARE_PAID_EVENT_DISCRIMINATOR,
   WITHDRAWN_EVENT_DISCRIMINATOR,
 } from "@top-pad/clients/fair-open";
 
@@ -151,9 +157,14 @@ export type FairOpenOpened = {
   coins: bigint;
   /** The pot's own fee, split 50/50 rather than joining the Tax Share. */
   potFee: bigint;
+  /** How many seats the open filled. */
+  seats: number;
 };
 
-/** A change to a Fair Open seat: a deposit, a withdrawal in the window, its delivery after the open, or a refund. */
+/**
+ * A change to a Fair Open seat: a deposit, a withdrawal in the window, its delivery after the open, the creator's seat's
+ * coins locked, its Tax Share paid as it closed, or a refund.
+ */
 export type SeatEvent = {
   /** The event's place among its transaction's seat events, in execution order. */
   eventIndex: number;
@@ -161,15 +172,18 @@ export type SeatEvent = {
   wallet: string;
   /** The person's pseudonym in the launch, hex. */
   person: string;
-  kind: "deposit" | "withdraw" | "delivery" | "refund";
+  kind: "deposit" | "withdraw" | "delivery" | "lock" | "tax_share" | "refund";
   tier: DepositorTier | null;
-  /** What moved: a delivery's refund. */
+  /** What moved: a delivery's refund; a lock's, what the Creator wallet got back; a Tax Share's, the share. */
   amount: bigint;
-  /** What the seat held after it: a delivery's deposit. */
+  /** What the seat held after it: a delivery's or a lock's deposit; a Tax Share's, the seat's fill. */
   deposit: bigint;
-  /** A refund's rents returned, the coin account's and the seat's; a delivery's coin account rent, if returned. */
+  /**
+   * A refund's rents returned, the coin account's and the seat's; a delivery's coin account rent, if returned; a lock's
+   * or a Tax Share's, the seat's as it closed.
+   */
   rent: bigint | null;
-  /** A delivery's spend of the rung and the coins it bought; null otherwise. */
+  /** A delivery's or a lock's spend of the rung and the coins it bought; a Tax Share's spend; null otherwise. */
   spent: bigint | null;
   coins: bigint | null;
   /** Whether a deposit took the seat, or a withdrawal or refund closed it. */
@@ -180,8 +194,30 @@ export type SeatEvent = {
 const FAILURES = ["below_lowest_rung", "min_raise_missed", "late"] as const;
 export type FairOpenFailure = (typeof FAILURES)[number];
 
-/** A Fair Open that failed, or that closed after failing, its creator's rent returned. */
+/** A Fair Open that failed, or whose launch account closed once it was done, its creator's rent returned. */
 export type FairOpenEnded = { launch: string; kind: "failed"; failure: FairOpenFailure } | { launch: string; kind: "closed" };
+
+/** The Creator lock (spec 2.1 step 13): the creator's coins in a Jupiter Lock escrow. */
+export type CreatorLock = {
+  launch: string;
+  /** None when the creator's seat bought no coins. */
+  escrow: string | null;
+  coins: bigint;
+  /** Unix seconds. */
+  cliffTime: bigint;
+  endTime: bigint;
+};
+
+/** The Tax Share collected (spec 2.1 step 14), in the quote's raw units. */
+export type TaxShareCollection = {
+  launch: string;
+  fees: bigint;
+  dust: bigint;
+  taxShare: bigint;
+  basis: bigint;
+  /** Whether, with no seat but the creator's, it went to Heat's treasury. */
+  toTreasury: boolean;
+};
 
 export type Decoded = {
   pools: PoolCreated[];
@@ -193,6 +229,8 @@ export type Decoded = {
   fairOpenOpens: FairOpenOpened[];
   seatEvents: SeatEvent[];
   fairOpenEnds: FairOpenEnded[];
+  creatorLocks: CreatorLock[];
+  taxShares: TaxShareCollection[];
 };
 
 const hex = (bytes: ReadonlyUint8Array) => Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
@@ -239,6 +277,8 @@ export function decodeTransaction(tx: RawTransaction, configs: ReadonlySet<strin
     fairOpens: [],
     fairOpenOpens: [],
     seatEvents: [],
+    creatorLocks: [],
+    taxShares: [],
     fairOpenEnds: [],
   };
   if (!tx.meta || tx.meta.err) return decoded;
@@ -432,6 +472,7 @@ function decodeFairOpenEvent(event: ReadonlyUint8Array, decoded: Decoded) {
       spent: e.spent,
       coins: e.coins,
       potFee: e.potFee,
+      seats: e.seats,
     });
   } else if (startsWith(event, SEAT_DELIVERED_EVENT_DISCRIMINATOR)) {
     const e = parseSeatDeliveredEvent(event);
@@ -448,6 +489,42 @@ function decodeFairOpenEvent(event: ReadonlyUint8Array, decoded: Decoded) {
       coins: e.coins,
       seatOpened: false,
       seatClosed: false,
+    });
+  } else if (startsWith(event, CREATOR_LOCKED_EVENT_DISCRIMINATOR)) {
+    const e = parseCreatorLockedEvent(event);
+    decoded.creatorLocks.push({ launch: e.launch, escrow: unwrapOption(e.escrow), coins: e.coins, cliffTime: e.cliffTime, endTime: e.endTime });
+    seat({
+      launch: e.launch,
+      wallet: e.creator,
+      person: hex(e.person),
+      kind: "lock",
+      tier: null,
+      amount: e.paid,
+      deposit: e.deposit,
+      rent: e.seatRent,
+      spent: e.spent,
+      coins: e.coins,
+      seatOpened: false,
+      seatClosed: true,
+    });
+  } else if (startsWith(event, TAX_SHARE_COLLECTED_EVENT_DISCRIMINATOR)) {
+    const e = parseTaxShareCollectedEvent(event);
+    decoded.taxShares.push({ launch: e.launch, fees: e.fees, dust: e.dust, taxShare: e.taxShare, basis: e.basis, toTreasury: unwrapOption(e.treasury) !== null });
+  } else if (startsWith(event, TAX_SHARE_PAID_EVENT_DISCRIMINATOR)) {
+    const e = parseTaxSharePaidEvent(event);
+    seat({
+      launch: e.launch,
+      wallet: e.wallet,
+      person: hex(e.person),
+      kind: "tax_share",
+      tier: null,
+      amount: e.amount,
+      deposit: e.fill,
+      rent: e.seatRent,
+      spent: e.spent,
+      coins: null,
+      seatOpened: false,
+      seatClosed: true,
     });
   } else if (startsWith(event, LAUNCH_FAILED_EVENT_DISCRIMINATOR)) {
     const e = parseLaunchFailedEvent(event);

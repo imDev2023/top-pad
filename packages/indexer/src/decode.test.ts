@@ -137,7 +137,7 @@ describe("decoding a transaction", () => {
   });
 
   it("holds nothing on configs that are not Heat's, or when the transaction failed", () => {
-    const none = { pools: [], coins: [], swaps: [], windowClaims: [], feeClaims: [], fairOpens: [], fairOpenOpens: [], seatEvents: [], fairOpenEnds: [] };
+    const none = { pools: [], coins: [], swaps: [], windowClaims: [], feeClaims: [], fairOpens: [], fairOpenOpens: [], seatEvents: [], fairOpenEnds: [], creatorLocks: [], taxShares: [] };
     for (const name of ["launch-with-creator-buy", "window-claim", "creator-claim"]) expect(decodeTransaction(fixture(name), new Set())).toEqual(none);
     const failed = fixture("launch-with-creator-buy");
     failed.meta!.err = { InstructionError: [4, { Custom: 6000 }] };

@@ -6,6 +6,10 @@
  * @see https://github.com/codama-idl/codama
  */
 
+export const CREATOR_LOCK_CLIFF_SECONDS: bigint = 604800n;
+
+export const CREATOR_LOCK_END_SECONDS: bigint = 2592000n;
+
 export const DEPOSIT_STEP: bigint = 10000000n;
 
 export const LATE_OPEN_SECONDS: bigint = 900n;

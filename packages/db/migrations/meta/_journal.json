@@ -50,6 +50,13 @@
       "when": 1793468673006,
       "tag": "0006_fair_open_scheduling",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793569277843,
+      "tag": "0007_fair_open_lock_tax_share",
+      "breakpoints": true
     }
   ]
 }

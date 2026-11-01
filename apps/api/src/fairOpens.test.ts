@@ -11,7 +11,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { admissionMessage, ED25519_PROGRAM_ADDRESS, FAIR_OPEN_PROGRAM_ADDRESS, fairOpenAccounts, seatAddress, seatOutcome, Tier } from "@top-pad/chain";
 import { CLAIM_DISCRIMINATOR, DEPOSIT_DISCRIMINATOR, getDepositInstructionDataDecoder, MARK_FAILED_DISCRIMINATOR, WITHDRAW_FAILED_DISCRIMINATOR } from "@top-pad/clients/fair-open";
 import { FairOpen, FairOpenRefusal, PreparedFairOpenTransaction } from "@top-pad/contract";
-import { admissions, createDb, creators, creatorWallets, fairOpens, pools, type Db } from "@top-pad/db";
+import { admissions, createDb, creators, creatorWallets, fairOpens, fairOpenSeatEvents, pools, type Db } from "@top-pad/db";
 import { createTestDatabase } from "@top-pad/db/testing";
 import { app } from "./index";
 import { decode, Fakes, fairOpenLaunch, fairOpenSeat, ORIGINS, testBindings, testContext, testKeypair } from "./test/fakes";
@@ -47,7 +47,7 @@ beforeEach(async () => {
   fakes = new Fakes();
   indexedNow = [];
   vi.stubGlobal("fetch", fakes.fetch);
-  for (const table of [admissions, fairOpens, creatorWallets, pools]) await db.delete(table);
+  for (const table of [admissions, fairOpenSeatEvents, fairOpens, creatorWallets, pools]) await db.delete(table);
 });
 afterEach(() => vi.unstubAllGlobals());
 
@@ -140,7 +140,20 @@ describe("a Fair Open's page", () => {
       wallet,
       admission: { admitted: true, tier: "unverified", cap: "100000000", via: "none", handle: null },
       // 2.1 SOL asked of a 1.7 SOL pot: the Unverified seat's 0.1 SOL fills, within a quarter of the spend.
-      seat: { address: seat, tier: "unverified", cap: "100000000", deposit: "100000000", seatRent: "2000000", coinRent: "2039280", fill: "100000000", refund: "0", coins: null, delivered: false },
+      seat: {
+        address: seat,
+        tier: "unverified",
+        cap: "100000000",
+        deposit: "100000000",
+        seatRent: "2000000",
+        coinRent: "2039280",
+        fill: "100000000",
+        refund: "0",
+        coins: null,
+        delivered: false,
+        taxShare: null,
+        closed: false,
+      },
     });
   });
 
@@ -173,6 +186,85 @@ describe("a Fair Open's page", () => {
       createdAt: new Date(),
     });
     expect(await view(launch)).toMatchObject({ phase: "closed", failure: "late", pot: { total: "0", seats: 0 } });
+  });
+
+  it("tells a done launch, its account closed, from the indexer: the open, the Creator lock, the Tax Share and a closed seat", async () => {
+    const [launch, creator, mint, pool, wallet] = [random(), random(), random(), random(), random()];
+    const escrow = random();
+    const opensAt = new Date(Date.now() - 3_000_000);
+    await db.insert(fairOpens).values({
+      launch,
+      creator,
+      nonce: random(),
+      dbcConfig: random(),
+      quoteMint: random(),
+      identityHash: "ab".repeat(32),
+      depositsOpenAt: new Date(opensAt.getTime() - 600_000),
+      opensAt,
+      minRaise: 0n,
+      potCap: 1_700_000_000n,
+      lowestRung: 67_148_451n,
+      step: STEP,
+      status: "opened",
+      mint,
+      pool,
+      spent: 1_615_000_000n,
+      coins: 300_000_000_000_000n,
+      seats: 2,
+      openedAt: opensAt,
+      lockEscrow: escrow,
+      lockCoins: 50_000_000_000n,
+      lockCliffAt: new Date(opensAt.getTime() + 7 * 86_400_000),
+      lockEndsAt: new Date(opensAt.getTime() + 30 * 86_400_000),
+      lockedAt: opensAt,
+      lockSignature: "lock",
+      taxShare: 990_007n,
+      taxShareFees: 990_000n,
+      taxShareDust: 7n,
+      taxShareBasis: 1_000_000_000n,
+      taxShareToTreasury: false,
+      taxShareCollectedAt: new Date(opensAt.getTime() + 61_000),
+      taxShareSignature: "collect",
+      closedAt: new Date(opensAt.getTime() + 90_000),
+      createdSignature: "created",
+      createdSlot: 1,
+      createdAt: new Date(),
+    });
+    const person = "cd".repeat(32);
+    const event = (n: number, kind: "deposit" | "delivery" | "lock" | "tax_share", who: string, amount: bigint, deposit: bigint, more = {}) => ({
+      signature: `sig${n}`,
+      eventIndex: 0,
+      slot: n,
+      at: new Date(),
+      launch,
+      wallet: who,
+      person: who === wallet ? person : "ef".repeat(32),
+      kind,
+      tier: kind === "deposit" ? ("verified" as const) : null,
+      amount,
+      deposit,
+      ...more,
+    });
+    await db.insert(fairOpenSeatEvents).values([
+      event(1, "deposit", wallet, 1_000_000_000n, 1_000_000_000n),
+      event(2, "deposit", creator, 300_000_000n, 300_000_000n),
+      event(3, "delivery", wallet, 50_000_000n, 1_000_000_000n, { spent: 950_000_000n, coins: 200_000_000_000_000n, rent: 0n }),
+      event(4, "lock", creator, 15_000_000n, 300_000_000n, { spent: 285_000_000n, coins: 50_000_000_000n, rent: 2_000_000n }),
+      event(5, "tax_share", wallet, 990_007n, 1_000_000_000n, { spent: 950_000_000n, rent: 2_000_000n }),
+    ]);
+    const page = await view(launch, wallet);
+    expect(page.phase).toBe("opened");
+    expect(page.open).toMatchObject({
+      mint,
+      pool,
+      seats: 2,
+      delivered: 2,
+      deposited: "1300000000",
+      closed: true,
+      lock: { status: "locked", deposit: "300000000", coins: "50000000000", escrow },
+      taxShare: { total: "990007", fees: "990000", dust: "7", toTreasury: false, paidSeats: 1, paid: "990007" },
+    });
+    expect(page.you!.seat).toMatchObject({ deposit: "1000000000", fill: "950000000", refund: "50000000", coins: "200000000000000", taxShare: "990007", closed: true });
   });
 
   it("answers 404 for an address with no Fair Open", async () => {

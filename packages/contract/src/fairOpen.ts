@@ -40,8 +40,9 @@ export const FairOpenAdmission = z.discriminatedUnion("admitted", [
 export type FairOpenAdmission = z.infer<typeof FairOpenAdmission>;
 
 /**
- * A wallet's seat, read from the chain: what it buys with and gets back, if the window closed now or, once the launch
- * has opened, what it bought.
+ * A wallet's seat, read from the chain while it lasts: what it buys with and gets back, if the window closed now or, once
+ * the launch has opened, what it bought. A seat closed after the open, by its Tax Share or the Creator lock, is told from
+ * the indexer's record of it.
  */
 export const FairOpenSeat = z.object({
   address: Address,
@@ -57,8 +58,48 @@ export const FairOpenSeat = z.object({
   /** Once the launch has opened: the coins it bought, in the coin's raw units, and whether they and its refund are in its wallet. */
   coins: RawAmount.nullable(),
   delivered: z.boolean(),
+  /** The Tax Share it was paid as it closed (spec 2.1 step 14); null until then, and for the creator's seat. */
+  taxShare: RawAmount.nullable(),
+  /** Whether it has closed, its rent returned: by its Tax Share, or the creator's by the Creator lock. */
+  closed: z.boolean(),
 });
 export type FairOpenSeat = z.infer<typeof FairOpenSeat>;
+
+/**
+ * The Creator lock (spec 2.1 step 13, ADR 0004): `none` when the Creator wallet holds no seat, `pending` until the lock
+ * runs right after the open, and `locked` once its coins are in a Jupiter Lock escrow nobody can cancel, released from
+ * `cliffAt` to `endsAt`. Coins are in the coin's raw units, the deposit in the quote's.
+ */
+export const CreatorLock = z.object({
+  status: z.enum(["none", "pending", "locked"]),
+  deposit: RawAmount.nullable(),
+  coins: RawAmount.nullable(),
+  escrow: Address.nullable(),
+  cliffAt: z.iso.datetime().nullable(),
+  endsAt: z.iso.datetime().nullable(),
+  /** The escrow on the explorer. */
+  explorer: z.string().url().nullable(),
+});
+export type CreatorLock = z.infer<typeof CreatorLock>;
+
+/**
+ * The Tax Share (spec 2.1 step 14): what the first 60 s of trading paid in sniper tax, less the pot's own fee, with the
+ * open's lamport dust, paid to every depositor but the creator in proportion to what they spent. Null on the page until
+ * it is collected, at `windowEndsAt`. In the quote's raw units.
+ */
+export const TaxShare = z.object({
+  total: RawAmount,
+  fees: RawAmount,
+  dust: RawAmount,
+  /** Whether, with no depositor but the creator, it went to Heat's treasury. */
+  toTreasury: z.boolean(),
+  /** How many seats have been paid theirs, and what that came to. */
+  paidSeats: z.number().int().nonnegative(),
+  paid: RawAmount,
+  collectedAt: z.iso.datetime(),
+  explorer: z.string().url(),
+});
+export type TaxShare = z.infer<typeof TaxShare>;
 
 /** `GET /fair-opens/:launch?wallet=`: a Fair Open as its page shows it (spec 9, screen 2). */
 export const FairOpen = z.object({
@@ -99,7 +140,17 @@ export const FairOpen = z.object({
       spent: RawAmount,
       coins: RawAmount,
       coinDecimals: z.number().int().nonnegative(),
+      /** How many seats have their coins and refund, out of `seats`, every seat the open filled, which deposited `deposited`. */
       delivered: z.number().int().nonnegative(),
+      seats: z.number().int().nonnegative(),
+      deposited: RawAmount,
+      /** When trading opened and when its Tax window ends, after which the Tax Share is collected. */
+      openedAt: z.iso.datetime(),
+      taxWindowEndsAt: z.iso.datetime(),
+      lock: CreatorLock,
+      taxShare: TaxShare.nullable(),
+      /** Whether the launch is done and its account closed, its rent back to the creator. */
+      closed: z.boolean(),
     })
     .nullable(),
   /** What a new seat prepays beyond its deposit, all of it returned (spec 2.1 step 9). */

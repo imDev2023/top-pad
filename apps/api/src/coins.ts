@@ -5,8 +5,9 @@ import { and, asc, desc, eq, gt, gte, lt, lte } from "drizzle-orm";
 import type { Context } from "hono";
 import { COIN_DECIMALS, COIN_SUPPLY, FEE_DENOMINATOR, marketCapOfSqrtPrice, priceOfSqrtPrice, SNIPER_TAX } from "@top-pad/chain";
 import { Address, CandleSeconds, type Coin, type CoinCandles, type CoinTrades, type Trade, type WindowClaim } from "@top-pad/contract";
-import { candles, coins, creators, pools, trades, windowClaims, type Db } from "@top-pad/db";
+import { candles, coins, creators, fairOpens, pools, trades, windowClaims, type Db } from "@top-pad/db";
 import { holderCount } from "@top-pad/indexer";
+import { creatorLockOf, taxShareOf } from "./afterOpen";
 import { explorerUrl, type Config } from "./env";
 import type { AppEnv } from "./http";
 
@@ -56,6 +57,13 @@ async function poolOf(db: Db, mint: string) {
   if (!Address.safeParse(mint).success) return null;
   const [pool] = await db.select().from(pools).where(eq(pools.mint, mint));
   return pool ?? null;
+}
+
+/** A Fair Open's coin: the launch it opened from, its Creator lock and its Tax Share; null for any other coin. */
+async function fairOpenOf(cfg: Config, db: Db, mint: string): Promise<Coin["fairOpen"]> {
+  const [row] = await db.select().from(fairOpens).where(eq(fairOpens.mint, mint));
+  if (!row) return null;
+  return { launch: row.launch, lock: await creatorLockOf(cfg, db, row), taxShare: await taxShareOf(cfg, db, row) };
 }
 
 /** `GET /coins/:mint`. */
@@ -117,6 +125,7 @@ export async function getCoin(c: Context<AppEnv>) {
       denominator: FEE_DENOMINATOR.toString(),
     },
     windowClaim: row.windowClaim ? windowClaimView(cfg, row.windowClaim) : null,
+    fairOpen: await fairOpenOf(cfg, db, mint),
     explorer: { mint: explorerUrl(cfg, "address", mint), pool: explorerUrl(cfg, "address", pool.pool) },
     servedAt: new Date().toISOString(),
   };

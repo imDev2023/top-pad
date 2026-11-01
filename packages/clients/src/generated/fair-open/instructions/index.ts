@@ -8,12 +8,15 @@
 
 export * from "./claim";
 export * from "./closeLaunch";
+export * from "./collectTaxShare";
 export * from "./createLaunch";
 export * from "./deposit";
 export * from "./initialize";
+export * from "./lockCreator";
 export * from "./markFailed";
 export * from "./open";
 export * from "./push";
+export * from "./pushTaxShare";
 export * from "./settle";
 export * from "./updateProgramConfig";
 export * from "./withdraw";

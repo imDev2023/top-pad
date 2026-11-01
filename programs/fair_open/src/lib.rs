@@ -793,6 +793,7 @@ pub mod fair_open {
         emit_cpi!(CreatorLocked {
             launch: launch_key,
             creator: launch.creator,
+            person: ctx.accounts.seat.person,
             mint: launch.mint,
             escrow,
             deposit: ctx.accounts.seat.deposit,
@@ -2191,6 +2192,8 @@ pub struct CoinDustBurnt {
 pub struct CreatorLocked {
     pub launch: Pubkey,
     pub creator: Pubkey,
+    /// The creator's pseudonym in this launch, their seat's.
+    pub person: [u8; 32],
     pub mint: Pubkey,
     /// The escrow, none when the creator's fill bought no coins.
     pub escrow: Option<Pubkey>,
