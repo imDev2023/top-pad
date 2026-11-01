@@ -60,6 +60,8 @@ export function TaxBand({ coin, now }: { coin: Coin; now: number }) {
                 </a>
                 ).{" "}
               </>
+            ) : BigInt(coin.fairOpen.taxShare.fees) === 0n ? (
+              <>Nobody traded in that minute, so no sniper tax was paid. </>
             ) : (
               <>
                 The depositors&apos; Tax Share came to <b className="num">{sol(coin.fairOpen.taxShare.total, 9)}&nbsp;SOL</b> (

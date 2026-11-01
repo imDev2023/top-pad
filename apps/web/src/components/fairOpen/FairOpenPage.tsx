@@ -411,11 +411,24 @@ function TaxShareStep({ open, at }: { open: NonNullable<FairOpen["open"]>; at: n
     );
   }
   const owed = open.seats - (open.lock.status === "none" ? 0 : 1);
+  const taxed = BigInt(share.fees) > 0n;
   return (
     <>
       <b>
-        <span className="num">{sol(share.total, 9)}</span>&nbsp;SOL of sniper tax is the depositors&apos; Tax Share.
+        {taxed ? (
+          <>
+            <span className="num">{sol(share.total, 9)}</span>&nbsp;SOL of sniper tax is the depositors&apos; Tax Share.
+          </>
+        ) : (
+          "Nobody paid sniper tax in the first minute."
+        )}
       </b>{" "}
+      {!taxed && (
+        <span className="muted">
+          The lamports the open&apos;s rounding left over, <span className="num">{sol(share.total, 9)}</span>&nbsp;SOL, are the depositors&apos; Tax Share
+          instead.{" "}
+        </span>
+      )}
       <span className="muted">
         {share.paidSeats >= owed
           ? `Every depositor has been paid theirs, in proportion to what they spent, and their seat's rent with it.`

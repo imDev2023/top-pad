@@ -183,6 +183,12 @@ Right after the open, anyone can run the lock instruction, which moves the creat
 
 Its rent (about 0.0036 SOL) comes out of the creator's deposit.
 The creator may later buy on the curve from their own wallet, unlocked; those holdings are labelled on the Fairness card, never refused.
+As built ([#49](https://github.com/imDev2023/top-pad/issues/49), 2026-11-01):
+- `lock_creator` takes the Creator wallet's seat, the one whose wallet is the launch's creator, once the launch has opened; the pot approves the launch's creator locker, a system account at the PDA `["creator_lock", launch]`, for exactly the seat's coins, and the locker, as the escrow's `base` and `sender`, has Jupiter Lock move them in; SPL Token clears the allowance once spent, which the instruction checks, so the creator's coins leave the pot only into the escrow.
+  Jupiter Lock takes a sender that is only the source account's delegate (checked on devnet on 2026-11-01 before the program relied on it).
+- The schedule counts from the pool's activation point, when trading opened: `cliff_time` 7 days after it with only the part that does not divide evenly released there (less than one coin's worth of seconds), then an equal part every second until 30 days after it; `cancel_mode` 0 and `update_recipient_mode` 2.
+- Its rent is the escrow's 296 bytes and the escrow's coin account, 3,642,360 lamports at devnet's rent on 2026-11-01, prepaid with the open's rent at scheduling rather than taken from the deposit, so a creator whose deposit was filled to the lamport still has their lock; a launch scheduled before that pays it from the seat's refund and its coin-account rent instead.
+  The seat's refund, its coin-account rent and its own rent go back to the Creator wallet, and the seat closes: it gets no Tax Share.
 
 **14. The tax window and the Tax Share.**
 - The Tax window is the first 60 s of trading.
@@ -190,6 +196,14 @@ The creator may later buy on the curve from their own wallet, unlocked; those ho
 - Window fees, minus the pot's own fee, become the launch's Tax Share, paid to depositors in proportion to the SOL their deposit spent.
 - The creator's seat gets no Tax Share, so a creator bundling their own creation slot is not refunded any of the tax **(owner, 2026-10-27)**.
 - The keeper pushes the Tax Share, about 14 depositors per transaction, and closes their seats, returning the seat rent.
+- As built ([#49](https://github.com/imDev2023/top-pad/issues/49), 2026-11-01): the window claim of a Fair Open's coin is the Fair Open program's `collect_tax_share`, which anyone may send once the pool's activation point plus 60 s has passed by the chain's clock: it makes the launch's pot again, has the fee program's `claim_fair_open_window_fees`, signed by its coin registrar, pay the pool's partner fees less the pot's own fee into it, and closes it into the vault, unwrapping them; the pot's own fee stays in the pool, so the next Creator Earnings claim splits it 50/50.
+  The Tax Share is those fees and the open's lamport dust, found from the counts per step; it is shared by every seat's fill but the creator's, which is in proportion to the SOL each spent, and a seat paid gets what its fill adds to the total's share of the fills paid so far, rounded down, so the shares add up to the Tax Share to the lamport in any order.
+  With no seat but the creator's, nobody may take it and it goes to Heat's treasury, as an Instant launch's window fees do.
+- `push_tax_share` pays and closes 13 seats a transaction, each its seat and its wallet: 14 come to 1,258 bytes against the 1,232-byte limit; a seat still owed its coins waits for them.
+  The launch tracks the Creator wallet's own seat from its deposits, so the Tax Share leaves it out whether or not the lock has run.
+- Once every seat has closed, the creator's with the lock, `close_launch` closes the launch and its vault, their rent and what is left of the creator's prepaid rent going back to the creator.
+- On devnet (2026-11-01, `tests/devnet/src/fair-open-open.test.ts`), against DBC and Jupiter Lock themselves: the creator's 0.3 SOL seat's coins went into escrow `CS6HWt14ckQK7SgpRnKZj2zmJARMxcXNy2tUnSvtASR3` with its cliff 7 days and its last release 30 days after the pool's activation point, the Creator wallet its recipient, `cancel_mode` 0 and `update_recipient_mode` 2, and every coin in its schedule; two sniper buys in the window left a Tax Share of 23,238,669 lamports (23,238,667 of fees and 2 of dust), the pool keeping the pot's own fee, and each of the three other seats was paid its share to the lamport with its rent as it closed, then the launch closed.
+  Compute: `lock_creator` 117,419 units, `collect_tax_share` 144,861 (most of it the pass over the counts per step that finds the dust), a Tax Share push of 3 seats 37,426.
 
 **15. Failure paths.**
 - The program refuses `open` once the scheduled time is 15 minutes past, so a late open can never race the withdrawals.
@@ -390,7 +404,8 @@ Instructions:
 - `register_coin`: creates a `CoinRecord`; requires the launch key's signature (Instant launch, in the creation transaction) or a CPI from the Fair Open program's `settle` (Fair Open); about 0.001 SOL of rent per coin.
 - `record_pot_fee`: CPI from `settle`; records the pot's own fee for the 50/50 split.
 - `claim_window_fees`: the first partner-fee claim after the pool's 60 s window; anyone may send it; pays the window's fees, minus the pot's own fee split 50/50, to the launch's Tax Share account or to the treasury.
-  As built ([#44](https://github.com/imDev2023/top-pad/issues/44)): for a Heat coin, by its `CoinRecord`, refused before the pool's activation point plus 60 s and once it has run; a Fair Open's is refused until the Tax Share path arrives with [#49](https://github.com/imDev2023/top-pad/issues/49), so its window fees never reach the treasury instead; `claim_unlisted_window_fees` does the same for a pool made around our flow, creating its `WindowClaim`, whose rent its sender pays.
+  As built ([#44](https://github.com/imDev2023/top-pad/issues/44)): for a Heat coin, by its `CoinRecord`, refused before the pool's activation point plus 60 s and once it has run; a Fair Open's is refused, so its window fees never reach the treasury instead; `claim_unlisted_window_fees` does the same for a pool made around our flow, creating its `WindowClaim`, whose rent its sender pays.
+  As built ([#49](https://github.com/imDev2023/top-pad/issues/49)): a Fair Open's window claim is `claim_fair_open_window_fees`, which only the Fair Open program's coin registrar may sign, from its `collect_tax_share` (2.1 step 14); it pays the pool's partner fees less the record's pot fee into the launch's pot, the Fair Open program's PDA `["pot", launch]`, and leaves the pot fee in the pool for the 50/50 split.
 - `claim_fees`: anyone may send it; claims the pool's partner fees by CPI and pays half to the current DBC creator role holder (read from the pool account) and half to the treasury.
   As built: `claim_fees(max_amount)`, refused until the pool's window claim has run; each share is a DBC `claim_trading_fee` CPI signed by the `fee_claimer` PDA, asking for none of the coin (the configs collect fees in the quote alone) and naming the fee claimer's own quote account in DBC's coin slot, where nothing is ever paid.
 - `claim_surplus`: after the curve completes, splits the partner surplus the same way.
@@ -404,6 +419,7 @@ Measured against DBC 0.2.2 on devnet: `claim_window_fees` 37,820 compute units a
 The claims' unit tests run in LiteSVM against `tests/dbc-stand-in`, our own stand-in for DBC's partner fee claim written from its source, never deployed; `tests/devnet/src/fee-claims.test.ts` runs them against DBC itself.
 Upgraded on devnet with `register_fair_open_coin` on 2026-10-31 ([#46](https://github.com/imDev2023/top-pad/issues/46)), from a verified build: executable hash `a953b6c93c2675592c445e7800cb5efb10151fa88593aba78e3c7c5aa3bc4ded`, commit `23aae8a`, 349,544 bytes, rebuilt from GitHub and recorded on chain; it checks its signer is the coin registrar of the Fair Open program the `FeeConfig` names (`vtRQaZaTtix75wDG6zHS3HrdgpqNNHpKdxQbHwJiFAG`).
 
+Upgraded on devnet with `claim_fair_open_window_fees` on 2026-11-01 ([#49](https://github.com/imDev2023/top-pad/issues/49)), from a verified build: executable hash `19e30a9f631154ddf597360608f2620c8ab3ef58a57820bdff6f4936ffbb0baa`, commit `e7fd2f4`, 367,240 bytes, rebuilt from GitHub and recorded on chain.
 Invariants:
 - It never holds a creator balance after an instruction ends.
 - Window fees reach only the launch's Tax Share or the treasury.
@@ -442,7 +458,7 @@ Invariants:
 - At most one open per launch, never before its scheduled time, never from 15 minutes after it.
 - No seat's fill exceeds its tier's cap; Unverified fills add up to at most 25% of the SOL spent.
 - The creator's coins leave the pot only into the Jupiter Lock escrow.
-- **Unproven**: the Jupiter Lock CPI ([#49](https://github.com/imDev2023/top-pad/issues/49)); `open`, `settle`, `push`, `claim` and a partial fill ran on devnet on 2026-10-31 ([#46](https://github.com/imDev2023/top-pad/issues/46)).
+- The Jupiter Lock CPI ran on devnet on 2026-11-01 ([#49](https://github.com/imDev2023/top-pad/issues/49)); `open`, `settle`, `push`, `claim` and a partial fill on 2026-10-31 ([#46](https://github.com/imDev2023/top-pad/issues/46)).
 
 As built on devnet ([#45](https://github.com/imDev2023/top-pad/issues/45), 2026-10-30), the window and the failure path:
 - Deployed from a verified build: executable hash `eed50f6f97903e24791299a47d43c2f106d31cf9092df49650fabbbf42df1265`, commit `585e447`, 409,664 bytes (2.08 SOL of rent), rebuilt from GitHub by `solana-verify verify-from-repo` and recorded on chain.
@@ -465,6 +481,13 @@ As built on devnet ([#46](https://github.com/imDev2023/top-pad/issues/46), 2026-
 - The open's whole transaction ran in LiteSVM against a stand-in for DBC's pool creation and swap (`tests/dbc-stand-in`), every shape it refuses unit-tested natively (`creation.rs`), and against DBC itself in `tests/devnet/src/fair-open-open.test.ts`.
 - Lamports leave the vault by hand, so the first CPI after such a move carries the vault too, and a push pays its refunds after its last CPI: the runtime refuses a CPI that sees one side of a move and not the other (`UnbalancedInstruction`).
 - Compute on devnet: the creation transaction 291,992 units, a push of 7 seats 203,352, a claim 39,956.
+
+As built on devnet ([#49](https://github.com/imDev2023/top-pad/issues/49), 2026-11-01), the Creator lock and the Tax Share:
+- Upgraded from a verified build: executable hash `afc51ec2ab6af4a4a7fa400f5979fb05065295f5e2dc746ebd3f94174360bd6c`, commit `e7fd2f4`, 652,000 bytes, rebuilt from GitHub and recorded on chain.
+- `lock_creator`, `collect_tax_share` and `push_tax_share` as in 2.1 steps 13 and 14; `close_launch` closes an opened launch too, once its Tax Share is collected and every seat has closed.
+- The launch account's reserved bytes took the creator's seat (its deposit and tier, set by its deposits and withdrawals), whether the Tax Share is collected, the Tax Share and the fills paid so far, so it keeps its 1,233 bytes; a seat closing after the open takes its count off the launch's seats and deliveries alike.
+- The open's prepaid rent covers the lock's escrow and its coin account too, so what is left of it after the open is the lock's, and it comes back to the creator with the launch's rent if they hold no seat.
+- The unit tests run the lock against `tests/lock-stand-in`, our stand-in for Jupiter Lock's `create_vesting_escrow_v2`, never deployed, as DBC's stand-in stands in for DBC; `tests/devnet` runs it against Jupiter Lock itself.
 
 ## 6. Anti-abuse
 
@@ -812,9 +835,9 @@ faucet.solana.com gives at most 10 SOL every 8 hours when signed in with GitHub 
 | Creator lock | nothing for 7 days after the open, linear to day 30 | [#11](https://github.com/imDev2023/top-pad/issues/11) |
 | Depositor rent | seat 0.00123 SOL + coin account 0.00149 SOL, about 0.0027 SOL, refundable | [#28](https://github.com/imDev2023/top-pad/issues/28) |
 | Creator rent at scheduling | about 0.03 SOL, refundable | [#28](https://github.com/imDev2023/top-pad/issues/28) |
-| Lock escrow rent | about 0.0036 SOL, from the creator's deposit | [#28](https://github.com/imDev2023/top-pad/issues/28) |
+| Lock escrow rent | 0.0036 SOL on devnet (2026-11-01), prepaid with the open's rent at scheduling ([#49](https://github.com/imDev2023/top-pad/issues/49)) | [#28](https://github.com/imDev2023/top-pad/issues/28) |
 | Coin record rent | about 0.001 SOL per coin | [#36](https://github.com/imDev2023/top-pad/issues/36) |
-| Push batch | about 8 depositors per transaction (coins and refunds), about 14 (Tax Share); parallel batches of 10 transactions; all within 2 minutes | [#28](https://github.com/imDev2023/top-pad/issues/28), [#35](https://github.com/imDev2023/top-pad/issues/35), [#36](https://github.com/imDev2023/top-pad/issues/36) |
+| Push batch | about 8 depositors per transaction (coins and refunds), 13 (Tax Share, [#49](https://github.com/imDev2023/top-pad/issues/49)); parallel batches of 10 transactions; all within 2 minutes | [#28](https://github.com/imDev2023/top-pad/issues/28), [#35](https://github.com/imDev2023/top-pad/issues/35), [#36](https://github.com/imDev2023/top-pad/issues/36) |
 | Teaser | free text, at most 80 characters, no links or cashtags, Vamp Shield's text checks (owner, 2026-10-27) | this spec |
 | Creator wallet rotation cooldown | 7 days, cancellable by the current Creator wallet (owner, 2026-10-27) | this spec |
 | Rounding and dust | level floored to the lamport; SOL spent rounds up, coins round down; lamport dust to the Tax Share; coin dust and DBC leftover burnt (owner, 2026-10-27) | this spec |
@@ -897,7 +920,7 @@ Not in this build; each returns only as its own effort, mostly the mainnet effor
 ## 16. Risks and what is unproven
 
 Unproven, and proved by section 11's tests:
-- The Jupiter Lock CPI; the `fee_claimer` PDA's claims by CPI were shown on devnet on 2026-10-29 ([#44](https://github.com/imDev2023/top-pad/issues/44)), the Fair Open program's deposits, admissions, withdrawals and failure path on 2026-10-30 ([#45](https://github.com/imDev2023/top-pad/issues/45)), and its open, `settle`, pushes, claims and a partial fill on 2026-10-31, the creation transaction measuring 1,093 bytes ([#46](https://github.com/imDev2023/top-pad/issues/46)).
+- The Jupiter Lock CPI, shown on devnet on 2026-11-01 ([#49](https://github.com/imDev2023/top-pad/issues/49)); the `fee_claimer` PDA's claims by CPI were shown on devnet on 2026-10-29 ([#44](https://github.com/imDev2023/top-pad/issues/44)), the Fair Open program's deposits, admissions, withdrawals and failure path on 2026-10-30 ([#45](https://github.com/imDev2023/top-pad/issues/45)), and its open, `settle`, pushes, claims and a partial fill on 2026-10-31, the creation transaction measuring 1,093 bytes ([#46](https://github.com/imDev2023/top-pad/issues/46)).
 - Wallets signing a 64-rung ladder in one prompt.
 - A sniper's separate transaction landing in the creation slot: shown on devnet on 2026-10-31, when 2 of 10 buys a sniper sent behind the open landed in its slot and paid 99% ([#46](https://github.com/imDev2023/top-pad/issues/46)).
 - Turbo serving an upload within 10 s: `turbo-gateway.com` served an Instant launch's upload at once, while `arweave.net` still answered 404 three minutes later (2026-10-29, [#41](https://github.com/imDev2023/top-pad/issues/41)), so metadata URIs name `turbo-gateway.com`; the Fair Open's 10 s hold is still to be measured.

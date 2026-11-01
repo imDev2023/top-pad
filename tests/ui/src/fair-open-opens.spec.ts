@@ -5,13 +5,13 @@
 // seat is pushed, and the page counts every seat delivered. The creator, who deposited too, has their coins locked in a
 // Jupiter Lock escrow, which the page links (#49); once the Tax window ends the Tax Share is collected and paid, every
 // seat closes and the launch with it, and the page tells the depositor their share from the indexer. The coin's own page
-// shows the coin, its Creator lock and its Tax Share. Every step is photographed in every view. Real devnet SOL: about
+// shows the coin, its Creator lock and its Tax Share, which a buy in the coin's first minute paid. Every step is photographed in every view. Real devnet SOL: about
 // 0.06 a run, the pot's coins sold back once the tax window ends.
 import { expect, test } from "@playwright/test";
 import type { Address } from "@solana/kit";
 import { allocate, dbcPoolAddress, lockCreatorInstructions, rungAtOrBelow, Tier } from "@top-pad/chain";
 import { fetchLaunch, LaunchStatus } from "@top-pad/clients/fair-open";
-import { bank, chainTime, coinBalance, fundedWallets, rpc, send, sweep } from "@top-pad/tests-devnet/devnet";
+import { bank, chainTime, coinBalance, fundedWallets, rpc, send, swap, sweep } from "@top-pad/tests-devnet/devnet";
 import {
   admitted,
   closeNonce,
@@ -82,6 +82,9 @@ test("a Fair Open opens: the page reveals its coin and what the pot bought, and 
     await expect(page.getByTestId("fair-open-phase")).toContainText("The coin is live", { timeout: 90_000 });
     await expect(page.getByTestId("fair-open-coin")).toContainText(launch.coin.ticker, { timeout: 60_000 });
     await expect(page.getByTestId("fair-open-spent")).toHaveText(sol(rung, 4));
+    // A buy inside the Tax window pays the falling sniper tax, the depositors' Tax Share.
+    const coinMint = (await fetchLaunch(rpc, launch.launch)).data.mint as Address;
+    await swap(other, coinMint, "buy", SOL / 100n, account.dbcConfig);
     await expect(page.getByRole("button", { name: "Claim my coins and refund" })).toBeVisible();
     await snap(page, "fair-open-opens-1-opened");
 
