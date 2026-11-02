@@ -7,3 +7,4 @@ export * from "./jobs";
 export * from "./launch";
 export * from "./radar";
 export * from "./trade";
+export * from "./vampShield";

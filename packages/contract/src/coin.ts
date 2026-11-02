@@ -2,6 +2,7 @@ import { z } from "zod";
 import { WindowClaim } from "./earnings";
 import { CreatorLock, TaxShare } from "./fairOpen";
 import { Address, RawAmount } from "./launch";
+import { LooksLike } from "./vampShield";
 
 /** An exact decimal number, such as a price or a market cap in whole quote units. */
 export const Decimal = z.string().regex(/^\d+(\.\d+)?$/);
@@ -112,6 +113,8 @@ export const Coin = z.object({
   fairOpen: z.object({ launch: Address, lock: CreatorLock, taxShare: TaxShare.nullable() }).nullable(),
   /** Null while the curve runs. */
   graduation: Graduation.nullable(),
+  /** Vamp Shield's "looks like X" labels from its launch (spec 6.2); empty for a coin near no Protected coin. */
+  looksLike: z.array(LooksLike),
   explorer: z.object({ mint: z.string().url(), pool: z.string().url() }),
   /** The API's clock as it answered, which a page counts the sniper tax by rather than its own. */
   servedAt: z.iso.datetime(),

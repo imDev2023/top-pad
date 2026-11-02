@@ -78,6 +78,13 @@
       "when": 1793607857084,
       "tag": "0010_bundle_radar",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1793621786055,
+      "tag": "0011_vamp_shield_images",
+      "breakpoints": true
     }
   ]
 }

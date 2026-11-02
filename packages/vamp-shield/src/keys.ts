@@ -137,7 +137,7 @@ function tickerCore(loose: string): string {
  * A name's core: whole-word affixes stripped from either end of its words, so that "Newton" or "Coinbase" keeps its
  * whole key. The last word is never stripped, nor any affix that would leave fewer than MIN_CORE characters.
  */
-function nameCore(words: string[]): string {
+function nameCoreWords(words: string[]): string[] {
   nameAffixes ??= CORE_AFFIXES.map((affix) => affix.split(" ").map(looseKey)).sort(
     (a, b) => b.join("").length - a.join("").length,
   );
@@ -151,10 +151,12 @@ function nameCore(words: string[]): string {
         length - a.join("").length >= MIN_CORE &&
         (at(rest, a, 0) || at(rest, a, rest.length - a.length)),
     );
-    if (!affix) return rest.join("");
+    if (!affix) return rest;
     rest = at(rest, affix, 0) ? rest.slice(affix.length) : rest.slice(0, rest.length - affix.length);
   }
 }
+
+const nameCore = (words: string[]) => nameCoreWords(words).join("");
 
 /**
  * A ticker's or a name's three keys (research/copycat-detection section 2). The field matters for the core key only, so
@@ -163,4 +165,89 @@ function nameCore(words: string[]): string {
 export function foldKeys(text: string, field: Field): Keys {
   const loose = looseKey(text);
   return { strict: strictKey(text), loose, core: field === "ticker" ? tickerCore(loose) : nameCore(looseWords(text)) };
+}
+
+/**
+ * Words that make a derivative of a coin rather than a copy of it (research/copycat-detection section 2): "Baby Pepe" or
+ * PEPEINU is a coin of its own, a normal genre, so a Protected coin's key with one of these added is labelled "looks
+ * like X", never refused (spec 6.2). They are never stripped into the core key: some are part of real names (SHIBA INU).
+ */
+export const DERIVATIVE_AFFIXES = ["BABY", "MINI", "LIL", "INU", "KING", "CAT", "DOG"] as const;
+let derivativeKeys: string[] | undefined;
+
+/**
+ * The keys a ticker or a name leaves once derivative words are taken off either end, one or more at a time, each
+ * remainder reduced to its core as well ("Baby Official Pepe" leaves PEPE): the keys a Protected coin's core key may equal
+ * for the launch to be labelled a derivative of it. A ticker loses them from its joined core key, a name as whole words;
+ * no remainder is shorter than MIN_CORE, and the text's own core key is never among them.
+ */
+export function derivativeCores(text: string, field: Field): string[] {
+  derivativeKeys ??= DERIVATIVE_AFFIXES.map(looseKey);
+  const affixes = derivativeKeys;
+  const found = new Set<string>();
+  if (field === "ticker") {
+    const start = tickerCore(looseKey(text));
+    const queue = [start];
+    for (let key = queue.shift(); key !== undefined; key = queue.shift()) {
+      for (const affix of affixes) {
+        if (key.length - affix.length < MIN_CORE) continue;
+        for (const rest of [key.startsWith(affix) ? key.slice(affix.length) : null, key.endsWith(affix) ? key.slice(0, -affix.length) : null]) {
+          if (rest === null) continue;
+          const core = tickerCore(rest);
+          if (core.length < MIN_CORE || core === start || found.has(core)) continue;
+          found.add(core);
+          queue.push(core);
+        }
+      }
+    }
+    return [...found];
+  }
+  const start = nameCoreWords(looseWords(text));
+  const own = start.join("");
+  const queue = [start];
+  const seen = new Set([own]);
+  for (let words = queue.shift(); words !== undefined; words = queue.shift()) {
+    if (words.length < 2) continue;
+    for (const rest of [affixes.includes(words[0]!) ? words.slice(1) : null, affixes.includes(words.at(-1)!) ? words.slice(0, -1) : null]) {
+      if (rest === null) continue;
+      const core = nameCoreWords(rest);
+      const key = core.join("");
+      if (key.length < MIN_CORE || seen.has(key)) continue;
+      seen.add(key);
+      found.add(key);
+      queue.push(core);
+    }
+  }
+  return [...found];
+}
+
+/** The shortest key an edit distance of 1 is looked for on: shorter ones are within 1 of a verified ticker too often. */
+export const MIN_EDIT_KEY = 5;
+
+/**
+ * A key with each of its characters left out in turn, distinct: two keys within one edit of each other share one of
+ * these, or one is among the other's, which is how the database finds near keys with an index.
+ */
+export function deletions(key: string): string[] {
+  const chars = Array.from(key);
+  return [...new Set(chars.map((_, i) => [...chars.slice(0, i), ...chars.slice(i + 1)].join("")))];
+}
+
+/**
+ * Whether two different keys are one edit apart: a character changed, added or left out, or two neighbours swapped (the
+ * optimal string alignment distance is exactly 1). Equal keys are not, since they are the same key.
+ */
+export function oneEditApart(a: string, b: string): boolean {
+  const x = Array.from(a);
+  const y = Array.from(b);
+  if (x.length === y.length) {
+    const differ = x.flatMap((c, i) => (c === y[i] ? [] : [i]));
+    if (differ.length === 1) return true;
+    return differ.length === 2 && differ[1] === differ[0]! + 1 && x[differ[0]!] === y[differ[1]!] && x[differ[1]!] === y[differ[0]!];
+  }
+  const [short, long] = x.length < y.length ? [x, y] : [y, x];
+  if (long.length - short.length !== 1) return false;
+  let i = 0;
+  while (i < short.length && short[i] === long[i]) i++;
+  return short.slice(i).every((c, j) => c === long[i + j + 1]);
 }

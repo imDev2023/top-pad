@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { bigint, boolean, index, integer, jsonb, numeric, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { bigint, bit, boolean, index, integer, jsonb, numeric, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid, vector } from "drizzle-orm/pg-core";
 
 // Postgres is the only system of record (spec 10.4). The job runner's three tables are Stoker's (commit 43e196b,
 // packages/db/src/schema.ts), with only the alert kinds this build raises.
@@ -115,13 +115,16 @@ export const xAuthorizations = pgTable("x_authorizations", {
 });
 
 /**
- * Coins a launch may not copy (spec 6.2), with their folded ticker and name keys; "Vamp Shield: images and the protected
- * set" fills it. Keys are recomputed whenever `fold_version` changes (UTS #39 skeletons are not stable across Unicode).
+ * Coins a launch may not copy (spec 6.2), one row per coin and source, with their folded ticker and name keys, kept by the
+ * protected set's refresh (apps/api/src/protectedSet.ts). Keys are recomputed whenever `fold_version` changes (UTS #39
+ * skeletons are not stable across Unicode). A row protects from `protected_from` until `protected_until`, or for as long
+ * as its source keeps listing it when that is null.
  */
 export const protectedCoins = pgTable(
   "protected_coins",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    /** The mint, or for a coin on another chain its id at the source (CoinGecko's). */
     mint: text("mint").notNull(),
     ticker: text("ticker").notNull(),
     name: text("name").notNull(),
@@ -133,9 +136,22 @@ export const protectedCoins = pgTable(
     nameStrict: text("name_strict").notNull(),
     nameLoose: text("name_loose").notNull(),
     nameCore: text("name_core").notNull(),
+    /** The loose keys with each character left out in turn: a key one edit away shares one (the "looks like X" rule). */
+    tickerLooseDels: text("ticker_loose_dels").array().notNull().default(sql`'{}'::text[]`),
+    nameLooseDels: text("name_loose_dels").array().notNull().default(sql`'{}'::text[]`),
     foldVersion: text("fold_version").notNull(),
+    /** The coin's image as its source names it; its signatures are the `protected_images` row of that URL. */
+    imageUrl: text("image_url"),
+    /** When protection starts: an organic coin's only once it has qualified for 12 hours. */
+    protectedFrom: timestamp("protected_from", { withTimezone: true }).notNull().defaultNow(),
     /** When protection lapses on its own, as a trending coin's 72 hours do; null while the coin keeps qualifying. */
     protectedUntil: timestamp("protected_until", { withTimezone: true }),
+    /** When the source last listed the coin as qualifying. */
+    seenAt: timestamp("seen_at", { withTimezone: true }).notNull().defaultNow(),
+    /** A Heat coin's first check below the activity bar in its current run below it (spec 6.2: lapses after 7 days). */
+    belowBarSince: timestamp("below_bar_since", { withTimezone: true }),
+    /** What qualified it, for the operator: organic score, holders, market cap, rank. */
+    details: jsonb("details"),
     createdAt: createdAt(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -147,7 +163,100 @@ export const protectedCoins = pgTable(
     index("protected_coins_name_strict").on(t.nameStrict),
     index("protected_coins_name_loose").on(t.nameLoose),
     index("protected_coins_name_core").on(t.nameCore),
+    index("protected_coins_ticker_loose_dels").using("gin", t.tickerLooseDels),
+    index("protected_coins_name_loose_dels").using("gin", t.nameLooseDels),
+    index("protected_coins_image_url").on(t.imageUrl),
   ],
+);
+
+/**
+ * Protected coins' images and their signatures from the vision service (spec 10.2), one row per image URL: PDQ as
+ * `bit(256)` under a Hamming HNSW index, SSCD as `vector(512)` under a cosine HNSW index. PDQ is null when the image's
+ * quality is under 50, at which Meta says a PDQ hash is not to be trusted, so SSCD alone judges it.
+ */
+export const protectedImages = pgTable(
+  "protected_images",
+  {
+    url: text("url").primaryKey(),
+    status: text("status", { enum: ["pending", "done", "failed"] }).notNull().default("pending"),
+    sha256: text("sha256"),
+    pdq: bit("pdq", { dimensions: 256 }),
+    pdqQuality: integer("pdq_quality"),
+    sscd: vector("sscd", { dimensions: 512 }),
+    attempts: integer("attempts").notNull().default(0),
+    error: text("error"),
+    computedAt: timestamp("computed_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("protected_images_status_idx").on(t.status, t.createdAt),
+    index("protected_images_pdq_idx").using("hnsw", t.pdq.op("bit_hamming_ops")),
+    index("protected_images_sscd_idx").using("hnsw", t.sscd.op("vector_cosine_ops")),
+  ],
+);
+
+/**
+ * A launch image's signatures, by the SHA-256 of its bytes, computed once when the launch flow checks it and read again
+ * when the launch is prepared, so preparing never waits on the vision service for an image already checked. The PDQ
+ * hash of each of its 8 orientations, the unrotated one first.
+ */
+export const imageChecks = pgTable("image_checks", {
+  sha256: text("sha256").primaryKey(),
+  pdqDihedral: text("pdq_dihedral").array().notNull(),
+  pdqQuality: integer("pdq_quality").notNull(),
+  sscd: vector("sscd", { dimensions: 512 }).notNull(),
+  /** How long the vision service took to answer, and whether it had to wake for it. */
+  answerMs: integer("answer_ms").notNull(),
+  createdAt: createdAt(),
+});
+
+/**
+ * Vamp Shield's log (spec 6.2): every verdict that refused or labelled a launch as it was prepared, and every image the
+ * launch flow checked, with the closest Protected coins' scores, so the thresholds can be measured again on real launches.
+ */
+export const vampChecks = pgTable(
+  "vamp_checks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    stage: text("stage", { enum: ["image", "prepare"] }).notNull(),
+    creatorId: uuid("creator_id").references(() => creators.id),
+    launchId: uuid("launch_id"),
+    ticker: text("ticker"),
+    name: text("name"),
+    imageSha256: text("image_sha256"),
+    outcome: text("outcome", { enum: ["clear", "looks_like", "refused"] }).notNull(),
+    /** Each refusing or near match: field, rule, the Protected coin and, for an image, its PDQ distance and SSCD similarity. */
+    matches: jsonb("matches").notNull(),
+    /** For an image, its closest Protected images whatever the outcome: the PDQ distances and SSCD similarities. */
+    nearest: jsonb("nearest"),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("vamp_checks_at_idx").on(t.at), index("vamp_checks_outcome_idx").on(t.outcome, t.at)],
+);
+
+/**
+ * A creator's appeal against a refusal (spec 6.2, 6.6): what they wanted to launch, the original they say is theirs or
+ * not copied, and why, for the operator queue (#54). The verdict is the one Vamp Shield gave when the appeal came in.
+ */
+export const vampAppeals = pgTable(
+  "vamp_appeals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    creatorId: uuid("creator_id")
+      .notNull()
+      .references(() => creators.id),
+    ticker: text("ticker").notNull(),
+    name: text("name").notNull(),
+    imageSha256: text("image_sha256"),
+    /** The mint of the coin the creator says is the original, theirs, or not the one matched. */
+    original: text("original"),
+    message: text("message").notNull(),
+    verdict: jsonb("verdict").notNull(),
+    status: text("status", { enum: ["open", "upheld", "denied"] }).notNull().default("open"),
+    createdAt: createdAt(),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+  },
+  (t) => [index("vamp_appeals_status_idx").on(t.status, t.createdAt), index("vamp_appeals_creator_idx").on(t.creatorId)],
 );
 
 /**
@@ -188,11 +297,18 @@ export const launches = pgTable(
     submittedAt: timestamp("submitted_at", { withTimezone: true }),
     landedAt: timestamp("landed_at", { withTimezone: true }),
     /**
-     * A Fair Open's ticker's strict key (spec 2.1 step 3), reserved while the launch is being scheduled and through its
-     * deposit window, so two Fair Opens of one ticker never hold overlapping windows; null once released, when the launch
-     * opens, fails or expires unsent.
+     * The ticker's strict key in the unique index (spec 6.2): a Fair Open's while it is being scheduled and through its
+     * deposit window, so two Fair Opens of one ticker never hold overlapping windows, and any Heat coin's while it is
+     * protected, a Fair Open's kept from its open; null once released, when a launch fails or expires unsent, or when a
+     * coin's protection lapses.
      */
     tickerKey: text("ticker_key"),
+    /** The SHA-256 of the coin's image, whose signatures Vamp Shield checked (`image_checks`). */
+    imageSha256: text("image_sha256"),
+    /** Vamp Shield's near matches when it was prepared (spec 6.2): the coin's "looks like X" labels; null when none. */
+    looksLike: jsonb("looks_like"),
+    /** When a Fair Open's keeper Workflow finished its work: the cron's sweep restarts any keeper not finished. */
+    keeperDoneAt: timestamp("keeper_done_at", { withTimezone: true }),
     // A Fair Open's schedule (spec 2.1 step 4): its launch account, the durable nonce our keeper made for it, its window
     // and minimum raise, and the calendar's teaser.
     fairOpen: text("fair_open").unique(),

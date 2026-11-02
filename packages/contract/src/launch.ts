@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { ApiError, Cluster } from "./health";
+import { FieldVerdict, VampShieldVerdict } from "./vampShield";
 
 /** A Solana address, base58. */
 export const Address = z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/, "not a Solana address");
@@ -47,31 +48,6 @@ export const Me = z.object({
 });
 export type Me = z.infer<typeof Me>;
 
-/** A Protected coin a launch was found to copy. */
-export const ProtectedMatch = z.object({ mint: Address, ticker: z.string(), name: z.string() });
-
-/** Vamp Shield's verdict on one field of a launch (spec 6.2): clear, or refused with the reason the creator reads. */
-export const FieldVerdict = z.object({
-  status: z.enum(["clear", "refused"]),
-  reason: z.string().nullable(),
-  match: ProtectedMatch.nullable(),
-});
-export type FieldVerdict = z.infer<typeof FieldVerdict>;
-
-/** `POST /vamp-shield/check`: the live text verdicts the launch flow shows as the creator types (spec 9, screen 4). */
-export const VampShieldCheck = z.object({ ticker: z.string().max(64), name: z.string().max(256) });
-export type VampShieldCheck = z.infer<typeof VampShieldCheck>;
-
-export const VampShieldVerdict = z.object({
-  /** The ticker as it would go on chain: NFKC, trimmed, uppercased. */
-  ticker: z.string(),
-  name: z.string(),
-  verdicts: z.object({ ticker: FieldVerdict, name: FieldVerdict }),
-  /** Whether nothing refuses the launch. */
-  clear: z.boolean(),
-});
-export type VampShieldVerdict = z.infer<typeof VampShieldVerdict>;
-
 /**
  * Why the launch service refused a launch, for the launch flow to show (an `ApiError` with a code). Every refusal is
  * our launch key declining to co-sign: nothing on chain refuses a launch (spec 6.2).
@@ -97,7 +73,10 @@ export const LaunchRefusal = ApiError.extend({
     "teaser",
     "schedule",
   ]),
+  /** The text's verdict, when Vamp Shield refused the ticker or the name. */
   verdict: VampShieldVerdict.optional(),
+  /** The image's verdict, when Vamp Shield refused it or could not check it. */
+  imageVerdict: FieldVerdict.optional(),
 });
 export type LaunchRefusal = z.infer<typeof LaunchRefusal>;
 

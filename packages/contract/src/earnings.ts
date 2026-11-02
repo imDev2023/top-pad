@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { Address, RawAmount } from "./launch";
+import { LooksLike } from "./vampShield";
 
 /** A transaction's signature, base58. */
 export const Signature = z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{64,88}$/, "not a transaction signature");
@@ -11,6 +12,8 @@ export const EarningsCoin = z.object({
   name: z.string(),
   ticker: z.string(),
   imageUri: z.string().url().nullable(),
+  /** Vamp Shield's "looks like X" labels from its launch (spec 6.2), as its row shows them. */
+  looksLike: z.array(LooksLike),
   /**
    * The pool's partner fees waiting, in the quote's raw units: half of them, rounded down, are the wallet's. A claim
    * asks for exactly this much, so it pays exactly `waiting` however much accrues meanwhile.

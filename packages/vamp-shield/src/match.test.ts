@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { candidateKeys, judge, lookupValues, type CoinKeys, type Judgement, type ProtectedCoin } from "./match";
+import { candidateKeys, judge, lookupValues, looksLikeName, nearKeys, nearLookupValues, nearMatches, type CoinKeys, type Judgement, type ProtectedCoin } from "./match";
+import { deletions } from "./keys";
 
 const coin = (mint: string, ticker: string, name: string): ProtectedCoin => ({
   mint,
@@ -196,6 +197,96 @@ describe("lookup values", () => {
     for (const [ticker, name] of candidates) {
       const candidate = candidateKeys(ticker, name);
       expect(judge(candidate, fetched(candidate)), `${ticker} ${name}`).toEqual(judge(candidate, PROTECTED));
+    }
+  });
+});
+
+describe("near matches, which launch labelled \"looks like X\"", () => {
+  const near = (ticker: string, name: string, coins: readonly ProtectedCoin[] = PROTECTED) =>
+    nearMatches(candidateKeys(ticker, name), nearKeys(ticker, name), coins).map((n) => `${n.field} ${n.rule} ${n.against} ${n.coin.ticker}`);
+
+  it("labels a Protected coin's ticker or name with a derivative word added", () => {
+    expect(near("BABYPEPE", "Frog")).toEqual(["ticker derivative ticker PEPE"]);
+    expect(near("PEPEINU", "Frog")).toEqual(["ticker derivative ticker PEPE"]);
+    expect(near("KINGBONK", "Frog")).toEqual(["ticker derivative ticker BONK"]);
+    expect(near("FROG", "Baby Pepe")).toEqual(["name derivative name PEPE"]);
+    expect(near("FROG", "Pepe Inu")).toEqual(["name derivative name PEPE"]);
+    // Several derivative words, and an authenticity word under them, all come off.
+    expect(near("FROG", "Official Mini Pepe King")).toEqual(["name derivative name PEPE"]);
+    expect(near("BABYPEPEINU", "Frog")).toEqual(["ticker derivative ticker PEPE"]);
+    // Against the other field: a name built on $WIF's ticker, and a ticker built on dogwifhat's name.
+    expect(near("FROG", "Baby Wif")).toEqual(["name derivative ticker WIF"]);
+    expect(near("FROG", "Dogwifhat Inu")).toEqual(["name derivative name WIF"]);
+    // DOG is itself a derivative word, so BABYDOGWIF comes down to $WIF.
+    expect(near("BABYDOGWIF", "Frog")).toEqual(["ticker derivative ticker WIF"]);
+  });
+
+  it("explains the label in the launch form's words", () => {
+    const [found] = nearMatches(candidateKeys("BABYPEPE", "Frog"), nearKeys("BABYPEPE", "Frog"), PROTECTED);
+    expect(found!.reason).toBe('The ticker builds on $PEPE, a protected coin, with a word such as BABY or INU: it can launch, labelled "looks like $PEPE" on its page.');
+    const [edit] = nearMatches(candidateKeys("BONKK", "Frog"), nearKeys("BONKK", "Frog"), PROTECTED);
+    expect(edit!.reason).toBe('The ticker is one letter away from $BONK, a protected coin: it can launch, labelled "looks like $BONK" on its page.');
+  });
+
+  it("labels a key one edit from a Protected coin's, only from 5 characters", () => {
+    const long = coin("dogwif-mint", "DOGWIF", "Dogwif");
+    // A letter added, changed, left out, and two neighbours swapped.
+    expect(near("BONKK", "Frog")).toEqual(["ticker edit ticker BONK"]);
+    expect(near("DOGWIT", "Frog", [long])).toEqual(["ticker edit ticker DOGWIF"]);
+    expect(near("DOGWF", "Frog", [long])).toEqual(["ticker edit ticker DOGWIF"]);
+    expect(near("DOGIWF", "Frog", [long])).toEqual(["ticker edit ticker DOGWIF"]);
+    expect(near("FROG", "Dogwfi", [long])).toEqual(["name edit name DOGWIF"]);
+    // Two edits away, or a candidate of 4 characters, is no label.
+    expect(near("DOGXIT", "Frog", [long])).toEqual([]);
+    expect(near("BONX", "Frog")).toEqual([]);
+    expect(near("PEEP", "Frog")).toEqual([]);
+  });
+
+  it("never reports a coin that judge refuses on, nor a coin twice for one field", () => {
+    // BABYPEPE as a name also strictly matches nothing; as a ticker with PEPE's name it is refused by the name.
+    expect(near("BABYPEPE", "Pepe")).toEqual([]);
+    const pepeKing = coin("pk-mint", "PEPEKING", "Pepe King");
+    expect(near("BABYPEPE", "Frog", [PEPE, pepeKing])).toEqual(["ticker derivative ticker PEPE"]);
+  });
+
+  it("clears ordinary coins and derivative words alone", () => {
+    expect(near("FROG", "Frog Coin")).toEqual([]);
+    expect(near("BABY", "Baby")).toEqual([]);
+    expect(near("CATDOG", "Cat Dog")).toEqual([]);
+  });
+
+  it("names the coin a label points at by its ticker, else its name", () => {
+    expect(looksLikeName(PEPE)).toBe("$PEPE");
+    expect(looksLikeName({ mint: "m", ticker: "", name: "Nameless" })).toBe("Nameless");
+    expect(looksLikeName({ mint: "m", ticker: "$WIF", name: "dogwifhat" })).toBe("$WIF");
+  });
+
+  it("looks near coins up by every value nearMatches compares, so judging the fetched rows changes nothing", () => {
+    const long = coin("dogwif-mint", "DOGWIF", "Dogwif");
+    const all = [...PROTECTED, long, PEPE2];
+    const fetched = (ticker: string, name: string) => {
+      const keys = candidateKeys(ticker, name);
+      const lookup = nearLookupValues(keys, nearKeys(ticker, name));
+      return all.filter(
+        (p) =>
+          lookup.core.includes(p.keys.ticker.core) ||
+          lookup.core.includes(p.keys.name.core) ||
+          (["ticker", "name"] as const).some(
+            (f) => lookup.loose[f].deletions.includes(p.keys[f].loose) || deletions(p.keys[f].loose).some((d) => lookup.loose[f].withSelf.includes(d)),
+          ),
+      );
+    };
+    for (const [ticker, name] of [
+      ["BABYPEPE", "Frog"],
+      ["FROG", "Baby Wif"],
+      ["BONKK", "Frog"],
+      ["DOGIWF", "Dogwfi"],
+      ["DOGWF", "Frog"],
+      ["FROG", "Frog"],
+    ] as const) {
+      const keys = candidateKeys(ticker, name);
+      const expected = nearMatches(keys, nearKeys(ticker, name), all);
+      expect(nearMatches(keys, nearKeys(ticker, name), fetched(ticker, name)), `${ticker} ${name}`).toEqual(expected);
     }
   });
 });

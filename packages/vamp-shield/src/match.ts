@@ -1,7 +1,7 @@
 // A launch's ticker and name against the Protected coins (spec 6.2): any exact key match refuses the launch, with a
-// reason for the launch form. Near matches, which launch with a "looks like X" label (one edit on a key of 5 or more,
-// a derivative word such as BABY), come in a later ticket as more rules beside these.
-import { foldKeys, MIN_CORE, type Field, type KeyKind, type Keys } from "./keys";
+// reason for the launch form; a near match, a derivative word such as BABY added to a Protected coin's key or one edit on
+// a key of 5 or more, lets it launch with a "looks like X" label. The images' rules are the API's, beside these.
+import { deletions, derivativeCores, foldKeys, MIN_CORE, MIN_EDIT_KEY, oneEditApart, type Field, type KeyKind, type Keys } from "./keys";
 
 /** A coin's six keys, a candidate's or a Protected coin's, both from candidateKeys. */
 export type CoinKeys = { ticker: Keys; name: Keys };
@@ -108,4 +108,93 @@ function reason({ field, kind, against }: Rule, coin: ProtectedCoin, keys: Keys)
   if (kind === "loose") return `The ${field} reads as ${target}, a protected coin, once digits and symbols are read as letters.`;
   const stripped = keys.loose !== keys.core || coin.keys[against].loose !== coin.keys[against].core;
   return `The ${field} matches ${target}, a protected coin${stripped ? ", once words such as OFFICIAL, 2 or CTO are left out" : ""}.`;
+}
+
+/** How a near match was found: a derivative word added to a Protected coin's key, or one edit away from it. */
+export type NearRule = "derivative" | "edit";
+
+export type Near = {
+  /** The candidate's field that is near. */
+  field: Field;
+  rule: NearRule;
+  /** The Protected coin's field it is near: the same one, or for a derivative also the other one. */
+  against: Field;
+  coin: ProtectedCoin;
+  /** A sentence for the launch form. */
+  reason: string;
+};
+
+/** What a candidate's near matches are looked for by, beside its six keys (see nearKeys). */
+export type NearKeys = Record<Field, { derived: string[]; editable: boolean }>;
+
+/**
+ * A candidate's keys for the near rules: what each field leaves once derivative words are taken off (derivativeCores),
+ * and whether its loose key is long enough to look for keys one edit away (MIN_EDIT_KEY characters or more: on shorter
+ * keys a random ticker is within one edit of a verified one most of the time, research/copycat-detection section 2).
+ */
+export const nearKeys = (ticker: string, name: string): NearKeys => {
+  const keys = candidateKeys(ticker, name);
+  return {
+    ticker: { derived: derivativeCores(ticker, "ticker"), editable: Array.from(keys.ticker.loose).length >= MIN_EDIT_KEY },
+    name: { derived: derivativeCores(name, "name"), editable: Array.from(keys.name.loose).length >= MIN_EDIT_KEY },
+  };
+};
+
+/**
+ * The Protected coins a candidate is near (spec 6.2's labels), each coin once per field, a derivative before an edit.
+ * A derivative is a field's remainder equal to a Protected coin's core key, ticker or name; an edit is a field's loose key
+ * one edit from the same field's loose key of a Protected coin. Exact matches are judge's: a coin judge refuses on is not
+ * also reported here.
+ */
+export function nearMatches(candidate: CoinKeys, near: NearKeys, protectedCoins: readonly ProtectedCoin[]): Near[] {
+  const exact = judge(candidate, protectedCoins);
+  const refusedOn = new Set(exact.verdict === "refused" ? exact.matches.map((m) => m.coin.mint) : []);
+  const found: Near[] = [];
+  const add = (field: Field, rule: NearRule, against: Field, coin: ProtectedCoin) => {
+    if (refusedOn.has(coin.mint) || found.some((n) => n.field === field && n.coin.mint === coin.mint)) return;
+    found.push({ field, rule, against, coin, reason: nearReason(field, rule, against, coin) });
+  };
+  for (const field of ["ticker", "name"] as const) {
+    for (const coin of protectedCoins) {
+      for (const against of [field, field === "ticker" ? "name" : "ticker"] as const) {
+        const core = coin.keys[against].core;
+        if (core.length >= MIN_CORE && near[field].derived.includes(core)) add(field, "derivative", against, coin);
+      }
+    }
+    if (!near[field].editable) continue;
+    for (const coin of protectedCoins) {
+      if (oneEditApart(candidate[field].loose, coin.keys[field].loose)) add(field, "edit", field, coin);
+    }
+  }
+  return found;
+}
+
+/**
+ * The values the API looks near Protected coins up by, with indexed equality and array overlap: a derivative's
+ * remainders against both fields' core keys, and for an edit each field's loose key and its deletions against the same
+ * field's loose key and its stored deletions (`ticker_loose_dels`, `name_loose_dels`).
+ */
+export type NearLookup = { core: string[]; loose: Record<Field, { deletions: string[]; withSelf: string[] }> };
+
+export function nearLookupValues(candidate: CoinKeys, near: NearKeys): NearLookup {
+  const edit = (field: Field) => {
+    if (!near[field].editable) return { deletions: [], withSelf: [] };
+    const dels = deletions(candidate[field].loose);
+    return { deletions: dels, withSelf: [candidate[field].loose, ...dels] };
+  };
+  return { core: [...new Set([...near.ticker.derived, ...near.name.derived])], loose: { ticker: edit("ticker"), name: edit("name") } };
+}
+
+/** A Protected coin's name for its label, "looks like X": its ticker with a $, else its name, else its id. */
+export function looksLikeName(coin: Pick<ProtectedCoin, "ticker" | "name" | "mint">): string {
+  const symbol = shown(coin.ticker).replace(/^\$/, "");
+  return symbol ? `$${symbol}` : shown(coin.name) || coin.mint;
+}
+
+function nearReason(field: Field, rule: NearRule, against: Field, coin: ProtectedCoin): string {
+  const label = looksLikeName(coin);
+  const target = against === field ? label : `the ${against} of ${label}`;
+  const then = `it can launch, labelled "looks like ${label}" on its page.`;
+  if (rule === "derivative") return `The ${field} builds on ${target}, a protected coin, with a word such as BABY or INU: ${then}`;
+  return `The ${field} is one letter away from ${target}, a protected coin: ${then}`;
 }
