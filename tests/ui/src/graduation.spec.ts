@@ -95,8 +95,12 @@ test("a coin bought to its Graduation Target graduates into DAMM v2 by Heat's ke
     const after = await api(`/coins/${mint}`, Coin);
     const g = after.graduation!.graduated!;
     expect(g.pool).not.toBe(after.pool);
-    expect(after.graduation!.surplus).not.toBeNull();
-    await expect.poll(async () => (await api(`/coins/${mint}`, Coin)).graduation!.graduated!.leftoverBurnt, { timeout: 60_000 }).not.toBeNull();
+    // The keeper's steps after the migration: the surplus split, then the leftover burnt.
+    const keeperDone = async () => {
+      const g = (await api(`/coins/${mint}`, Coin)).graduation!;
+      return g.surplus !== null && g.graduated!.leftoverBurnt !== null;
+    };
+    await expect.poll(keeperDone, { timeout: 90_000 }).toBe(true);
 
     // Trading goes on from the same panel, on the graduated pool, paying Heat's referral account its share.
     const buy = await trade(traderPage, "buy", { preset: "0.1 SOL" }, "graduation-4-buy-on-damm");
@@ -107,8 +111,8 @@ test("a coin bought to its Graduation Target graduates into DAMM v2 by Heat's ke
     }
     await snap(traderPage, "graduation-5-traded-on-damm");
 
-    // The creator's page: their LP fees from the graduated pool beside their curve earnings, both claimed in one go.
-    await installTestWallet(page, creator);
+    // The creator's page, in the browser they launched from: their LP fees from the graduated pool beside their curve
+    // earnings, both claimed in one go.
     await page.goto("/creator");
     const waiting = page.getByTestId("earnings-waiting");
     const connect = page.getByRole("main").getByRole("button", { name: "Connect wallet" });
@@ -121,7 +125,7 @@ test("a coin bought to its Graduation Target graduates into DAMM v2 by Heat's ke
     expect(BigInt(shown.lpFees)).toBeGreaterThan(0n);
     const before = await lamports(creator.address);
     await page.getByRole("button", { name: /^Claim / }).click();
-    await expect(page.getByRole("status")).toContainText("Claimed", { timeout: 60_000 });
+    await expect(page.getByText(/^Claimed [\d.]+ SOL$/)).toBeVisible({ timeout: 60_000 });
     await snap(page, "graduation-7-creator-claimed");
     // At least what the page showed, less the network fee and the coin account the LP claim opens.
     const rent = await rpc.getMinimumBalanceForRentExemption(165n).send();

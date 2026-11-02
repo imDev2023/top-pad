@@ -229,6 +229,15 @@ Meteora's mainnet keepers only migrate at a 10 SOL threshold, so our keeper does
 The graduated pool starts with about 85 SOL and 200 million coins, at a 425 SOL market cap.
 Both halves of its LP are permanently locked: the creator's half as their own position NFT, Heat's half held by the fee program ([Launch liquidity](https://github.com/imDev2023/top-pad/issues/30)).
 
+As built ([#51](https://github.com/imDev2023/top-pad/issues/51), 2026-11-02):
+- DBC's `migration_damm_v2` creates the graduated pool on Meteora's customizable DAMM v2 config (`A8gMrEPJkacWkcb3DGwtJwTe16HktSEfvwtuDh2MCtck`, the DBC SDK's `MigrationFeeOption::Customizable` entry), which is what gives it the market-cap fee schedule; the pool's address follows from that config and the two mints, so Heat knows it before the migration runs.
+- The migration makes two positions, the larger half first (the creator's, when the halves are equal), locks each permanently and hands its NFT to the DBC creator role holder and to the `fee_claimer` PDA; the indexer reads both owners from the Token-2022 hand-overs in the migration itself.
+- DBC's split rounds: on devnet one position kept a single unit of liquidity unlocked out of about 2 x 10^30, worth no coin and no lamport, and DAMM v2 refuses its withdrawal (`AmountIsZero`), as `tests/devnet/src/graduation.test.ts` checks.
+- Curve A completes exactly at its target, so its surplus is 0; the migration leaves a fraction of a coin over (800,004 raw units, 0.8 coins, on the rehearsal config), which the fee program burns.
+- Measured on devnet: the migration used 253,909 compute units (the SDK budgets 600,000).
+- On the deployed site the keeper graduated two 8.5 SOL Instant launches bought to their target from the coin page (`tests/ui/src/graduation.spec.ts`), each 1.9 s after the page showed its curve complete, the surplus split and the leftover burnt right after; both went on trading from the same panel on their DAMM v2 pools, paying Heat's referral account its share. Each run cost about 2 SOL.
+- The coin page shows the curve graduating, then a checkered flag, the graduated pool with its fee and both locked positions, each linked; quick trade goes on from the same panel on the graduated pool (9, screen 3).
+
 ### 2.4 Coins made around our flow
 
 Anyone can create a pool directly on Heat's DBC configs.
@@ -340,6 +349,7 @@ The SDK's `buildCurveWithCustomSqrtPrices` cannot make an exact config either: i
 
 The fee follows the current price, not the peak, so a coin falling back toward its graduation price climbs back toward 1.25% (2x: 1.21%, 10x: 1.01%, 50x: 0.58%).
 Until the schedule expires, Meteora's operators cannot change the pool's base fee, only its dynamic fee.
+As built ([#51](https://github.com/imDev2023/top-pad/issues/51)): read back from a graduated pool on devnet, every value above was as configured; a buy of a fifth of the pool's quote lifted the price two steps and the next trade paid 1.23%, and a sell back below them 1.25% again. Quotes on a graduated pool come from `@top-pad/meteora/damm`, DAMM v2's integer maths for this one kind of pool in plain bigints (the SDK's main entry would add about 380 KiB gzipped to the API Worker), matching the SDK to the raw unit in its tests and every devnet swap in `tests/devnet`.
 Its encoding, checked against DAMM v2's `fee_market_cap_scheduler.rs` ([#40](https://github.com/imDev2023/top-pad/issues/40)): linear market-cap mode (3), `pool_fee_bps` 125, `number_of_period` 100, `sqrt_price_step_bps` 900, `reduction_factor` 100,000 and `scheduler_expiration_duration` 315,360,000; DAMM v2 counts passed steps as (sqrt price - graduation sqrt price) x 10,000 / graduation sqrt price / 900, so the 100th lands at exactly 10x the sqrt price.
 
 ## 4. Fees
@@ -378,6 +388,13 @@ As built ([#43](https://github.com/imDev2023/top-pad/issues/43), 2026-11-02):
 - Every swap Heat's site builds names it, and DBC pays it a fifth of Meteora's fifth of the fee: 0.05% of a trade at 1.25%, and 4% of the sniper tax inside the Tax window, out of Meteora's share, never the creator's, the depositors' or the trader's.
 - On devnet every quick trade paid it to the lamport its event recorded (`tests/devnet/src/quick-trade.test.ts`).
 
+As built ([#51](https://github.com/imDev2023/top-pad/issues/51), 2026-11-02):
+- At Graduation the keeper has the fee program split the partner's surplus (`claim_surplus`), half to the creator role holder and the rest to the treasury, as DBC pays it once; curve A's surplus is 0, as above.
+- Heat's LP fees reach the treasury through the fee program's `claim_lp_fees`, which the API's cron sends once an hour for every graduated pool whose Heat position has accrued at least 0.001 SOL; anyone may send it.
+- The creator's page shows a graduated coin's LP fees beside its curve earnings and claims both in one transaction: the fee program's `claim_fees` and DAMM v2's own `claim_position_fee`, signed by the creator as their position NFT's owner. A position's fees cannot be capped, so that claim pays at least what the page showed.
+- Swaps on a graduated pool name Heat's referral account too, and DAMM v2 pays it a fifth of Meteora's fifth of the fee, as DBC does.
+- On devnet Heat's and the creator's LP fees came to 1,396,533 and 1,396,534 lamports from the same trades, each exactly what `@top-pad/meteora/damm` said its position had accrued.
+
 ## 5. On-chain programs
 
 Sources: [Our Fair Open program](https://github.com/imDev2023/top-pad/issues/28), [ADR 0006](adr/0006-a-fee-program-and-a-fair-open-program.md), [Fair Open creation transaction on devnet](https://github.com/imDev2023/top-pad/issues/31), [Launch liquidity](https://github.com/imDev2023/top-pad/issues/30), [Stack](https://github.com/imDev2023/top-pad/issues/17).
@@ -414,8 +431,11 @@ Instructions:
 - `claim_fees`: anyone may send it; claims the pool's partner fees by CPI and pays half to the current DBC creator role holder (read from the pool account) and half to the treasury.
   As built: `claim_fees(max_amount)`, refused until the pool's window claim has run; each share is a DBC `claim_trading_fee` CPI signed by the `fee_claimer` PDA, asking for none of the coin (the configs collect fees in the quote alone) and naming the fee claimer's own quote account in DBC's coin slot, where nothing is ever paid.
 - `claim_surplus`: after the curve completes, splits the partner surplus the same way.
+  As built ([#51](https://github.com/imDev2023/top-pad/issues/51)): anyone may send it; DBC's `partner_withdraw_surplus` pays the partner's share into the fee claimer's own quote account, and the same instruction pays it straight on, the creator's half rounded down, so it never rests there.
 - `claim_lp_fees`: claims Heat's graduated LP fees to the treasury.
+  As built: DAMM v2's `claim_position_fee` signed by the `fee_claimer` PDA as the owner of Heat's position NFT, paying the quote straight into the treasury's account; the fee claimer's coin account stands in the coin's slot, where a pool collecting in the quote pays nothing.
 - `burn_leftover`: withdraws any DBC fixed-supply leftover after migration and burns it **(owner, 2026-10-27)**.
+  As built: DBC's `withdraw_leftover` into the fee claimer's coin account, then everything that account holds burnt, so the fee program never keeps a coin.
 
 On devnet (2026-10-29, [#41](https://github.com/imDev2023/top-pad/issues/41)): deployed from a verified build (executable hash `bf006185f8d7ea20ec56e9e700ff4e6f49f6063f41e8038e3cabd91be3c8b7e6`, rebuilt from GitHub by `solana-verify verify-from-repo` and recorded on chain; OtterSec's remote check runs on mainnet only), upgrade authority `4hsevQ8dGaJeRLgXa2DhsqAshJTpByHpy9ug15oyj6Sk`, `FeeConfig` at `5dpSgkTGGSNitmdpBhaP92kReDWHoVaz7TTMpSzRnGFL` naming the treasury `F7mn4DAccxre57wjoNoQzDgmk7H6mYG2NuWwG8Yt3oTG` and the keeper `GpDvDUpEC9ynHTJBt3XaZcTvBUw1HaMnU9Wwox18xfNi`.
 `register_coin` checks the pool is a DBC pool of the mint on a config whose fee claimer is the fee program's PDA, and costs about 17k compute units; the Instant launch's creation transaction with it is 1,015 bytes and about 117k compute units.
@@ -425,6 +445,10 @@ The claims' unit tests run in LiteSVM against `tests/dbc-stand-in`, our own stan
 Upgraded on devnet with `register_fair_open_coin` on 2026-10-31 ([#46](https://github.com/imDev2023/top-pad/issues/46)), from a verified build: executable hash `a953b6c93c2675592c445e7800cb5efb10151fa88593aba78e3c7c5aa3bc4ded`, commit `23aae8a`, 349,544 bytes, rebuilt from GitHub and recorded on chain; it checks its signer is the coin registrar of the Fair Open program the `FeeConfig` names (`vtRQaZaTtix75wDG6zHS3HrdgpqNNHpKdxQbHwJiFAG`).
 
 Upgraded on devnet with `claim_fair_open_window_fees` on 2026-11-01 ([#49](https://github.com/imDev2023/top-pad/issues/49)), from a verified build: executable hash `19e30a9f631154ddf597360608f2620c8ab3ef58a57820bdff6f4936ffbb0baa`, commit `e7fd2f4`, 367,240 bytes, rebuilt from GitHub and recorded on chain.
+
+Upgraded on devnet with `claim_surplus`, `claim_lp_fees` and `burn_leftover` on 2026-11-02 ([#51](https://github.com/imDev2023/top-pad/issues/51)), from a verified build: executable hash `b2a53339e5265e7f3d5c14718e3a852f2d141263843837150cda0b33aeb8e33c`, commit `c00ca9e`, 430,904 bytes, the program account extended for about 0.33 SOL, rebuilt from GitHub and recorded on chain.
+Measured against DBC and DAMM v2 on devnet: `claim_surplus` 31,388 compute units, `burn_leftover` 25,899 and `claim_lp_fees` 36,547; the creator's DAMM v2 `claim_position_fee` 18,234.
+Their unit tests run in LiteSVM against `tests/dbc-stand-in`'s surplus and leftover and `tests/damm-stand-in`, our stand-in for DAMM v2's `claim_position_fee`, never deployed.
 Invariants:
 - It never holds a creator balance after an instruction ends.
 - Window fees reach only the launch's Tax Share or the treasury.
@@ -634,7 +658,8 @@ The screens:
    As built ([#47](https://github.com/imDev2023/top-pad/issues/47)): `/launch` walks a Fair Open through Link X, Launch mode, Coin, Schedule, Sign and Done; the schedule starts now or later (a local date and time, up to 7 days ahead), with the coin's open time beside it, the calendar entry previewed live, and refusals said as typed; signing is one button, "Sign your open in advance", with the 64 rungs behind a details link and the fallback beside them; Done says when the coin opens and, after the fallback, when to come back. The Fair Open's page shows the creator who signs at the open a panel that asks for that one signature once the window closes.
 5. **Creator record**: the facts in section 7, Creator wallet history, the verified-human and verified-creator marks, Creator Earnings from both sources with one claim, and for a barred Creator the banner, evidence pack and appeal history; the accused creator's private 72-hour view with a reply box.
    As built ([#44](https://github.com/imDev2023/top-pad/issues/44)): `/creator`, the Creator Earnings of the connected wallet, since earnings follow the creator role a wallet holds: what waits in each Heat coin whose role it holds, read from the chain to the lamport, a coin whose first minute is unclaimed saying so, and one claim of it all; the record's facts join it in [#55](https://github.com/imDev2023/top-pad/issues/55).
-   A claim names five accounts of each pool, so one transaction holds two pools; a claim of more is as many transactions, signed in one wallet request, and an address lookup table of Heat's shared accounts would hold about four a transaction once LP fees join the claim ([#51](https://github.com/imDev2023/top-pad/issues/51)).
+   A claim names five accounts of each pool, so one transaction holds two pools; a claim of more is as many transactions, signed in one wallet request.
+   As built ([#51](https://github.com/imDev2023/top-pad/issues/51)): a graduated coin's row adds what its Meteora pool's position has accrued, claimed in the same transaction; that claim names the pool's accounts too, so a transaction holds fewer coins, and the claim still splits into as many as it needs.
 6. **How this is enforced**: each promise, what keeps it, and who could still change it (below).
 7. **Operator app** (separate, section 10): cases, appeals, refused launches and admissions.
 
@@ -731,6 +756,10 @@ Sources: [Stack](https://github.com/imDev2023/top-pad/issues/17), [Backend desig
     The open never landed more than 2 s late, so it stays in the Workflow and no Durable Object alarm is needed.
     An open signed at the open waits for the creator's click (3.91 s after its time in the deployed run), not for the keeper.
 
+  As built for Graduation ([#51](https://github.com/imDev2023/top-pad/issues/51), 2026-11-02): `GraduationKeeper`, one Workflow per coin keyed by its mint, started when the indexer sees a Heat curve complete (DBC's `EvtCurveComplete`, in the buy that completed it) and by the 5-minute cron's sweep for any coin whose curve completed and whose Graduation is not done.
+  It migrates the coin, then splits the surplus and burns the leftover, each step reading the chain first and sending only what is undone; a coin no `CoinRecord` lists is left alone.
+  The indexer records the migration with both positions and their owners, and from then watches the graduated pool's address, whose swaps name neither a config nor our programs; its trades are the coin's, and the coin's price and quote reserve follow them.
+
   As built for Instant launches ([#44](https://github.com/imDev2023/top-pad/issues/44), 2026-10-29): `InstantLaunchKeeper`, one Workflow per launch keyed by its coin's mint, since a coin registered by another deployment has no launch here; it reads when the coin's Tax window ends, sleeps until then and sends the window claim, tried every second while the chain's clock trails the Worker's.
   It is started when a launch lands, when the indexer sees an Instant coin registered, and by the 5-minute cron's sweep, which settles every coin with no window claim recorded against the chain: one whose record says the claim ran has the claim's transaction indexed again, and any other has its keeper started, or started again if it failed.
   On devnet, deployed, the window claims landed 1 s after the minute ended by the chain's clock.
@@ -813,6 +842,7 @@ All on devnet, against Meteora's deployed programs, with no Meteora binaries any
 About 60 SOL for the proof (about 6 to deploy two programs, about 26 for three graduations at 8.5 SOL, about 15 for simulation wallets, the rest margin) and about 130 for the cohort; most comes back by selling test coins.
 Every CLI airdrop was refused during the prototype, so the owner collects it (section 13).
 faucet.solana.com gives at most 10 SOL every 8 hours when signed in with GitHub (at most 30 SOL a day), so collection runs alongside the build: the first slices need only the deploys (about 6 SOL), the proof's 60 SOL is 2 to 3 days of requests, and the cohort's 130 accrues during the build, before slice 11 needs it.
+A graduation's real cost is the fifth of its target that stays locked in the graduated pool forever, plus fees: about 2 SOL at 8.5 SOL ([#51](https://github.com/imDev2023/top-pad/issues/51)). So `tests/devnet` graduates on devnet's rehearsal config, `FpBAjo24FLrxj69qfu92NodVvWJE8zSPPxPxmearft27`, the Instant config's every value but a 0.25 SOL Graduation Target, for about 0.08 SOL a run (`GRADUATION=real` uses the Instant config); the 8.5 SOL graduation runs from the deployed site in `tests/ui/src/graduation.spec.ts`.
 
 ### 11.5 The Bundle Radar evaluation
 
@@ -846,7 +876,7 @@ faucet.solana.com gives at most 10 SOL every 8 hours when signed in with GitHub 
 | Ladder rungs | 5% steps from the pot's cap, at most 64 | [#28](https://github.com/imDev2023/top-pad/issues/28) |
 | Late-open withdrawal | 15 minutes after the scheduled time | [#19](https://github.com/imDev2023/top-pad/issues/19) |
 | Creator lock | nothing for 7 days after the open, linear to day 30 | [#11](https://github.com/imDev2023/top-pad/issues/11) |
-| Depositor rent | seat 0.00123 SOL + coin account 0.00149 SOL, about 0.0027 SOL, refundable | [#28](https://github.com/imDev2023/top-pad/issues/28) |
+| Depositor rent | seat 0.00123 SOL + coin account 0.00149 SOL (1,488,440 lamports, a token account's rent since late 2026, which the API asks the cluster for), about 0.0027 SOL, refundable | [#28](https://github.com/imDev2023/top-pad/issues/28) |
 | Creator rent at scheduling | about 0.03 SOL, refundable | [#28](https://github.com/imDev2023/top-pad/issues/28) |
 | Lock escrow rent | 0.0036 SOL on devnet (2026-11-01), prepaid with the open's rent at scheduling ([#49](https://github.com/imDev2023/top-pad/issues/49)) | [#28](https://github.com/imDev2023/top-pad/issues/28) |
 | Coin record rent | about 0.001 SOL per coin | [#36](https://github.com/imDev2023/top-pad/issues/36) |
