@@ -583,6 +583,9 @@ As built ([#53](https://github.com/imDev2023/top-pad/issues/53), 2026-11-02):
 - As a coin launches, and as it is bought in its first hour, the indexer reads its Creator wallet's window on (at most 40 transactions a time) and tells the coin's live room, whose page reads the labels again; a launch or buy indexed more than 10 minutes late, as reconciliation catching up indexes them, is left to the case job, so catching up never floods the RPC.
 - On the coin page, wallets directly linked to the Creator wallet are a red flag with the share of supply they bought, and same-slot buys with no link a yellow one (section 9); the Creator wallet's own buys are labelled with the yellow ones.
 - Jito's record is read from its public API (`bundles.jito.wtf`, no key, 404 for a transaction in no bundle) on mainnet only, for the creation and its slot's buys.
+- Measured on the deployed site (2026-11-02, `tests/ui/src/bundle-radar.spec.ts`): the Creator wallet and 4 wallets it funded put 18 buys in an Instant launch's creation slot; the coin's page showed its red flag 15.9 s after the open, and all four wallets linked after 31.1 s, since the indexer reads a slot's transactions one by one, each served 2 to 3 s after its block on Helius's free tier; a sniper the creator never funded, in the same slot but further down it, stayed a yellow label.
+- On devnet, which runs no Jito block engine, a buy sent right behind a launch can land in the four positions after its creation without any tie to the creator, and the position rule then links it: on one devnet run a sniper's buy did.
+  Jito's record settles it on mainnet; the Bundle Radar evaluation (11.5) should measure the position rule alone on launches whose creation was not bundled.
 
 ### 6.5 Confirmed bundling and bars
 

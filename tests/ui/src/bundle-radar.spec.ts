@@ -199,9 +199,15 @@ test("Bundle Radar flags a creator's bundle within seconds, and a case opens an 
     await sleep(Math.max(0, opened + 65_000 - Date.now()));
     for (const f of funded) await swap(f, coin, "buy", PAST_TAX);
     await swap(sniper, coin, "buy", PAST_TAX * 2n);
-    const counted = await waitFor(() => api(`/coins/${coin}/radar`, BundleRadar), (r) => BigInt(r.linked.coins) >= BigInt(r.floor), 60_000);
+    // Every one of the 4 buys counted, so the figure is final before the page is checked against it.
+    const pastTaxCounted = (r: BundleRadar) =>
+      funded.every((f) => r.wallets.find((w) => w.wallet === f.address)?.buys.some((b) => b.firstHour && b.quoteAmount === PAST_TAX.toString()));
+    const counted = await waitFor(() => api(`/coins/${coin}/radar`, BundleRadar), pastTaxCounted, 60_000);
+    expect(BigInt(counted.linked.coins) >= BigInt(counted.floor)).toBe(true);
     console.log(`the linked wallets bought ${counted.linked.coins} of ${counted.supply} (floor ${counted.floor})`);
-    await expect(page.getByTestId("radar-linked")).toContainText(/· \d+\.\d\d% of supply/);
+    // The page's flag catches up with the API's count, written as the page writes a share: two places, rounded down.
+    const hundredths = (BigInt(counted.linked.coins) * 10_000n) / BigInt(counted.supply);
+    await expect(page.getByTestId("radar-linked")).toContainText(`· ${hundredths / 100n}.${(hundredths % 100n).toString().padStart(2, "0")}% of supply`, { timeout: 30_000 });
     await snap(page, "radar-4-past-the-floor");
 
     // Two minutes after the open, everyone sells, and what is left goes back to the bank before the hour's wait.
