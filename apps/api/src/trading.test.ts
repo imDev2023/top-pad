@@ -13,8 +13,17 @@ import {
   getVirtualPoolEncoder,
   POOL_CONFIG_DISCRIMINATOR,
 } from "@top-pad/clients/dbc";
+import {
+  CP_AMM_PROGRAM_ADDRESS,
+  getPoolDecoder,
+  getPoolEncoder,
+  getPoolSize,
+  getSwap2InstructionDataDecoder as getDammSwap2InstructionDataDecoder,
+  POOL_DISCRIMINATOR,
+} from "@top-pad/clients/damm-v2";
 import { Holdings, PreparedSwap, SwapOutcome, SwapQuote } from "@top-pad/contract";
-import { createDb, pools, type Db } from "@top-pad/db";
+import { coins, createDb, graduations, pools, type Db } from "@top-pad/db";
+import { quoteDammSwap } from "@top-pad/meteora/damm";
 import { createTestDatabase } from "@top-pad/db/testing";
 import { heatHandler, indexTransactions, provisionalOrderKey, type RawTransaction } from "@top-pad/indexer";
 import recorded from "../../../packages/meteora/src/fixtures/swaps.json" with { type: "json" };
@@ -177,6 +186,103 @@ describe("a quick trade's quote", () => {
     expect(await errorOf(complete)).toMatch(/curve is complete/);
   });
 
+  it("is quoted and built on the coin's DAMM v2 pool once it has graduated, its fee set by its price (#51)", async () => {
+    const graduatedMint = random();
+    const curve = random();
+    const dammPool = random();
+    const now = new Date();
+    await db.insert(pools).values({
+      pool: curve,
+      mint: graduatedMint,
+      config: devnet.configs!.instant,
+      creator: random(),
+      name: "Graduated",
+      ticker: "GRAD",
+      uri: "https://example.com/g.json",
+      activatedAt: now,
+      createdSignature: "graduated",
+      createdSlot: 1,
+      createdAt: now,
+      sqrtPrice: "120258058333485015",
+      quoteReserve: BigInt(instant.migrationQuoteThreshold),
+    });
+    await db.insert(coins).values({
+      mint: graduatedMint,
+      pool: curve,
+      config: devnet.configs!.instant,
+      launchMode: "instant",
+      creatorWallet: random(),
+      name: "Graduated",
+      ticker: "GRAD",
+      metadataUri: "https://example.com/g.json",
+      createdSignature: "graduated-coin",
+      createdSlot: 1,
+      createdAt: now,
+    });
+    const graduation = 120_258_058_333_485_015n;
+    await db.insert(graduations).values({
+      mint: graduatedMint,
+      curvePool: curve,
+      pool: dammPool,
+      config: devnet.configs!.instant,
+      signature: "migration",
+      slot: 2,
+      graduatedAt: now,
+      sqrtPrice: `${graduation}`,
+      creatorPosition: random(),
+      creatorPositionNftMint: random(),
+      creatorPositionOwner: random(),
+      creatorLiquidity: "1",
+      heatPosition: random(),
+      heatPositionNftMint: random(),
+      heatLiquidity: "1",
+    });
+    // The graduated pool a little above its graduation price, as DAMM v2 lays it out.
+    const scheduler = new Uint8Array(32);
+    const view = new DataView(scheduler.buffer);
+    view.setBigUint64(0, 12_500_000n, true);
+    view.setUint8(8, 3);
+    view.setUint16(14, 100, true);
+    view.setUint32(16, 900, true);
+    view.setUint32(20, 315_360_000, true);
+    view.setBigUint64(24, 100_000n, true);
+    const blank = getPoolDecoder().decode(Uint8Array.from({ length: getPoolSize() }, (_, i) => (i < 8 ? POOL_DISCRIMINATOR[i]! : 0)));
+    const state = {
+      ...blank,
+      tokenAMint: graduatedMint,
+      tokenBMint: devnet.quote.mint,
+      sqrtMinPrice: 4_295_048_016n,
+      sqrtMaxPrice: 79_226_673_521_066_979_257_578_248_091n,
+      sqrtPrice: (graduation * 125n) / 100n,
+      liquidity: (8_483_000_000n << 128n) / (graduation - 4_295_048_016n),
+      activationPoint: ACTIVATION,
+      collectFeeMode: 1,
+      feeVersion: 1,
+      poolFees: { ...blank.poolFees, protocolFeePercent: 20, referralFeePercent: 20, initSqrtPrice: graduation, baseFee: { ...blank.poolFees.baseFee, baseFeeInfo: { data: scheduler } } },
+    };
+    fakes.accounts.set(dammPool, { owner: CP_AMM_PROGRAM_ADDRESS, data: new Uint8Array(getPoolEncoder().encode(state)) });
+    fakes.clock = ACTIVATION + 86_400n;
+
+    const quote = SwapQuote.parse(await (await post(`/coins/${graduatedMint}/quote`, { side: "buy", amount: `${SOL / 10n}`, slippageBps: 100 })).json());
+    const expected = quoteDammSwap({ pool: getPoolDecoder().decode(fakes.accounts.get(dammPool)!.data), side: "buy", amountIn: SOL / 10n, currentPoint: ACTIVATION + 86_400n, hasReferral: true });
+    // One step: a graduated pool's fee follows its price, here two 9% steps up, at 1.23%.
+    expect(quote.steps).toEqual([{ from: Number(ACTIVATION) + 86_400, fee: `${expected.fee}`, quoteAmount: `${expected.quoteAmount}`, amountOut: `${expected.amountOut}` }]);
+    expect(Number(expected.fee) / Number(SOL / 10n)).toBeCloseTo(0.0123, 6);
+    expect(quote.minimumOut).toBe(`${(expected.amountOut * 9_900n) / 10_000n}`);
+
+    const wallet = random();
+    fakes.accounts.set(wallet, { owner: "11111111111111111111111111111111", data: new Uint8Array(), lamports: SOL });
+    const prepared = PreparedSwap.parse(await (await post(`/coins/${graduatedMint}/swap`, { side: "buy", amount: `${SOL / 10n}`, slippageBps: 100, wallet })).json());
+    const message = decompileTransactionMessage(getCompiledTransactionMessageDecoder().decode(decode(prepared.transaction).messageBytes));
+    expect(message.instructions.some((ix) => ix.programAddress === DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS)).toBe(false);
+    const [swap] = message.instructions.filter((ix) => ix.programAddress === CP_AMM_PROGRAM_ADDRESS);
+    const named = (swap!.accounts ?? []).map((a) => a.address);
+    expect(named[1]).toBe(dammPool);
+    // Heat's referral account takes Meteora's referral share on the graduated pool too.
+    expect(named).toContain(await referralAccountOf(devnet.keys!.treasury, devnet.quote.mint));
+    expect(getDammSwap2InstructionDataDecoder().decode(swap!.data!).params).toEqual({ amount0: SOL / 10n, amount1: BigInt(quote.minimumOut), swapMode: 0 });
+  });
+
   it("is built only for coins launched through Heat", async () => {
     const around = random();
     await db.insert(pools).values({
@@ -247,7 +353,8 @@ describe("a quick trade", () => {
     fakes.accounts.set(wallet, { owner: "11111111111111111111111111111111", data: new Uint8Array(), lamports: SOL / 10n });
     const res = await swapOf({ side: "buy", amount: `${SOL / 10n}`, slippageBps: 100, wallet });
     expect(res.status).toBe(400);
-    expect(await errorOf(res)).toBe("This wallet holds 0.1 SOL; the buy needs 0.10408856 SOL, with its accounts' rent and the network fee.");
+    // Two accounts' rent as the cluster charges it, 1,488,440 lamports each, and the network fee.
+    expect(await errorOf(res)).toBe("This wallet holds 0.1 SOL; the buy needs 0.10298688 SOL, with its accounts' rent and the network fee.");
   });
 
   it("says what a wallet holds to trade with", async () => {

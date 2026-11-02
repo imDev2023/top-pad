@@ -247,6 +247,75 @@
   background: var(--go);
 }
 
+/* After Graduation: the checkered flag, then what the coin trades on and what keeps its liquidity */
+.graduated {
+  gap: 14px;
+}
+
+.gradFlag {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+}
+
+.gradFlag p {
+  margin: 2px 0 0;
+}
+
+.flagCloth {
+  width: 44px;
+  height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+}
+
+.gradFacts {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.gradFacts div {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 12px;
+  align-items: baseline;
+}
+
+.gradFacts dt {
+  color: var(--muted);
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.gradFacts dd {
+  margin: 0;
+  min-width: 0;
+}
+
+@media (max-width: 560px) {
+  .gradFacts div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+}
+
+.graduatedChip {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.graduatedChip i {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+}
+
 /* Quick trade above the coin's facts, beside the chart */
 .side {
   display: grid;

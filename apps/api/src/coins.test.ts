@@ -5,7 +5,7 @@ import { getBase58Encoder } from "@solana/kit";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { CLUSTERS } from "@top-pad/chain";
 import { Coin, CoinCandles, CoinTrades } from "@top-pad/contract";
-import { createDb, pools, type Db } from "@top-pad/db";
+import { createDb, graduations, pools, type Db } from "@top-pad/db";
 import { createTestDatabase } from "@top-pad/db/testing";
 import { foldTrade, heatHandler, indexTransactions, type RawTransaction } from "@top-pad/indexer";
 import { app } from "./index";
@@ -80,6 +80,7 @@ describe("a coin's page", () => {
       tax: { cliffNumerator: "989999960", reductionPerPeriod: "16291666", periodSeconds: 1, periods: 60, denominator: "1000000000" },
     });
     expect(Number(coin.market.marketCap)).toBeCloseTo(3.708873955, 8);
+    expect(coin.graduation).toBeNull();
     expect(calls).toEqual(["getProgramAccounts"]);
 
     // The count stands for a minute.
@@ -92,6 +93,49 @@ describe("a coin's page", () => {
     vi.stubGlobal("fetch", async () => new Response("down", { status: 503 }));
     const coin = Coin.parse(await (await request(`/coins/${MINT}`)).json());
     expect(coin.market.holders).toBe(4);
+  });
+
+  it("says when its curve completed, and once it has graduated, its DAMM v2 pool, its fee and its locked positions (#51)", async () => {
+    await db.update(pools).set({ curveCompletedAt: new Date(1_793_300_000_000), quoteReserve: 8_500_000_000n, holders: 1, holdersCountedAt: new Date() });
+    const completed = Coin.parse(await (await request(`/coins/${MINT}`)).json());
+    expect(completed.graduation).toEqual({ completedAt: new Date(1_793_300_000_000).toISOString(), surplus: null, graduated: null });
+
+    const graduation = 120_258_058_333_485_015n;
+    await db.insert(graduations).values({
+      mint: MINT,
+      curvePool: POOL,
+      pool: "4jxAv3LiE7NprE4oT5ouiBQEziBR3ZFqbGn2sqRqZRyu",
+      config: CLUSTERS.devnet!.configs!.instant,
+      signature: "WGUuif2coNGXtkstV3wQPkJ3dVSA1a8Q5MYV6zkeFy9EFDWSQCef5MRjheFvWVFb7tZwNXAHLcXRC7NXBgytU9L",
+      slot: 2,
+      graduatedAt: new Date(1_793_300_010_000),
+      sqrtPrice: `${graduation}`,
+      creatorPosition: "5p6cnsZgtiCdNt6f883wmmBLwtKKjhsGaYpnFi8Fqwa3",
+      creatorPositionNftMint: "EqSFT6TmVY1fY8k79J6DoEjY7kKZT5vRXMr6c26j8yxi",
+      creatorPositionOwner: "923oSKVPTAdwojxpNBjMsbLwUg8bKTPMEp3LGWn7EDus",
+      creatorLiquidity: "1",
+      heatPosition: "5mH7gGn38uVnCwdHmVMCKrttcX6Zs913VWjDAp2FNYDv",
+      heatPositionNftMint: "4t6T34BF62mjCX21AZUWNxjvjA2zVtmTniWHArzeZje4",
+      heatLiquidity: "1",
+      leftoverBurnt: 800_004n,
+      leftoverSignature: "burn",
+    });
+    // Its price two 9% steps above Graduation, where the fee has stepped down to 1.23%.
+    await db.update(pools).set({ sqrtPrice: `${(graduation * 119n) / 100n}`, surplusCreatorAmount: 0n, surplusTreasuryAmount: 0n, surplusSignature: "split" });
+    const coin = Coin.parse(await (await request(`/coins/${MINT}`)).json());
+    expect(coin.graduation).toMatchObject({
+      surplus: { creator: "0", treasury: "0" },
+      graduated: {
+        at: new Date(1_793_300_010_000).toISOString(),
+        pool: "4jxAv3LiE7NprE4oT5ouiBQEziBR3ZFqbGn2sqRqZRyu",
+        feeBps: 123,
+        positions: { creator: { owner: "923oSKVPTAdwojxpNBjMsbLwUg8bKTPMEp3LGWn7EDus" }, heat: { position: "5mH7gGn38uVnCwdHmVMCKrttcX6Zs913VWjDAp2FNYDv" } },
+        leftoverBurnt: "800004",
+      },
+    });
+    expect(coin.graduation!.graduated!.explorer.migration).toMatch(/\/tx\/WGUuif2c/);
+    await db.delete(graduations);
+    await db.update(pools).set({ curveCompletedAt: null, quoteReserve: 100_000n, sqrtPrice: "35525545851457242", surplusCreatorAmount: null, surplusTreasuryAmount: null, surplusSignature: null });
   });
 
   it("is not found for a mint that is no coin of Heat's", async () => {

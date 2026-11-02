@@ -3,9 +3,10 @@
 import type { Coin, LiveBatch, Trade } from "@top-pad/contract";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { coinLiveUrl, getCoin, getCoinTrades } from "@/lib/api";
-import { ago, coinAmount, compactNumber, shortAddress, sol, solAmount } from "@/lib/format";
+import { ago, coinAmount, compactNumber, shortAddress } from "@/lib/format";
 import { CandleChart, type ChartFeed } from "./CandleChart";
 import styles from "./Coin.module.css";
+import { GraduationPanel } from "./GraduationPanel";
 import { QuickTrade } from "./QuickTrade";
 import { TaxBand } from "./TaxBand";
 import { TradeList } from "./TradeList";
@@ -129,6 +130,12 @@ export function CoinPage({ initial }: { initial: Coin }) {
       const landed = batch.events.flatMap((e) => (e.type === "trade" && e.mint === mint ? [e.trade] : []));
       merge(landed, { live: true });
       chart.current?.add(landed);
+      // A Graduation moving on: the coin again, for its new pool and how it stands.
+      if (batch.events.some((e) => e.type === "graduation" && e.mint === mint)) {
+        void getCoin(mint)
+          .then((latest) => setCoin((c) => ({ ...c, graduation: latest.graduation, explorer: latest.explorer })))
+          .catch(() => undefined);
+      }
       for (const e of batch.events) {
         if (e.type !== "window_claim" || e.mint !== mint) continue;
         setCoin((c) => ({ ...c, windowClaim: e.windowClaim }));
@@ -171,7 +178,6 @@ export function CoinPage({ initial }: { initial: Coin }) {
   }, [coin.explorer.mint]);
   const opened = Date.parse(coin.activatedAt);
   const taxEnds = opened + coin.tax.periods * coin.tax.periodSeconds * 1000;
-  const progress = Math.min(1, Number(coin.market.quoteReserve) / Number(coin.market.graduationTarget));
   const initials = (coin.ticker || coin.name || "?").slice(0, 2).toUpperCase();
 
   return (
@@ -191,6 +197,12 @@ export function CoinPage({ initial }: { initial: Coin }) {
             </h1>
             <div className="row">
               {coin.heat && <span className="chip chip-neutral">{coin.launchMode === "fair_open" ? "Fair Open" : "Instant launch"}</span>}
+              {coin.graduation?.graduated && (
+                <span className={`chip chip-neutral ${styles.graduatedChip}`} data-testid="coin-graduated-flag">
+                  <i className="checkered" aria-hidden="true" />
+                  Graduated
+                </span>
+              )}
               {coin.creator.handle && <span className="chip chip-info">@{coin.creator.handle}</span>}
               <a className={`mono note ${styles.mint}`} href={coin.explorer.mint} target="_blank" rel="noreferrer" title={coin.mint}>
                 {shortAddress(coin.mint)}
@@ -234,21 +246,7 @@ export function CoinPage({ initial }: { initial: Coin }) {
       <div className={styles.layout}>
         <div className={styles.main}>
           <CandleChart mint={mint} ageSeconds={(now + offsetMs - opened) / 1000} supply={supply} ref={chart} />
-          <section className={`panel ${styles.graduation}`} aria-label="Graduation">
-            <div className="spread">
-              <b>To Graduation</b>
-              <span className="num note">
-                {Number(coin.market.quoteReserve) === 0 ? "0" : solAmount(coin.market.quoteReserve, 3)} of {sol(coin.market.graduationTarget, 2)} SOL
-              </span>
-            </div>
-            <div className={styles.gradBar} role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress * 100)} aria-label="Toward Graduation">
-              <div className={styles.gradTrack}>
-                <i style={{ width: `${progress * 100}%` }} />
-              </div>
-              <div className="checkered" title="Graduation" />
-            </div>
-            <p className="note">At {sol(coin.market.graduationTarget, 2)} SOL the coin moves to a Meteora pool, its liquidity locked forever.</p>
-          </section>
+          <GraduationPanel coin={coin} />
         </div>
 
         <div className={styles.side}>
@@ -300,8 +298,13 @@ export function CoinPage({ initial }: { initial: Coin }) {
                 Coin
               </a>
               <a href={coin.explorer.pool} target="_blank" rel="noreferrer">
-                Pool
+                {coin.graduation?.graduated ? "Curve" : "Pool"}
               </a>
+              {coin.graduation?.graduated && (
+                <a href={coin.graduation.graduated.explorer.pool} target="_blank" rel="noreferrer">
+                  DAMM v2 pool
+                </a>
+              )}
               {coin.heat && (
                 <a href={coin.metadataUri} target="_blank" rel="noreferrer">
                   Metadata on Arweave

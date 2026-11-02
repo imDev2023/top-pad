@@ -28,7 +28,8 @@ type Claim =
 
 /**
  * A wallet's Creator Earnings (spec 4, 7): what waits in each Heat coin whose creator role it holds, read from the chain,
- * and one claim of it all, which pays exactly the amounts shown. A claim the wallet signs is sent by the wallet, and the
+ * with a graduated coin's LP fees from its Meteora pool, and one claim of it all, which pays the amounts shown (LP fees
+ * that accrue meanwhile come too). A claim the wallet signs is sent by the wallet, and the
  * API then reads what it paid from the chain.
  */
 export function EarningsPanel({ account, chain }: { account: UiWalletAccount; chain: SolanaChain }) {
@@ -141,7 +142,14 @@ function CoinRow({ coin }: { coin: EarningsCoin }) {
       <span className={styles.cell}>
         <span className={`eyebrow ${styles.label}`}>Waiting</span>
         {coin.windowClaimed ? (
-          <span className="num">{amount(coin.waiting)}</span>
+          <span className={styles.waitingCell}>
+            <span className="num">{amount(coin.waiting)}</span>
+            {BigInt(coin.lpFees) > 0n && (
+              <span className="note" data-testid="earnings-lp-fees">
+                with <span className="num">{amount(coin.lpFees)}</span> of LP fees from its Meteora pool
+              </span>
+            )}
+          </span>
         ) : (
           <span className="chip chip-caution" title="Heat's keeper claims the first minute's tax for the treasury when the minute ends; your half of every fee after it waits here from then.">
             First minute&apos;s claim pending
@@ -184,7 +192,7 @@ function ClaimButton({
       onClaim({ phase: "preparing" });
       const prepared = await prepareClaim(
         account.address,
-        coins.map((coin) => ({ mint: coin.mint, partnerFees: coin.partnerFees })),
+        coins.map((coin) => ({ mint: coin.mint, partnerFees: coin.partnerFees, lpFees: coin.lpFees })),
       );
       if (prepared.pays !== total) throw new Error(`the claim would pay ${amount(prepared.pays)}, not the ${amount(total)} shown`);
       onClaim({ phase: "signing" });

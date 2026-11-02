@@ -3,10 +3,20 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { address, decompileTransactionMessage, getAddressDecoder, getCompiledTransactionMessageDecoder, type Address } from "@solana/kit";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { CLUSTERS, FEE_PROGRAM_ADDRESS } from "@top-pad/chain";
+import { CLUSTERS, FEE_PROGRAM_ADDRESS, positionAddresses } from "@top-pad/chain";
+import {
+  getPoolDecoder,
+  getPoolEncoder,
+  getPoolSize,
+  getPositionDecoder,
+  getPositionEncoder,
+  getPositionSize,
+  POOL_DISCRIMINATOR,
+  POSITION_DISCRIMINATOR,
+} from "@top-pad/clients/damm-v2";
 import { CLAIM_FEES_DISCRIMINATOR, findCoinRecordPda } from "@top-pad/clients/fee";
 import { ClaimOutcome, CreatorEarnings, PreparedClaim } from "@top-pad/contract";
-import { coins, createDb, feeClaims, type Db } from "@top-pad/db";
+import { coins, createDb, feeClaims, graduations, type Db } from "@top-pad/db";
 import { createTestDatabase } from "@top-pad/db/testing";
 import type { RawTransaction } from "@top-pad/indexer";
 import { app } from "./index";
@@ -38,6 +48,7 @@ beforeEach(async () => {
   vi.stubGlobal("fetch", fakes.fetch);
   await db.delete(coins);
   await db.delete(feeClaims);
+  await db.delete(graduations);
 });
 afterEach(() => vi.unstubAllGlobals());
 
@@ -97,6 +108,62 @@ describe("a wallet's Creator Earnings", () => {
 
   it("refuses an address that is not one", async () => {
     expect((await request("/earnings/not-a-wallet")).status).toBe(400);
+  });
+});
+
+describe("a graduated coin's LP fees (#51)", () => {
+  /** The coin graduated, the creator's position NFT with `owner`, `accrued` lamports of fees on it. */
+  async function graduated(c: { mint: Address; pool: Address }, owner: Address, accrued: bigint) {
+    const dammPool = random();
+    const nftMint = random();
+    await db.insert(graduations).values({
+      mint: c.mint,
+      curvePool: c.pool,
+      pool: dammPool,
+      config: devnet.configs!.instant,
+      signature: `migration-${c.mint}`,
+      slot: 2,
+      graduatedAt: new Date(),
+      sqrtPrice: "1",
+      creatorPosition: random(),
+      creatorPositionNftMint: nftMint,
+      creatorPositionOwner: owner,
+      creatorLiquidity: "1",
+      heatPosition: random(),
+      heatPositionNftMint: random(),
+      heatLiquidity: "1",
+    });
+    const blank = (size: number, discriminator: ArrayLike<number>) => Uint8Array.from({ length: size }, (_, i) => (i < 8 ? discriminator[i]! : 0));
+    const { position } = await positionAddresses(nftMint);
+    const damm = "cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG";
+    fakes.accounts.set(dammPool, { owner: damm, data: new Uint8Array(getPoolEncoder().encode(getPoolDecoder().decode(blank(getPoolSize(), POOL_DISCRIMINATOR)))) });
+    const state = { ...getPositionDecoder().decode(blank(getPositionSize(), POSITION_DISCRIMINATOR)), pool: dammPool, nftMint, feeBPending: accrued };
+    fakes.accounts.set(position, { owner: damm, data: new Uint8Array(getPositionEncoder().encode(state)) });
+    return { dammPool, position };
+  }
+
+  it("shows what the creator's position has accrued, and claims it with the curve earnings in one transaction", async () => {
+    const ember = await coin({ creator: WALLET, partnerQuoteFee: 1_000n, record: "window claimed", name: "ember" });
+    const { position } = await graduated(ember, WALLET, 7_777n);
+    const earnings = CreatorEarnings.parse(await (await request(`/earnings/${WALLET}`)).json());
+    expect(earnings.coins).toEqual([expect.objectContaining({ mint: ember.mint, partnerFees: "1000", lpFees: "7777", waiting: "8277" })]);
+
+    const prepared = PreparedClaim.parse(await (await post(`/earnings/${WALLET}/claim`, { claims: [{ mint: ember.mint, partnerFees: "1000", lpFees: "7777" }] })).json());
+    expect(prepared).toMatchObject({ pays: "8277", coins: [{ mint: ember.mint, pays: "8277" }] });
+    const message = decompileTransactionMessage(getCompiledTransactionMessageDecoder().decode(decode(prepared.transactions[0]!).messageBytes));
+    expect(message.instructions.some((ix) => ix.programAddress === FEE_PROGRAM_ADDRESS)).toBe(true);
+    const [lp] = message.instructions.filter((ix) => ix.programAddress === "cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG");
+    expect((lp!.accounts ?? []).map((a) => a.address)).toContain(position);
+    // LP fees claimed meanwhile are refused, as a stale figure is.
+    const stale = await post(`/earnings/${WALLET}/claim`, { claims: [{ mint: ember.mint, partnerFees: "1000", lpFees: "9000" }] });
+    expect(stale.status).toBe(409);
+  });
+
+  it("are not the wallet's once the creator's position NFT is someone else's", async () => {
+    const ember = await coin({ creator: WALLET, partnerQuoteFee: 1_000n, record: "window claimed", name: "ember" });
+    await graduated(ember, random(), 7_777n);
+    const earnings = CreatorEarnings.parse(await (await request(`/earnings/${WALLET}`)).json());
+    expect(earnings.coins).toEqual([expect.objectContaining({ lpFees: "0", waiting: "500" })]);
   });
 });
 

@@ -10,8 +10,10 @@ import {
   fairOpens,
   fairOpenSeatEvents,
   feeClaims,
+  graduations,
   indexedTransactions,
   launches,
+  lpFeeClaims,
   pools,
   trades,
   windowClaims,
@@ -36,7 +38,7 @@ beforeAll(async () => {
 });
 afterAll(() => cleanup());
 beforeEach(async () => {
-  for (const table of [candles, trades, coins, launches, creators, pools, indexedTransactions, windowClaims, feeClaims, fairOpens, fairOpenSeatEvents]) {
+  for (const table of [candles, trades, coins, launches, creators, pools, indexedTransactions, windowClaims, feeClaims, fairOpens, fairOpenSeatEvents, graduations, lpFeeClaims]) {
     await db.delete(table);
   }
 });
@@ -256,6 +258,89 @@ describe("indexing a Fair Open", () => {
     expect(await db.select().from(indexedTransactions)).toEqual([]);
     expect(await indexTransactions(db, handle, [fixture("fair-open-late-created"), fixture("fair-open-late")])).toEqual({ transactions: 2, fairOpen: 2 });
     expect((await db.select().from(fairOpens))[0]).toMatchObject({ status: "failed", failure: "late" });
+  });
+});
+
+describe("indexing a Graduation", () => {
+  // Recorded on devnet's rehearsal config (decode.test.ts says which), indexed here as if it were one of Heat's configs.
+  const REHEARSAL = heat.rehearsal!;
+  const MINT = "9Rn22SUjuoJJJoeDrDVhNvokdEr1hFBW31ArLkLxSTxC";
+  const CURVE = "3C6upx6nivHsQkoPVjryf2t6whknLHHuvJn8b154EEh6";
+  const DAMM_POOL = "4jxAv3LiE7NprE4oT5ouiBQEziBR3ZFqbGn2sqRqZRyu";
+  const rehearsalHandler = () => {
+    const published: Indexed[] = [];
+    const handle = heatHandler({
+      heat: { ...heat, configs: { instant: REHEARSAL, fairOpen: heat.configs!.fairOpen } },
+      blockIndexOf: async () => 5,
+      onIndexed: (indexed) => void published.push(indexed),
+    });
+    return { handle, published };
+  };
+  /** The coin's pool, as the indexer would have written it from its launch. */
+  async function curvePool() {
+    await db.insert(pools).values({
+      pool: CURVE,
+      mint: MINT,
+      config: REHEARSAL,
+      creator: "923oSKVPTAdwojxpNBjMsbLwUg8bKTPMEp3LGWn7EDus",
+      name: "Heat Graduation Test",
+      ticker: "HEATGRAD",
+      uri: "https://turbo-gateway.com/heat-devnet-graduation-test",
+      activatedAt: new Date(1_793_597_200_000),
+      createdSignature: "launch",
+      createdSlot: 1,
+      createdAt: new Date(1_793_597_200_000),
+      sqrtPrice: "6092491434681104",
+      quoteReserve: 0n,
+    });
+  }
+
+  it("records the curve completing, the Graduation, the surplus, the leftover, the graduated pool's trades and the LP fee claims", async () => {
+    await curvePool();
+    const { handle, published } = rehearsalHandler();
+    await indexTransactions(db, handle, [fixture("graduation-completing-buy")]);
+    expect((await db.select().from(pools))[0]!.curveCompletedAt).not.toBeNull();
+    expect(published.at(-1)!.curveCompletes).toEqual([expect.objectContaining({ mint: MINT, pool: CURVE })]);
+
+    expect(await indexTransactions(db, handle, [fixture("graduation-migration")])).toEqual({ transactions: 1, graduation: 1 });
+    const [graduation] = await db.select().from(graduations);
+    expect(graduation).toMatchObject({
+      mint: MINT,
+      curvePool: CURVE,
+      pool: DAMM_POOL,
+      config: REHEARSAL,
+      sqrtPrice: "20624086856177974",
+      creatorPosition: "5p6cnsZgtiCdNt6f883wmmBLwtKKjhsGaYpnFi8Fqwa3",
+      creatorPositionOwner: "923oSKVPTAdwojxpNBjMsbLwUg8bKTPMEp3LGWn7EDus",
+      heatPosition: "5mH7gGn38uVnCwdHmVMCKrttcX6Zs913VWjDAp2FNYDv",
+      leftoverBurnt: null,
+    });
+    await indexTransactions(db, handle, [fixture("graduation-surplus"), fixture("graduation-leftover")]);
+    expect((await db.select().from(pools))[0]).toMatchObject({ surplusCreatorAmount: 0n, surplusTreasuryAmount: 0n });
+    expect((await db.select().from(graduations))[0]).toMatchObject({ leftoverBurnt: 800_004n });
+
+    // The graduated pool's trades are the coin's, and its price and quote reserve follow them.
+    await indexTransactions(db, handle, [fixture("graduated-buy"), fixture("graduated-sell")]);
+    const coinTrades = await db.select().from(trades).where(eq(trades.mint, MINT));
+    expect(coinTrades.filter((t) => t.pool === DAMM_POOL).map((t) => t.side).sort()).toEqual(["buy", "sell"]);
+    const [pool] = await db.select().from(pools);
+    const latest = coinTrades.reduce((a, b) => (BigInt(b.orderKey) > BigInt(a.orderKey) ? b : a));
+    expect({ sqrtPrice: pool!.sqrtPrice, quoteReserve: pool!.quoteReserve }).toEqual({ sqrtPrice: latest.sqrtPrice, quoteReserve: latest.quoteReserve });
+
+    await indexTransactions(db, handle, [fixture("graduated-heat-lp-claim"), fixture("graduated-creator-claim")]);
+    const claims = await db.select().from(lpFeeClaims);
+    expect(claims.map((c) => [c.owner, c.quoteAmount]).sort()).toEqual([
+      ["4Garg7N38ShAr8z38ZKkHrgP9Lj5nRKiy3HGtNDqTpko", 1_396_533n],
+      ["923oSKVPTAdwojxpNBjMsbLwUg8bKTPMEp3LGWn7EDus", 1_396_534n],
+    ]);
+  });
+
+  it("leaves a leftover burnt before its Graduation was seen for reconciliation, which finds the Graduation first", async () => {
+    await curvePool();
+    const { handle } = rehearsalHandler();
+    await expect(indexTransactions(db, handle, [fixture("graduation-leftover")])).rejects.toThrow(IndexBatchError);
+    await indexTransactions(db, handle, [fixture("graduation-migration"), fixture("graduation-leftover")]);
+    expect((await db.select().from(graduations))[0]).toMatchObject({ leftoverBurnt: 800_004n });
   });
 });
 
