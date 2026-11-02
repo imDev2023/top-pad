@@ -126,22 +126,24 @@ type CoinGeckoCoin = { id: string; symbol: string; name: string; image?: string 
 const COINGECKO_TRIES = 3;
 const COINGECKO_RETRY_MS = 30_000;
 
-export async function coinGeckoTop(pauseMs = 3_000, retryMs = COINGECKO_RETRY_MS): Promise<Listed[]> {
+export async function coinGeckoTop(pauseMs = 3_000, retryMs = COINGECKO_RETRY_MS, apiKey: string | null = null): Promise<Listed[]> {
   const listed: Listed[] = [];
   const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  // A Demo key (free, made by the owner on CoinGecko) has a limit of its own; without one, requests share the address's.
+  const headers: Record<string, string> = { accept: "application/json", "user-agent": USER_AGENT, ...(apiKey ? { "x-cg-demo-api-key": apiKey } : {}) };
   for (let page = 1; page <= 4; page++) {
     if (page > 1) await wait(pauseMs);
     let res: Response | undefined;
     // Keyless, CoinGecko limits by address, and a Worker shares its addresses with many others: a 429 is asked again
-    // after the wait it names, or half a minute, up to three tries.
+    // after at least half a minute (longer if it says so), since its limit is by the minute, up to three tries.
     for (let attempt = 1; attempt <= COINGECKO_TRIES; attempt++) {
       res = await fetch(`${COINGECKO}/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page=${page}`, {
-        headers: { accept: "application/json", "user-agent": USER_AGENT },
+        headers,
         signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       });
       if (res.status !== 429 || attempt === COINGECKO_TRIES) break;
       const after = Number(res.headers.get("retry-after"));
-      await wait(Number.isFinite(after) && after > 0 ? Math.min(after * 1000, 90_000) : retryMs);
+      await wait(Math.max(retryMs, Number.isFinite(after) && after > 0 ? Math.min(after * 1000, 90_000) : 0));
     }
     if (!res!.ok) throw new Error(`CoinGecko answered ${res!.status} for page ${page}`);
     const body = (await res!.json()) as CoinGeckoCoin[];
@@ -462,7 +464,7 @@ export async function refreshLists(db: Db, cfg: Config, env: Bindings, opts: { c
       .from(protectedCoins)
       .where(eq(protectedCoins.source, "coingecko_top"));
     if (last && Date.now() - new Date(last).getTime() < 23 * 3_600_000) return { due: false };
-    const listed = await coinGeckoTop(opts.coinGeckoPauseMs, opts.coinGeckoRetryMs);
+    const listed = await coinGeckoTop(opts.coinGeckoPauseMs, opts.coinGeckoRetryMs, await secret(env.COINGECKO_API_KEY));
     await upsertListed(db, "coingecko_top", listed);
     return { listed: listed.length };
   });

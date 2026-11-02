@@ -125,6 +125,16 @@ describe("CoinGecko's limit", () => {
     tries = -10;
     await expect(coinGeckoTop(0, 0)).rejects.toThrow("CoinGecko answered 429 for page 1");
   });
+
+  it("sends a Demo key when there is one", async () => {
+    const keys: (string | null)[] = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      keys.push(new Request(input, init).headers.get("x-cg-demo-api-key"));
+      return Response.json([]);
+    });
+    await coinGeckoTop(0, 0, "cg-demo-key");
+    expect(keys).toEqual(["cg-demo-key", "cg-demo-key", "cg-demo-key", "cg-demo-key"]);
+  });
 });
 
 describe("the hourly refresh", () => {

@@ -65,6 +65,11 @@ export type Bindings = {
    * locally; without one the lists are read keyless, at Jupiter's lower rate.
    */
   JUPITER_API_KEY?: SecretBinding | string;
+  /**
+   * A CoinGecko Demo key, for its top 1,000 (spec 6.2): keyless, CoinGecko limits a Worker's shared addresses, and on
+   * devnet answered every daily read 429 (2026-11-02); unset until the owner makes one.
+   */
+  COINGECKO_API_KEY?: SecretBinding | string;
   /** The keeper's Workflow for each Instant launch, keyed by its coin (spec 10.2): its window claim at 60 s. */
   INSTANT_LAUNCHES?: Workflow<KeeperParams>;
   /** The keeper's Workflow for each Fair Open, keyed by its launch account (spec 10.2): the upload, the open, the pushes. */
