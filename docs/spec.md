@@ -574,6 +574,16 @@ After the open, Bundle Radar only labels, each label with its evidence linked:
 
 Labels never move a coin's ranking (section 8).
 
+As built ([#53](https://github.com/imDev2023/top-pad/issues/53), 2026-11-02):
+- Labels are worked out from what the indexer wrote, so they follow the chain and never disagree with it: `radarOf` in `@top-pad/indexer`, served at `GET /coins/<mint>/radar`.
+- The indexer records each transaction's signers, the fee payer first, and the place in its block of every transaction that creates a pool, not only of one with trades, so the positions after a coin's creation are counted from its creation transaction.
+- The Fair Open pot's own buy, inside the creation transaction, is the labelled keeper's and never a label.
+- The funding graph is read from the Creator wallet's own history, since every direct transfer with a buyer names it: lamports by the System program's `transfer`, and any token by the Token programs' `transfer` and `transferChecked`, from the sending account's authority to the receiving account's owner, inner instructions included; a wallet wrapping its own SOL is no transfer.
+  Scans keep one unbroken stretch of the wallet's history in `funding_scans`, going on from where the last stopped, and space their reads 250 ms apart, so they never crowd launches and trades on Helius's free tier.
+- As a coin launches, and as it is bought in its first hour, the indexer reads its Creator wallet's window on (at most 40 transactions a time) and tells the coin's live room, whose page reads the labels again; a launch or buy indexed more than 10 minutes late, as reconciliation catching up indexes them, is left to the case job, so catching up never floods the RPC.
+- On the coin page, wallets directly linked to the Creator wallet are a red flag with the share of supply they bought, and same-slot buys with no link a yellow one (section 9); the Creator wallet's own buys are labelled with the yellow ones.
+- Jito's record is read from its public API (`bundles.jito.wtf`, no key, 404 for a transaction in no bundle) on mainnet only, for the creation and its slot's buys.
+
 ### 6.5 Confirmed bundling and bars
 
 Source: [Confirmed bundling](https://github.com/imDev2023/top-pad/issues/34).
@@ -593,6 +603,11 @@ Source: [Confirmed bundling](https://github.com/imDev2023/top-pad/issues/34).
   An upheld appeal lifts the Bar and removes the finding from the public record; the audit log keeps it.
 - **A Bar never expires and only stops new launches**: it bars the X account, the Creator wallet and any World ID nullifier from launching; Creator Earnings keep flowing, the Creator lock keeps vesting, existing coins keep trading with the finding shown; a barred Creator may still trade and deposit in other creators' Fair Opens.
 - The "How this is enforced" page publishes the counts of bars, appeals and overturned findings.
+
+As built ([#53](https://github.com/imDev2023/top-pad/issues/53), 2026-11-02):
+- The floor counts what the linked wallets other than the Creator wallet bought in the first hour, and what their seats in the coin's Fair Open bought at the open; the Creator wallet's own open buys and its own seat, the Creator lock, are never counted, since the floor targets hidden buying only ([Confirmed bundling](https://github.com/imDev2023/top-pad/issues/34)).
+- A wallet is linked by any one direct link, and then every buy of its in the 7 days after the open is evidence; one with only same-slot buys stays a label, and the case's evidence pack never names it.
+- One case per coin, in `bundle_cases` with its evidence pack, the same pack in R2 at `bundle-radar/cases/<mint>.json`; it stays open for an operator ([#54](https://github.com/imDev2023/top-pad/issues/54), [#56](https://github.com/imDev2023/top-pad/issues/56)), and no case is ever shown on a public page.
 
 ### 6.6 The operator queue
 
@@ -660,6 +675,8 @@ The screens:
    On the deployed site the fee shown before signing was within one 1-second step of what the chain charged on every trade, and exact on most.
    A trade's minimum is set by the fee of two seconds before the quote's clock, since a wallet's own node may simulate it that far behind, where the tax is higher: without that, the public devnet endpoint's preflight refused a buy.
    Quick trade is built only for Heat coins; a pool made around Heat's flow gets none.
+   As built ([#53](https://github.com/imDev2023/top-pad/issues/53)): Bundle Radar's flags sit in a strip under the coin's head, above the sniper tax and the chart: red for wallets linked to the creator, yellow for same-slot buys, or "Nothing labelled"; each opens its evidence below the strip, every buy, deposit and transfer linked on the explorer.
+   Coin rows come with the board ([#57](https://github.com/imDev2023/top-pad/issues/57)), which shows the same flags from the same route.
 4. **Launch flow**: link X; Fair Open (preselected) or Instant launch; the coin with live Vamp Shield verdicts (clear, "looks like X", refused with an appeal link); schedule (time up to 7 days ahead, minimum raise, teaser, about 0.03 SOL refundable rent); sign; done.
    As built ([#47](https://github.com/imDev2023/top-pad/issues/47)): `/launch` walks a Fair Open through Link X, Launch mode, Coin, Schedule, Sign and Done; the schedule starts now or later (a local date and time, up to 7 days ahead), with the coin's open time beside it, the calendar entry previewed live, and refusals said as typed; signing is one button, "Sign your open in advance", with the 64 rungs behind a details link and the fallback beside them; Done says when the coin opens and, after the fallback, when to come back. The Fair Open's page shows the creator who signs at the open a panel that asks for that one signature once the window closes.
 5. **Creator record**: the facts in section 7, Creator wallet history, the verified-human and verified-creator marks, Creator Earnings from both sources with one claim, and for a barred Creator the banner, evidence pack and appeal history; the accused creator's private 72-hour view with a reply box.
@@ -779,6 +796,8 @@ Sources: [Stack](https://github.com/imDev2023/top-pad/issues/17), [Backend desig
 - **Vision service**: PDQ (all 8 orientations) and SSCD on CPU in one Python Container behind a Durable Object, asleep when idle; signatures in Postgres (PDQ `bit(256)` with a Hamming HNSW index, SSCD `vector(512)` with a cosine HNSW index).
   The protected set refreshes from Jupiter's trending endpoints every minute, its verified and organic lists hourly, CoinGecko's top 1,000 daily, and our own coins as they cross the protection bar.
 - **Bundle Radar**: labels from the indexer within seconds; one hour after each open a job builds the evidence pack (positions, Jito bundle membership on mainnet from Jito's public API, each linked buyer's direct transfers over the previous 7 days) and opens a case if it meets section 6.5's rules.
+  As built ([#53](https://github.com/imDev2023/top-pad/issues/53), 2026-11-02): the job runs in the 5-minute cron (`bundle-radar`), not a Workflow per coin: each Heat coin is reviewed in the first run after its first hour ends, newest coins first, and every coin without a case again each hour until its 7 days after the open are over, since proceeds sent back to the Creator wallet link a wallet too.
+  A review first reads the Creator wallet's window through; a busy wallet, such as devnet's bank, which creates and funds the test coins, takes several runs, each reading at most 300 transactions, and its coins wait meanwhile (`bundle_reviews` records each review).
 - **Operator app**: its own Worker behind Cloudflare Access (free for up to 50 users), never a route of the public site; every operator action writes an audit row through a database role that can only insert; the audit log is exported to R2 daily; evidence packs are stored with their case.
 - **Cohort tap**: gives each cohort member 1 devnet SOL once.
 
@@ -799,6 +818,7 @@ Sources: [Stack](https://github.com/imDev2023/top-pad/issues/17), [Backend desig
 
 - Postgres is the only system of record: launches, seats, coins, pools, trades, candles, transfers (the funding graph), the co-signed list mirror, creators (X account, Creator wallet history, World ID nullifier), admissions, protected coins and their signatures, the known-bot list, cases, appeals, bars, the audit log, job runs and indexer cursors.
 - R2 holds blobs: an Arweave image cache, Fairness card images, evidence pack and audit exports.
+  As built ([#53](https://github.com/imDev2023/top-pad/issues/53)): the funding graph is `transfers`, every direct transfer to or from a Creator wallet in its coins' windows, with `funding_scans` saying how far each wallet's history is read; Jito's record is `jito_bundles`; reviews and cases are `bundle_reviews` and `bundle_cases`.
 - KV holds only public caches (up to 60 s stale).
 - Durable Object storage holds only live-room state; D1 is not used.
 - One Neon project for devnet **(owner, 2026-10-27)**: Supabase's free plan allows two active projects and both are Stoker's; Convex was weighed and set aside, because the board's trending query, the funding graph, the candle rebuilds and the insert-only audit role are SQL.
