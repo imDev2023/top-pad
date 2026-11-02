@@ -210,15 +210,19 @@ describe.skipIf(!existsSync(keeperFile) || !existsSync(bankFile))("Graduation on
         for (const p of positions) {
           expect(p.held).toBe(1n);
           expect(p.state.pool).toBe(dammPool);
-          expect(p.state.unlockedLiquidity).toBe(0n);
+          // DBC's split rounds, and may leave a single unit of liquidity (of about 10^30) unlocked: worth no coin and no
+          // lamport at any price in the pool's range, as the refused withdrawal below shows.
+          expect(p.state.unlockedLiquidity).toBeLessThanOrEqual(1n);
           expect(p.state.vestedLiquidity).toBe(0n);
-          expect(p.state.permanentLockedLiquidity).toBeGreaterThan(0n);
+          expect(p.state.permanentLockedLiquidity).toBeGreaterThan(10n ** 20n);
         }
         expect(graduated.permanentLockLiquidity).toBe(positions.reduce((sum, p) => sum + p.state.permanentLockedLiquidity, 0n));
+        console.log(`positions: ${positions.map((p) => `${p.owner === FEE_CLAIMER_ADDRESS ? "Heat" : "creator"} locked ${p.state.permanentLockedLiquidity}, unlocked ${p.state.unlockedLiquidity}`).join("; ")}`);
         // Each half is half, to within DAMM v2's rounding.
         const [a, b] = positions.map((p) => p.state.permanentLockedLiquidity);
         expect(Number(a! > b! ? a! - b! : b! - a!) / Number(a!)).toBeLessThan(1e-6);
-        // Nobody can withdraw: the creator's own attempt to remove their liquidity is refused, as there is none unlocked.
+        // Nobody can withdraw: the creator's own attempt to remove their liquidity is refused, as what is unlocked is worth
+        // nothing.
         const withdraw = getRemoveAllLiquidityInstruction({
           poolAuthority: DAMM_V2_POOL_AUTHORITY,
           pool: dammPool,
@@ -282,12 +286,15 @@ describe.skipIf(!existsSync(keeperFile) || !existsSync(bankFile))("Graduation on
           return { before, quote };
         }
         await tradeGraduated("buy", 5_000_000n);
-        const half = (await coinBalance(trader.address, mint.address)) / 2n;
-        await tradeGraduated("sell", half);
-        // A buy of a fifth of the pool's quote lifts the square-root price well past one 9% step.
+        // A buy of a fifth of the pool's quote lifts the square-root price past at least one 9% step, and the fee steps
+        // down for the trade after it; a sell brings the price back down and the fee back up.
         await tradeGraduated("buy", target / 5n);
         const { before: lifted } = await tradeGraduated("buy", 2_000_000n);
         expect(dammFeeNumerator(lifted, await chainTime())).toBeLessThan(12_500_000n);
+        const half = (await coinBalance(trader.address, mint.address)) / 2n;
+        await tradeGraduated("sell", half);
+        const { before: fallen } = await tradeGraduated("sell", (await coinBalance(trader.address, mint.address)) / 10n);
+        expect(dammFeeNumerator(fallen, await chainTime())).toBe(12_500_000n);
         console.table(trades);
 
         // Heat's LP fees reach the treasury, exactly what its position had accrued.
@@ -313,7 +320,7 @@ describe.skipIf(!existsSync(keeperFile) || !existsSync(bankFile))("Graduation on
         const claimSignature = await send(creator, claim!.instructions as Instruction[]);
         const after = (await rpc.getBalance(creator.address, { commitment: "confirmed" }).send()).value;
         // The coin account the LP claim opens holds the rent the creator paid for it.
-        const coinRent = 2_039_280n;
+        const coinRent = await rpc.getMinimumBalanceForRentExemption(165n).send();
         expect(after - before).toBe(curveNow.partnerQuoteFee / 2n + owedCreator.quote - 5_000n - coinRent);
         const lpUnits = await programCompute(claimSignature, DAMM_V2_PROGRAM_ADDRESS);
 

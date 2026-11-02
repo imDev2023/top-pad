@@ -1,17 +1,20 @@
 // What the indexer writes for Heat (spec 10.2): the pools on Heat's configs, the coins the fee program registers, every
-// trade with its candles, the fee program's claims, and each Fair Open with its open, its Creator lock, its Tax Share and
-// its seats' deposits, withdrawals, deliveries, Tax Shares and refunds.
+// trade with its candles, on the curve and after Graduation on the coin's DAMM v2 pool, the fee program's claims, each
+// coin's Graduation with its surplus, leftover and LP fee claims, and each Fair Open with its open, its Creator lock, its
+// Tax Share and its seats' deposits, withdrawals, deliveries, Tax Shares and refunds.
 // Each transaction is written in one database transaction that first claims its signature, so the live source, the
 // browser's fast path and reconciliation can all hand it in and it is written once.
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { priceOfSqrtPrice, type HeatCluster } from "@top-pad/chain";
+import { FEE_CLAIMER_ADDRESS, priceOfSqrtPrice, type HeatCluster } from "@top-pad/chain";
 import {
   coins,
   fairOpens,
   fairOpenSeatEvents,
   feeClaims,
+  graduations,
   indexedTransactions,
   launches,
+  lpFeeClaims,
   pools,
   trades,
   windowClaims,
@@ -19,8 +22,15 @@ import {
 } from "@top-pad/db";
 import { foldTrade } from "./candles";
 import {
+  dammPoolsIn,
   decodeTransaction,
   type CoinRegistered,
+  type CurveCompleted,
+  type Graduated,
+  type GraduatedPoolRef,
+  type LeftoverBurn,
+  type LpFeeClaim,
+  type SurplusSplit,
   type CreatorLock,
   type FairOpenCreated,
   type FairOpenEnded,
@@ -51,6 +61,11 @@ export type Indexed = {
   fairOpenEnds: FairOpenEnded[];
   creatorLocks: CreatorLock[];
   taxShares: TaxShareCollection[];
+  curveCompletes: CurveCompleted[];
+  graduations: Graduated[];
+  surplusSplits: SurplusSplit[];
+  leftoverBurns: LeftoverBurn[];
+  lpFeeClaims: LpFeeClaim[];
 };
 
 export type HeatHandlerOptions = {
@@ -85,7 +100,13 @@ export function heatHandler({ heat, blockIndexOf, onIndexed }: HeatHandlerOption
 
   return async (db, tx: RawTransaction): Promise<IndexResult> => {
     const signature = tx.transaction.signatures[0]!;
-    const decoded = decodeTransaction(tx, configs);
+    // The graduated pools the transaction trades on or claims from, as Heat knows them.
+    const named = dammPoolsIn(tx);
+    const known = named.length
+      ? await db.select({ pool: graduations.pool, mint: graduations.mint, config: graduations.config }).from(graduations).where(inArray(graduations.pool, named))
+      : [];
+    const graduated = new Map<string, GraduatedPoolRef>(known.map((g) => [g.pool, { mint: g.mint, config: g.config }]));
+    const decoded = decodeTransaction(tx, configs, graduated);
     const blockIndex = decoded.swaps.length ? await blockIndexOf(tx.slot, signature) : null;
     const blockTime = new Date((tx.blockTime ?? Math.floor(Date.now() / 1000)) * 1000);
 
@@ -146,7 +167,49 @@ export function heatHandler({ heat, blockIndexOf, onIndexed }: HeatHandlerOption
         added.push(row);
         await foldTrade(t, { mint: s.mint, at, orderKey: key, price, quoteAmount: s.quoteAmount, baseAmount: s.baseAmount });
       }
-      for (const pool of new Set([...decoded.pools.map((p) => p.pool), ...added.map((a) => a.pool)])) await followLatestTrade(t, pool);
+      for (const mint of new Set(added.map((a) => a.mint))) await followLatestTrade(t, mint);
+
+      // Graduation (spec 2.3): the curve completing, the migration, the surplus, the leftover and the LP fee claims.
+      for (const c of decoded.curveCompletes) {
+        await t
+          .update(pools)
+          .set({ curveCompletedAt: blockTime })
+          .where(and(eq(pools.pool, c.pool), sql`${pools.curveCompletedAt} is null`));
+      }
+      for (const g of decoded.graduations) await recordGraduation(t, g, signature, tx.slot, blockTime);
+      for (const x of decoded.surplusSplits) {
+        const [found] = await t
+          .update(pools)
+          .set({ surplusCreatorAmount: x.creatorAmount, surplusTreasuryAmount: x.treasuryAmount, surplusSignature: signature })
+          .where(eq(pools.pool, x.pool))
+          .returning({ pool: pools.pool });
+        if (!found) throw new Error(`the surplus of pool ${x.pool} was split, and the indexer has not seen it created`);
+      }
+      for (const x of decoded.leftoverBurns) {
+        const [found] = await t
+          .update(graduations)
+          .set({ leftoverBurnt: x.burnt, leftoverSignature: signature })
+          .where(eq(graduations.mint, x.mint))
+          .returning({ mint: graduations.mint });
+        if (!found) throw new Error(`the leftover of ${x.mint} was burnt, and the indexer has not seen it graduate`);
+      }
+      for (const x of decoded.lpFeeClaims) {
+        await t
+          .insert(lpFeeClaims)
+          .values({
+            signature,
+            eventIndex: x.eventIndex,
+            slot: tx.slot,
+            at: blockTime,
+            pool: x.pool,
+            mint: x.mint,
+            position: x.position,
+            owner: x.owner,
+            quoteAmount: x.quoteAmount,
+            coinAmount: x.coinAmount,
+          })
+          .onConflictDoNothing();
+      }
 
       for (const w of decoded.windowClaims) {
         await t
@@ -296,6 +359,11 @@ export function heatHandler({ heat, blockIndexOf, onIndexed }: HeatHandlerOption
         fairOpenEnds: decoded.fairOpenEnds,
         creatorLocks: decoded.creatorLocks,
         taxShares: decoded.taxShares,
+        curveCompletes: decoded.curveCompletes,
+        graduations: decoded.graduations,
+        surplusSplits: decoded.surplusSplits,
+        leftoverBurns: decoded.leftoverBurns,
+        lpFeeClaims: decoded.lpFeeClaims,
       });
     }
     const result: IndexResult = { transactions: 1 };
@@ -312,6 +380,9 @@ export function heatHandler({ heat, blockIndexOf, onIndexed }: HeatHandlerOption
       decoded.creatorLocks.length +
       decoded.taxShares.length;
     if (fairOpen) result.fairOpen = fairOpen;
+    const graduation =
+      decoded.curveCompletes.length + decoded.graduations.length + decoded.surplusSplits.length + decoded.leftoverBurns.length + decoded.lpFeeClaims.length;
+    if (graduation) result.graduation = graduation;
     return result;
   };
 }
@@ -351,11 +422,47 @@ async function recordCoin(t: DbOrTransaction, c: CoinRegistered, signature: stri
   }
 }
 
-/** A pool's price and quote reserve, from its latest trade by the trades' order, whenever that trade was indexed. */
-async function followLatestTrade(t: DbOrTransaction, pool: string) {
+/**
+ * A coin's price and quote reserve, from its latest trade by the trades' order, whenever that trade was indexed: on its
+ * curve, then after Graduation on its DAMM v2 pool, whose prices are in the same units.
+ */
+async function followLatestTrade(t: DbOrTransaction, mint: string) {
   await t.execute(sql`
     update pools
     set sqrt_price = latest.sqrt_price, quote_reserve = latest.quote_reserve, last_trade_key = latest.order_key
-    from (select sqrt_price, quote_reserve, order_key from trades where pool = ${pool} order by order_key desc limit 1) as latest
-    where pools.pool = ${pool} and (pools.last_trade_key is null or pools.last_trade_key < latest.order_key)`);
+    from (select sqrt_price, quote_reserve, order_key from trades where mint = ${mint} order by order_key desc limit 1) as latest
+    where pools.mint = ${mint} and (pools.last_trade_key is null or pools.last_trade_key < latest.order_key)`);
+}
+
+/**
+ * A coin's Graduation: its DAMM v2 pool and both locked positions, told apart by their owners, the creator's going to
+ * whoever held the creator role and Heat's to the fee program's fee claimer. The coin's price and quote reserve start
+ * from the graduated pool's, until its first trade there.
+ */
+async function recordGraduation(t: DbOrTransaction, g: Graduated, signature: string, slot: number, at: Date) {
+  const heat = g.positions.find((p) => p.owner === FEE_CLAIMER_ADDRESS);
+  const creator = g.positions.find((p) => p.owner !== FEE_CLAIMER_ADDRESS);
+  if (!heat || !creator) throw new Error(`the migration of ${g.mint} did not hand one position to Heat's fee claimer and one to the creator`);
+  const [pool] = await t.select().from(pools).where(eq(pools.pool, g.curvePool));
+  if (!pool) throw new Error(`${g.mint} graduated from pool ${g.curvePool}, which the indexer has not seen created`);
+  await t
+    .insert(graduations)
+    .values({
+      mint: g.mint,
+      curvePool: g.curvePool,
+      pool: g.pool,
+      config: g.config,
+      signature,
+      slot,
+      graduatedAt: at,
+      sqrtPrice: g.sqrtPrice.toString(),
+      creatorPosition: creator.position,
+      creatorPositionNftMint: creator.nftMint,
+      creatorPositionOwner: creator.owner,
+      creatorLiquidity: creator.liquidity.toString(),
+      heatPosition: heat.position,
+      heatPositionNftMint: heat.nftMint,
+      heatLiquidity: heat.liquidity.toString(),
+    })
+    .onConflictDoNothing();
 }

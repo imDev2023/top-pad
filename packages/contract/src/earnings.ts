@@ -16,7 +16,13 @@ export const EarningsCoin = z.object({
    * asks for exactly this much, so it pays exactly `waiting` however much accrues meanwhile.
    */
   partnerFees: RawAmount,
-  /** The wallet's half of `partnerFees`: what a claim pays it now. */
+  /**
+   * Once the coin has graduated, what the creator's own position in its DAMM v2 pool has accrued (spec 4), if this wallet
+   * holds that position's NFT: a claim takes it from Meteora in the same transaction, and pays at least this much, since
+   * a position's fees cannot be capped. 0 before Graduation.
+   */
+  lpFees: RawAmount,
+  /** The wallet's half of `partnerFees`, and its `lpFees`: what a claim pays it now. */
   waiting: RawAmount,
   /**
    * Whether the coin's window claim has run (spec 4): until it has, whatever the pool holds may be its Tax window's
@@ -40,9 +46,9 @@ export const CreatorEarnings = z.object({
 });
 export type CreatorEarnings = z.infer<typeof CreatorEarnings>;
 
-/** `POST /earnings/:wallet/claim`: the coins to claim, each with the partner fees the page showed. */
+/** `POST /earnings/:wallet/claim`: the coins to claim, each with the partner fees and the LP fees the page showed. */
 export const ClaimRequest = z.object({
-  claims: z.array(z.object({ mint: Address, partnerFees: RawAmount })).min(1).max(40),
+  claims: z.array(z.object({ mint: Address, partnerFees: RawAmount, lpFees: RawAmount.default("0") })).min(1).max(40),
 });
 export type ClaimRequest = z.infer<typeof ClaimRequest>;
 
@@ -52,7 +58,7 @@ export type ClaimRequest = z.infer<typeof ClaimRequest>;
  */
 export const PreparedClaim = z.object({
   transactions: z.array(z.string()).min(1),
-  /** What the claim pays the wallet, in all and by coin: exactly what the page showed. */
+  /** What the claim pays the wallet, in all and by coin: exactly what the page showed, or more as LP fees accrue. */
   pays: RawAmount,
   coins: z.array(z.object({ mint: Address, pays: RawAmount })),
 });
@@ -62,7 +68,7 @@ export type PreparedClaim = z.infer<typeof PreparedClaim>;
 export const ClaimSent = z.object({ signatures: z.array(Signature).min(1).max(20) });
 export type ClaimSent = z.infer<typeof ClaimSent>;
 
-/** What a sent claim did on chain, read from the fee program's events in its landed transactions. */
+/** What a sent claim did on chain, read from the fee program's and DAMM v2's events in its landed transactions. */
 export const ClaimOutcome = z.object({
   transactions: z.array(
     z.object({

@@ -14,6 +14,7 @@ import { finishXLink, logout, me, startXLink } from "./auth";
 import { getCoin, getCoinCandles, getCoinTrades } from "./coins";
 import { getEarnings, prepareClaim, reportClaim } from "./earnings";
 import { reclaimUnscheduled, sweepFairOpens } from "./fairOpenKeeper";
+import { claimHeatLpFees, sweepGraduations } from "./graduation";
 import { MAX_AHEAD_SECONDS, renewFairOpen } from "./fairOpenLaunches";
 import {
   getFairOpen,
@@ -170,8 +171,8 @@ async function housekeeping(db: Db, env: Bindings) {
 }
 
 /**
- * The Cron Trigger: the indexer kept running, the keeper's float, any window claim the keeper's Workflows missed,
- * housekeeping, then every open alert to the operator.
+ * The Cron Trigger: the indexer kept running, the keeper's float, any window claim, Fair Open or Graduation the keeper's
+ * Workflows missed, Heat's LP fees once an hour, housekeeping, then every open alert to the operator.
  */
 async function scheduled(_controller: ScheduledController, env: Bindings, ctx: ExecutionContext) {
   const cfg = config(env);
@@ -186,6 +187,11 @@ async function scheduled(_controller: ScheduledController, env: Bindings, ctx: E
     }
     await runJob(db, "window-claims", () => sweepWindowClaims(db, env), { exclusive: true }).catch(() => undefined);
     await runJob(db, "fair-opens", () => sweepFairOpens(db, env), { exclusive: true }).catch(() => undefined);
+    await runJob(db, "graduations", () => sweepGraduations(db, env), { exclusive: true }).catch(() => undefined);
+    // Heat's LP fees, once an hour: the first run of each hour.
+    if (new Date(_controller.scheduledTime).getUTCMinutes() < 5) {
+      await runJob(db, "lp-fees", () => claimHeatLpFees(db, env), { exclusive: true }).catch(() => undefined);
+    }
     await runJob(db, "housekeeping", () => housekeeping(db, env), { exclusive: true }).catch(() => undefined);
     await notifyPending(db, cfg.alertWebhookUrl);
   } finally {

@@ -39,10 +39,40 @@ export const Trade = z.object({
   fee: RawAmount,
   /** The price after it, in whole quote units per coin. */
   price: Decimal,
-  /** The quote the curve holds after it, which Graduation is measured against. */
+  /** The quote the curve holds after it, which Graduation is measured against; after Graduation, the graduated pool's. */
   quoteReserve: RawAmount,
 });
 export type Trade = z.infer<typeof Trade>;
+
+/**
+ * A coin's Graduation (spec 2.3): its curve held its Graduation Target, then Heat's keeper migrated it into a DAMM v2 pool
+ * with both halves of its liquidity locked forever, the surplus split and the leftover burnt (spec 4, 5.2).
+ */
+export const Graduation = z.object({
+  /** When the curve completed, by the chain's clock; null if the indexer did not see the moment. */
+  completedAt: z.iso.datetime().nullable(),
+  /** What the fee program split of the partner's surplus, in the quote's raw units; null until split. */
+  surplus: z.object({ creator: RawAmount, treasury: RawAmount }).nullable(),
+  /** Null until the coin has migrated. */
+  graduated: z
+    .object({
+      at: z.iso.datetime(),
+      /** The DAMM v2 pool the coin trades on now. */
+      pool: Address,
+      /** Its fee now, in basis points: 125 at Graduation, a basis point less for every step its price rises (spec 3.4). */
+      feeBps: z.number().int().nonnegative(),
+      /** The two halves of its liquidity, each a permanently locked position: the creator's and Heat's. */
+      positions: z.object({
+        creator: z.object({ position: Address, owner: Address, explorer: z.string().url() }),
+        heat: z.object({ position: Address, explorer: z.string().url() }),
+      }),
+      /** The coins DBC left over and the fee program burnt, in raw units; null until burnt. */
+      leftoverBurnt: RawAmount.nullable(),
+      explorer: z.object({ migration: z.string().url(), pool: z.string().url() }),
+    })
+    .nullable(),
+});
+export type Graduation = z.infer<typeof Graduation>;
 
 /** `GET /coins/:mint`: a coin's page. 404 for a mint with no pool on Heat's configs. */
 export const Coin = z.object({
@@ -80,6 +110,8 @@ export const Coin = z.object({
   windowClaim: WindowClaim.nullable(),
   /** A Fair Open's coin: the launch it opened from, its Creator lock and its Tax Share (spec 2.1 steps 13 and 14). */
   fairOpen: z.object({ launch: Address, lock: CreatorLock, taxShare: TaxShare.nullable() }).nullable(),
+  /** Null while the curve runs. */
+  graduation: Graduation.nullable(),
   explorer: z.object({ mint: z.string().url(), pool: z.string().url() }),
   /** The API's clock as it answered, which a page counts the sniper tax by rather than its own. */
   servedAt: z.iso.datetime(),
@@ -123,6 +155,8 @@ export const LiveEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("trade"), mint: Address, trade: Trade }),
   z.object({ type: z.literal("coin"), mint: Address, name: z.string(), ticker: z.string(), heat: z.boolean() }),
   z.object({ type: z.literal("window_claim"), mint: Address, windowClaim: WindowClaim }),
+  /** A coin's curve completed, or the coin graduated into DAMM v2 (spec 2.3): its page reads the coin again. */
+  z.object({ type: z.literal("graduation"), mint: Address, stage: z.enum(["curve_complete", "graduated"]) }),
   z.object({
     type: z.literal("fair_open"),
     launch: Address,

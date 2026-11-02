@@ -4,6 +4,7 @@ import { Cluster } from "@top-pad/contract";
 import type { Indexer } from "./indexer";
 import type { LiveRoom } from "./rooms";
 import type { FairOpenKeeperParams } from "./fairOpenKeeper";
+import type { GraduationParams } from "./graduation";
 import type { KeeperParams } from "./windowClaims";
 
 /** What the launch service needs from R2: the signed Arweave data items wait there until uploaded (spec 10.4). */
@@ -60,6 +61,8 @@ export type Bindings = {
   INSTANT_LAUNCHES?: Workflow<KeeperParams>;
   /** The keeper's Workflow for each Fair Open, keyed by its launch account (spec 10.2): the upload, the open, the pushes. */
   FAIR_OPENS?: Workflow<FairOpenKeeperParams>;
+  /** The keeper's Workflow for each coin whose curve completes, keyed by its coin (spec 10.2): its Graduation. */
+  GRADUATIONS?: Workflow<GraduationParams>;
   /** Which version of the Worker this code is: the indexer checks it runs the same as the Worker that calls it. */
   CF_VERSION_METADATA?: { id: string; tag: string; timestamp: string };
 };

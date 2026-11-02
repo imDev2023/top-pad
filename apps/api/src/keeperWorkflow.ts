@@ -2,7 +2,8 @@
 // sleeps until then, and sends the window claim. A Fair Open's, keyed by its launch account: the coin's metadata up 15 s
 // before the open, the rung the pot covers at the open, then every seat pushed its coins and refund, the creator's coins
 // locked, the Tax Share collected at 60 s and pushed to every seat, and the launch closed; or, if the launch cannot open,
-// the launch failed and every seat refunded; then the nonce closed and the ticker released. Every step is safe to repeat.
+// the launch failed and every seat refunded; then the nonce closed and the ticker released. A coin's Graduation, keyed by
+// its coin: the migration into DAMM v2, then the surplus split and the leftover burnt. Every step is safe to repeat.
 import { address } from "@solana/kit";
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers";
 import { createDb } from "@top-pad/db";
@@ -21,6 +22,7 @@ import {
   uploadMetadata,
   type FairOpenKeeperParams,
 } from "./fairOpenKeeper";
+import { readCurve, sendLeftoverBurn, sendMigration, sendSurplusClaim, type GraduationParams } from "./graduation";
 import { indexNow } from "./indexing";
 import { sendWindowClaim, windowEnd, type KeeperParams } from "./windowClaims";
 
@@ -160,5 +162,37 @@ export class FairOpenKeeper extends WorkflowEntrypoint<Bindings, FairOpenKeeperP
     }
     await step.do("close the nonce", quick, () => withDb((db) => closeLaunchNonce(db, cfg, key, launch)));
     await step.do("release the ticker", quick, () => withDb((db) => releaseTicker(db, launch)));
+  }
+}
+
+/**
+ * A coin's Graduation (spec 2.3, 10.2), started when its curve completes: the keeper migrates it into DAMM v2, then has
+ * the fee program split the surplus and burn the leftover. A coin no record lists, or whose curve is not complete, is
+ * left alone; each step finds on chain what anyone else did first and sends nothing for it.
+ */
+export class GraduationKeeper extends WorkflowEntrypoint<Bindings, GraduationParams> {
+  async run(event: Readonly<WorkflowEvent<GraduationParams>>, step: WorkflowStep) {
+    const cfg = config(this.env);
+    const mint = address(event.payload.mint);
+    const key = keeperKeyOf(this.env);
+    const quick = { retries: { limit: 10, delay: "2 seconds", backoff: "exponential" }, timeout: "2 minutes" } as const;
+    // The trade that completed the curve may reach the RPC a moment after the indexer saw it.
+    const curve = await step.do("read the curve", quick, async () => {
+      const state = await readCurve(cfg, mint);
+      return state ? { heat: true, complete: state.complete } : { heat: false, complete: false };
+    });
+    if (!curve.heat || !curve.complete) return { graduated: false, reason: curve.heat ? "the curve is not complete" : "not a Heat coin" };
+    const indexed = async (name: string, signature: string | null) => {
+      if (signature) await step.do(name, async () => (await indexNow(this.env, [signature]), signature));
+    };
+    const send = { retries: { limit: 10, delay: "3 seconds", backoff: "constant" }, timeout: "3 minutes" } as const;
+    const migration = await step.do("migrate to DAMM v2", send, () => sendMigration(cfg, key, mint));
+    await indexed("index the migration", migration.signature);
+    const surplus = await step.do("split the surplus", send, () => sendSurplusClaim(cfg, key, mint));
+    await indexed("index the surplus", surplus.signature);
+    const leftover = await step.do("burn the leftover", send, () => sendLeftoverBurn(cfg, key, mint));
+    await indexed("index the leftover", leftover.signature);
+    console.log(`Graduation of ${mint}: migration ${migration.signature ?? "already run"}, surplus ${surplus.signature ?? "already split"}, leftover ${leftover.signature ?? "already burnt"}`);
+    return { graduated: true, migration: migration.signature, surplus: surplus.signature, leftover: leftover.signature };
   }
 }

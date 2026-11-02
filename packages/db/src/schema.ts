@@ -311,15 +311,83 @@ export const pools = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
     /** The square-root price (Q64.64) after the latest trade, or curve A's start before the first. */
     sqrtPrice: numeric("sqrt_price", { precision: 40, scale: 0 }).notNull(),
-    /** The quote the curve holds after the latest trade, in raw units: what Graduation is measured against. */
+    /**
+     * The quote the curve holds after the latest trade, in raw units: what Graduation is measured against; after
+     * Graduation, the quote its DAMM v2 pool holds.
+     */
     quoteReserve: bigint("quote_reserve", { mode: "bigint" }).notNull(),
     /** The latest trade's order key (see `trades`), so a trade indexed late never rolls the state back. */
     lastTradeKey: numeric("last_trade_key", { precision: 30, scale: 0 }),
     /** Wallets holding the coin outside the pool, when last counted; null until first counted. */
     holders: integer("holders"),
     holdersCountedAt: timestamp("holders_counted_at", { withTimezone: true }),
+    /**
+     * When the curve completed, holding its Graduation Target, by the chain's clock (DBC's `EvtCurveComplete`): from
+     * here it takes no trades until it graduates (spec 2.3).
+     */
+    curveCompletedAt: timestamp("curve_completed_at", { withTimezone: true }),
+    /**
+     * The partner's share of what the curve raised past its target, as the fee program split it once the curve completed
+     * (spec 4, 5.2), in the quote's raw units; null until split.
+     */
+    surplusCreatorAmount: bigint("surplus_creator_amount", { mode: "bigint" }),
+    surplusTreasuryAmount: bigint("surplus_treasury_amount", { mode: "bigint" }),
+    surplusSignature: text("surplus_signature"),
   },
   (t) => [index("pools_created_idx").on(t.createdAt)],
+);
+
+/**
+ * Each coin's Graduation (spec 2.3), from DBC's `migration_damm_v2`: the DAMM v2 pool it trades on from then on, and both
+ * halves of its liquidity, each a position permanently locked, the creator's NFT to the creator role holder and Heat's
+ * to the fee program's `fee_claimer`; then the leftover burnt (spec 5.2). Once a coin has a row, its price and quote
+ * reserve in `pools` follow its DAMM v2 trades.
+ */
+export const graduations = pgTable("graduations", {
+  mint: text("mint").primaryKey(),
+  /** The coin's DBC pool, and the DAMM v2 pool it graduated into. */
+  curvePool: text("curve_pool").notNull().unique(),
+  pool: text("pool").notNull().unique(),
+  config: text("config").notNull(),
+  signature: text("signature").notNull().unique(),
+  slot: bigint("slot", { mode: "number" }).notNull(),
+  /** The block's time. */
+  graduatedAt: timestamp("graduated_at", { withTimezone: true }).notNull(),
+  /** The square-root price the graduated pool opened at, which its market-cap fee schedule counts its steps from. */
+  sqrtPrice: numeric("sqrt_price", { precision: 40, scale: 0 }).notNull(),
+  creatorPosition: text("creator_position").notNull(),
+  creatorPositionNftMint: text("creator_position_nft_mint").notNull(),
+  /** Whoever held the DBC creator role at Graduation, to whom the creator's position NFT went. */
+  creatorPositionOwner: text("creator_position_owner").notNull(),
+  creatorLiquidity: numeric("creator_liquidity", { precision: 40, scale: 0 }).notNull(),
+  heatPosition: text("heat_position").notNull(),
+  heatPositionNftMint: text("heat_position_nft_mint").notNull(),
+  heatLiquidity: numeric("heat_liquidity", { precision: 40, scale: 0 }).notNull(),
+  /** The coins DBC left over and the fee program burnt, in raw units. */
+  leftoverBurnt: bigint("leftover_burnt", { mode: "bigint" }),
+  leftoverSignature: text("leftover_signature"),
+});
+
+/**
+ * Every claim of a graduated pool's LP fees (spec 4), from DAMM v2's `EvtClaimPositionFee`: Heat's position's, which the
+ * fee program pays to the treasury, and the creator's, which they claim from Meteora directly. In raw units.
+ */
+export const lpFeeClaims = pgTable(
+  "lp_fee_claims",
+  {
+    signature: text("signature").notNull(),
+    eventIndex: integer("event_index").notNull(),
+    slot: bigint("slot", { mode: "number" }).notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    pool: text("pool").notNull(),
+    mint: text("mint").notNull(),
+    position: text("position").notNull(),
+    /** The position NFT's owner: the fee program's `fee_claimer` for Heat's. */
+    owner: text("owner").notNull(),
+    quoteAmount: bigint("quote_amount", { mode: "bigint" }).notNull(),
+    coinAmount: bigint("coin_amount", { mode: "bigint" }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.signature, t.eventIndex] }), index("lp_fee_claims_owner_idx").on(t.owner), index("lp_fee_claims_mint_idx").on(t.mint)],
 );
 
 /**

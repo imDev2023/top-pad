@@ -1,5 +1,6 @@
 // The indexer (spec 10.2) as one Durable Object, on the devnet source: a `logsSubscribe` WebSocket on Heat's two
-// configs and its two programs says which transactions to fetch and index at once, and reconciliation from each
+// configs, its two programs and every DAMM v2 pool a Heat coin graduated into says which transactions to fetch and
+// index at once, and reconciliation from each
 // account's cursor catches whatever the socket missed. An alarm every 15 s keeps the object awake, reopens a dropped
 // socket and reconciles every minute, or at once while the socket is down; the cron wakes it after a deploy. The
 // socket is only the fast path: a trade the socket never reports is still indexed within a minute.
@@ -7,7 +8,7 @@ import { DurableObject } from "cloudflare:workers";
 import { inArray } from "drizzle-orm";
 import { FAIR_OPEN_PROGRAM_ADDRESS, FEE_PROGRAM_ADDRESS } from "@top-pad/chain";
 import type { LiveEvent } from "@top-pad/contract";
-import { createDb, indexedTransactions } from "@top-pad/db";
+import { createDb, graduations, indexedTransactions } from "@top-pad/db";
 import {
   blockPositions,
   fetchRawTransaction,
@@ -23,6 +24,7 @@ import {
 } from "@top-pad/indexer";
 import { tradeView, windowClaimView } from "./coins";
 import { config, type Bindings } from "./env";
+import { startGraduation } from "./graduation";
 import { startKeeper } from "./windowClaims";
 
 const ALARM_MS = 15_000;
@@ -62,14 +64,37 @@ export class Indexer extends DurableObject<Bindings> {
   private handle: TransactionHandler | null = null;
   /** Where reconciliation stands on each account, read from Postgres once per instance, then kept here. */
   private cursors = new Map<string, string | null>();
+  /**
+   * The DAMM v2 pools Heat's coins graduated into, read from Postgres once per instance and added to as Graduations are
+   * indexed: a graduated pool's swaps name neither a config nor our programs (spec 2.3).
+   */
+  private graduated: Set<string> | null = null;
 
   /**
-   * The accounts whose transactions are Heat's: both configs (every pool and swap on them), the fee program, and the
-   * Fair Open program (every launch, deposit, withdrawal and refund).
+   * The accounts whose transactions are Heat's: both configs (every pool, swap and migration on them), the fee program,
+   * the Fair Open program (every launch, deposit, withdrawal and refund), and each graduated pool (its swaps).
    */
   private watching(): string[] {
     const configs = config(this.env).heat?.configs;
-    return configs ? [configs.instant, configs.fairOpen, FEE_PROGRAM_ADDRESS, FAIR_OPEN_PROGRAM_ADDRESS] : [];
+    return configs ? [configs.instant, configs.fairOpen, FEE_PROGRAM_ADDRESS, FAIR_OPEN_PROGRAM_ADDRESS, ...(this.graduated ?? [])] : [];
+  }
+
+  private async loadGraduated() {
+    if (this.graduated) return;
+    const { db, close } = createDb(this.env.HYPERDRIVE.connectionString);
+    try {
+      this.graduated = new Set((await db.select({ pool: graduations.pool }).from(graduations)).map((g) => g.pool));
+    } finally {
+      await close();
+    }
+  }
+
+  /** A pool a coin just graduated into, watched from now on, on the open socket too. */
+  private watchGraduated(pool: string) {
+    this.graduated ??= new Set();
+    if (this.graduated.has(pool)) return;
+    this.graduated.add(pool);
+    this.socket?.send(logsSubscribeRequest(this.watching().length, pool));
   }
 
   private handler(): TransactionHandler {
@@ -117,6 +142,11 @@ export class Indexer extends DurableObject<Bindings> {
 
   async alarm(): Promise<void> {
     if (!this.watching().length) return;
+    try {
+      await this.loadGraduated();
+    } catch (e) {
+      this.failed("reading the graduated pools", e);
+    }
     try {
       if (!this.socket) await this.openSocket();
     } catch (e) {
@@ -232,10 +262,13 @@ export class Indexer extends DurableObject<Bindings> {
    * Sends what a transaction added to its coins' rooms and the board's, and a Fair Open's changes to its room, and starts
    * the keeper for each Instant launch registered, which the launch's own landing may not have (a launch whose browser went away, or another deployment's).
    */
-  private async publish({ signature, pools, coins, trades, windowClaims, fairOpens, fairOpenOpens, seatEvents, fairOpenEnds, taxShares }: Indexed) {
+  private async publish({ signature, pools, coins, trades, windowClaims, fairOpens, fairOpenOpens, seatEvents, fairOpenEnds, taxShares, curveCompletes, graduations: graduated }: Indexed) {
     for (const coin of coins) {
       if (coin.launchMode === "instant") await startKeeper(this.env, coin.mint).catch((e) => console.error(`starting the keeper for ${coin.mint} failed`, e));
     }
+    // A curve that completed graduates through the keeper's Workflow, which leaves alone a coin that is not Heat's.
+    for (const c of curveCompletes) await startGraduation(this.env, c.mint).catch((e) => console.error(`starting the Graduation of ${c.mint} failed`, e));
+    for (const g of graduated) this.watchGraduated(g.pool);
     const rooms = this.env.LIVE_ROOMS;
     if (!rooms) return;
     const events = new Map<string, LiveEvent[]>();
@@ -248,6 +281,13 @@ export class Indexer extends DurableObject<Bindings> {
     for (const trade of trades) {
       const event: LiveEvent = { type: "trade", mint: trade.mint, trade: tradeView(trade) };
       add(`coin:${trade.mint}`, event);
+      add("board", event);
+    }
+    // A coin's page reads the coin again as its Graduation moves on.
+    for (const c of curveCompletes) add(`coin:${c.mint}`, { type: "graduation", mint: c.mint, stage: "curve_complete" });
+    for (const g of graduated) {
+      const event: LiveEvent = { type: "graduation", mint: g.mint, stage: "graduated" };
+      add(`coin:${g.mint}`, event);
       add("board", event);
     }
     const cfg = config(this.env);

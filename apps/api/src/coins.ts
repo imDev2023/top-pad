@@ -5,7 +5,8 @@ import { and, asc, desc, eq, gt, gte, lt, lte } from "drizzle-orm";
 import type { Context } from "hono";
 import { COIN_DECIMALS, COIN_SUPPLY, FEE_DENOMINATOR, marketCapOfSqrtPrice, priceOfSqrtPrice, SNIPER_TAX } from "@top-pad/chain";
 import { Address, CandleSeconds, type Coin, type CoinCandles, type CoinTrades, type Trade, type WindowClaim } from "@top-pad/contract";
-import { candles, coins, creators, fairOpens, pools, trades, windowClaims, type Db } from "@top-pad/db";
+import { candles, coins, creators, fairOpens, graduations, pools, trades, windowClaims, type Db } from "@top-pad/db";
+import { graduatedPoolFeeNumerator } from "@top-pad/meteora";
 import { holderCount } from "@top-pad/indexer";
 import { creatorLockOf, taxShareOf } from "./afterOpen";
 import { explorerUrl, type Config } from "./env";
@@ -66,6 +67,33 @@ async function fairOpenOf(cfg: Config, db: Db, mint: string): Promise<Coin["fair
   return { launch: row.launch, lock: await creatorLockOf(cfg, db, row), taxShare: await taxShareOf(cfg, db, row) };
 }
 
+/** A coin's Graduation as its page shows it, from its pool's row and its Graduation's; null while its curve runs. */
+function graduationOf(cfg: Config, pool: typeof pools.$inferSelect, g: typeof graduations.$inferSelect | null): Coin["graduation"] {
+  if (!g && !pool.curveCompletedAt && !(cfg.heat && pool.quoteReserve >= cfg.heat.graduationTarget)) return null;
+  const surplus =
+    pool.surplusCreatorAmount !== null && pool.surplusTreasuryAmount !== null
+      ? { creator: pool.surplusCreatorAmount.toString(), treasury: pool.surplusTreasuryAmount.toString() }
+      : null;
+  return {
+    completedAt: pool.curveCompletedAt?.toISOString() ?? null,
+    surplus,
+    graduated: g
+      ? {
+          at: g.graduatedAt.toISOString(),
+          pool: g.pool,
+          // DAMM v2's fee numerator is out of 1,000,000,000: 100,000 a basis point.
+          feeBps: Number(graduatedPoolFeeNumerator(BigInt(g.sqrtPrice), BigInt(pool.sqrtPrice)) / 100_000n),
+          positions: {
+            creator: { position: g.creatorPosition, owner: g.creatorPositionOwner, explorer: explorerUrl(cfg, "address", g.creatorPosition) },
+            heat: { position: g.heatPosition, explorer: explorerUrl(cfg, "address", g.heatPosition) },
+          },
+          leftoverBurnt: g.leftoverBurnt?.toString() ?? null,
+          explorer: { migration: explorerUrl(cfg, "tx", g.signature), pool: explorerUrl(cfg, "address", g.pool) },
+        }
+      : null,
+  };
+}
+
 /** `GET /coins/:mint`. */
 export async function getCoin(c: Context<AppEnv>) {
   const { cfg, db } = c.var;
@@ -73,11 +101,12 @@ export async function getCoin(c: Context<AppEnv>) {
   const mint = c.req.param("mint")!;
   if (!heat || !Address.safeParse(mint).success) return notFound(c);
   const [row] = await db
-    .select({ pool: pools, coin: coins, handle: creators.xHandle, windowClaim: windowClaims })
+    .select({ pool: pools, coin: coins, handle: creators.xHandle, windowClaim: windowClaims, graduation: graduations })
     .from(pools)
     .leftJoin(coins, eq(coins.mint, pools.mint))
     .leftJoin(creators, eq(creators.id, coins.creatorId))
     .leftJoin(windowClaims, eq(windowClaims.pool, pools.pool))
+    .leftJoin(graduations, eq(graduations.mint, pools.mint))
     .where(eq(pools.mint, mint));
   if (!row) return notFound(c);
   const { pool, coin } = row;
@@ -126,6 +155,7 @@ export async function getCoin(c: Context<AppEnv>) {
     },
     windowClaim: row.windowClaim ? windowClaimView(cfg, row.windowClaim) : null,
     fairOpen: await fairOpenOf(cfg, db, mint),
+    graduation: graduationOf(cfg, pool, row.graduation),
     explorer: { mint: explorerUrl(cfg, "address", mint), pool: explorerUrl(cfg, "address", pool.pool) },
     servedAt: new Date().toISOString(),
   };

@@ -1,5 +1,6 @@
 // Quick buy and sell (spec 9, screen 3; spec 10.1, "Trading"): a quote read from the pool as it stands, by DBC's own
-// maths (`@top-pad/meteora/quote`), with the fee for each second the sniper tax still runs; the swap itself, built here
+// maths (`@top-pad/meteora/quote`), with the fee for each second the sniper tax still runs, or once the coin has
+// graduated by DAMM v2's (`@top-pad/meteora/damm`) on its graduated pool (spec 2.3); the swap itself, built here
 // for the wallet to sign and send, naming Heat's referral account so Heat earns Meteora's referral share (spec 4); what
 // a wallet holds to trade with; and the browser's fast path, which reads a sent trade back from the chain the moment it
 // confirms so the page shows it at once, and hands it to the indexer (spec 10.2).
@@ -15,11 +16,13 @@ import {
 import { eq } from "drizzle-orm";
 import type { Context } from "hono";
 import { priceOfSqrtPrice, referralAccountOf, swapMessage, tokenAccountOf, type HeatCluster } from "@top-pad/chain";
+import { getPoolDecoder, type Pool as DammPoolState } from "@top-pad/clients/damm-v2";
 import { getPoolConfigDecoder, getVirtualPoolDecoder, type PoolConfig, type PoolState } from "@top-pad/clients/dbc";
 import { TAX_WINDOW_SECONDS } from "@top-pad/clients/fee";
 import { Address, Holdings, SwapPrepareRequest, SwapRequest, SwapSent, type PreparedSwap, type QuoteStep, type SwapOutcome, type SwapQuote, type Trade } from "@top-pad/contract";
-import { coins, pools } from "@top-pad/db";
-import { decodeTransaction, fetchRawTransaction, provisionalOrderKey } from "@top-pad/indexer";
+import { coins, graduations, pools } from "@top-pad/db";
+import { decodeTransaction, fetchRawTransaction, provisionalOrderKey, type GraduatedPoolRef } from "@top-pad/indexer";
+import { quoteDammSwap } from "@top-pad/meteora/damm";
 import { minimumOut, quoteSwap, type Quote } from "@top-pad/meteora/quote";
 import { explorerUrl, type Config } from "./env";
 import type { AppEnv } from "./http";
@@ -35,8 +38,15 @@ const CLOCK_SYSVAR = address("SysvarC1ock11111111111111111111111111111111");
 const SETTLE_WAIT_MS = 30_000;
 /** How often it asks: the fast path is only worth having if it answers the moment the trade confirms (spec 10.2). */
 const SETTLE_POLL_MS = 300;
-/** The rent an associated token account holds, which a swap pays when it opens one. */
-const TOKEN_ACCOUNT_RENT = 2_039_280n;
+/** An SPL token account's size, whose rent a swap pays when it opens one. */
+const TOKEN_ACCOUNT_BYTES = 165n;
+/** That rent, asked of the cluster once per isolate: rent has changed before (2,039,280 lamports until late 2026). */
+let tokenAccountRent: Promise<bigint> | null = null;
+const rentOfTokenAccount = (rpc: Rpc) => {
+  tokenAccountRent ??= rpc.getMinimumBalanceForRentExemption(TOKEN_ACCOUNT_BYTES).send(limited());
+  tokenAccountRent.catch(() => (tokenAccountRent = null));
+  return tokenAccountRent;
+};
 /** A swap's network fee, one signature, with room for a priority fee on a busy cluster. */
 const NETWORK_FEE = 10_000n;
 /**
@@ -50,41 +60,58 @@ const DBC_ERRORS: Record<number, string> = {
   6002: "The price moved more than your slippage allows before the trade ran, so nothing was traded. Try again, or allow more slippage.",
   6013: "The coin's curve completed before the trade ran: it trades on Meteora once it graduates.",
 };
+/** DAMM v2's custom errors a quick trade on a graduated pool can land with. */
+const DAMM_ERRORS: Record<number, string> = {
+  6004: "The price moved more than your slippage allows before the trade ran, so nothing was traded. Try again, or allow more slippage.",
+};
 
 type Rpc = ReturnType<typeof createSolanaRpc>;
 type PoolRow = typeof pools.$inferSelect;
+type GraduationRow = typeof graduations.$inferSelect;
+type Wallet = { lamports: bigint; coins: bigint; coinAccountOpen: boolean; quoteAccountOpen: boolean };
 
-/** What a quote reads, in one call: the pool, its config and the chain's clock, and the wallet's balances if asked. */
-type Market = {
-  pool: PoolState;
-  config: PoolConfig;
-  chainTime: bigint;
-  wallet: { lamports: bigint; coins: bigint; coinAccountOpen: boolean; quoteAccountOpen: boolean } | null;
-};
+/**
+ * What a quote reads, in one call: the curve and its config, or after Graduation the coin's DAMM v2 pool; the chain's
+ * clock; and the wallet's balances if asked.
+ */
+type Market =
+  | { venue: "curve"; pool: PoolState; config: PoolConfig; chainTime: bigint; wallet: Wallet | null }
+  | { venue: "graduated"; damm: DammPoolState; chainTime: bigint; wallet: Wallet | null };
 
 /** An SPL token account's balance: its amount sits after its mint and owner. */
 const tokenAmount = (data: Uint8Array) => new DataView(data.buffer, data.byteOffset).getBigUint64(64, true);
 
-async function readMarket(rpc: Rpc, heat: HeatCluster, row: PoolRow, wallet: KitAddress | null): Promise<Market> {
+async function readMarket(rpc: Rpc, heat: HeatCluster, row: PoolRow, graduation: GraduationRow | null, wallet: KitAddress | null): Promise<Market> {
   const walletAccounts = wallet ? [wallet, await tokenAccountOf(wallet, address(row.mint)), await tokenAccountOf(wallet, heat.quote.mint)] : [];
+  const market = graduation ? [address(graduation.pool)] : [address(row.pool), address(row.config)];
   const { value } = await rpc
     // At `processed`, the freshest the node has: the price and the second a trade sent now would meet.
-    .getMultipleAccounts([address(row.pool), address(row.config), CLOCK_SYSVAR, ...walletAccounts], { encoding: "base64", commitment: "processed" })
+    .getMultipleAccounts([...market, CLOCK_SYSVAR, ...walletAccounts], { encoding: "base64", commitment: "processed" })
     .send(limited());
   const bytes = (i: number) => {
     const account = value[i];
     return account ? (base64.encode(account.data[0]) as Uint8Array) : null;
   };
-  const [poolBytes, configBytes, clockBytes] = [bytes(0), bytes(1), bytes(2)];
-  if (!poolBytes || !configBytes || !clockBytes) throw new Error(`pool ${row.pool} or its config is missing on chain`);
-  const coinBytes = bytes(4);
+  const clock = market.length;
+  const clockBytes = bytes(clock);
+  if (!clockBytes || market.some((_, i) => !bytes(i))) throw new Error(`the market of ${row.mint} is missing on chain`);
+  const chainTime = new DataView(clockBytes.buffer, clockBytes.byteOffset).getBigInt64(32, true);
+  const coinBytes = bytes(clock + 2);
+  const held: Wallet | null = wallet
+    ? {
+        lamports: value[clock + 1]?.lamports ?? 0n,
+        coins: coinBytes ? tokenAmount(coinBytes) : 0n,
+        coinAccountOpen: coinBytes !== null,
+        quoteAccountOpen: value[clock + 3] !== null,
+      }
+    : null;
+  if (graduation) return { venue: "graduated", damm: getPoolDecoder().decode(bytes(0)!), chainTime, wallet: held };
   return {
-    pool: getVirtualPoolDecoder().decode(poolBytes).poolState,
-    config: getPoolConfigDecoder().decode(configBytes),
-    chainTime: new DataView(clockBytes.buffer, clockBytes.byteOffset).getBigInt64(32, true),
-    wallet: wallet
-      ? { lamports: value[3]?.lamports ?? 0n, coins: coinBytes ? tokenAmount(coinBytes) : 0n, coinAccountOpen: coinBytes !== null, quoteAccountOpen: value[5] !== null }
-      : null,
+    venue: "curve",
+    pool: getVirtualPoolDecoder().decode(bytes(0)!).poolState,
+    config: getPoolConfigDecoder().decode(bytes(1)!),
+    chainTime,
+    wallet: held,
   };
 }
 
@@ -98,22 +125,31 @@ class Refusal extends Error {
   }
 }
 
-/** The pool of a Heat coin: quick trades are built only for coins our launch key co-signed (spec 2.4). */
-async function heatPool(c: Context<AppEnv>): Promise<{ row: PoolRow; heat: HeatCluster }> {
+/**
+ * The pool of a Heat coin, and its Graduation if it has graduated: quick trades are built only for coins our launch key
+ * co-signed (spec 2.4).
+ */
+async function heatPool(c: Context<AppEnv>): Promise<{ row: PoolRow; graduation: GraduationRow | null; heat: HeatCluster }> {
   const { cfg, db } = c.var;
   const mint = c.req.param("mint")!;
   const heat = cfg.heat;
   if (!heat?.configs || !heat.keys || !Address.safeParse(mint).success) throw new Refusal(404, "Heat has no coin at this address.");
-  const [found] = await db.select({ pool: pools, coin: coins.mint }).from(pools).leftJoin(coins, eq(coins.mint, pools.mint)).where(eq(pools.mint, mint));
+  const [found] = await db
+    .select({ pool: pools, coin: coins.mint, graduation: graduations })
+    .from(pools)
+    .leftJoin(coins, eq(coins.mint, pools.mint))
+    .leftJoin(graduations, eq(graduations.mint, pools.mint))
+    .where(eq(pools.mint, mint));
   if (!found) throw new Refusal(404, "Heat has no coin at this address.");
   if (!found.coin) throw new Refusal(409, "Heat builds trades only for coins launched through Heat.");
-  return { row: found.pool, heat };
+  return { row: found.pool, graduation: found.graduation, heat };
 }
 
 /** Why a market cannot trade now, if it cannot. */
 function closedReason(market: Market): string | null {
+  if (market.venue === "graduated") return market.damm.poolStatus !== 0 ? "Meteora has paused trading on this coin's pool." : null;
   if (market.pool.isMigrated || market.pool.quoteReserve >= market.config.migrationQuoteThreshold) {
-    return "This coin's curve is complete: it trades on Meteora once it graduates.";
+    return "This coin's curve is complete and it is graduating to Meteora's DAMM v2, where it trades in a moment.";
   }
   if (market.chainTime < market.pool.activationPoint) return "Trading on this coin has not opened yet.";
   return null;
@@ -125,6 +161,24 @@ function closedReason(market: Market): string | null {
  */
 export function quoteOf(market: Market, request: SwapRequest, hasReferral: boolean): { quote: SwapQuote; first: Quote } {
   const amountIn = BigInt(request.amount);
+  if (market.venue === "graduated") {
+    // A graduated pool's fee follows its price, not the clock (spec 3.4): one step holds from now on.
+    const first = quoteDammSwap({ pool: market.damm, side: request.side, amountIn, currentPoint: market.chainTime, hasReferral });
+    const step: QuoteStep = { from: Number(market.chainTime), fee: `${first.fee}`, quoteAmount: `${first.quoteAmount}`, amountOut: `${first.amountOut}` };
+    return {
+      first,
+      quote: {
+        side: request.side,
+        amountIn: `${first.amountIn}`,
+        amountLeft: "0",
+        chainTime: Number(market.chainTime),
+        taxEndsAt: Number(market.chainTime),
+        steps: [step],
+        slippageBps: request.slippageBps,
+        minimumOut: `${minimumOut(first.amountOut, request.slippageBps)}`,
+      },
+    };
+  }
   const taxEndsAt = market.pool.activationPoint + TAX_WINDOW_SECONDS;
   const at = (second: bigint) => quoteSwap({ pool: market.pool, config: market.config, side: request.side, amountIn, currentPoint: second, hasReferral });
   const first = at(market.chainTime);
@@ -184,8 +238,8 @@ const BAD_REQUEST = "Say buy or sell, an amount in raw units, and the slippage t
 export const quote = (c: Context<AppEnv>) =>
   respond(c, async () => {
     const request = await body(c, SwapRequest, BAD_REQUEST);
-    const { row, heat } = await heatPool(c);
-    return quoteOrRefuse(await readMarket(createSolanaRpc(c.var.cfg.rpcUrl), heat, row, null), request).quote;
+    const { row, graduation, heat } = await heatPool(c);
+    return quoteOrRefuse(await readMarket(createSolanaRpc(c.var.cfg.rpcUrl), heat, row, graduation, null), request).quote;
   });
 
 const sol = (lamports: bigint) => `${(Number(lamports) / 1e9).toLocaleString("en-US", { maximumFractionDigits: 9 })} SOL`;
@@ -198,14 +252,15 @@ export const prepareSwap = (c: Context<AppEnv>) =>
   respond(c, async () => {
     const { cfg } = c.var;
     const request = await body(c, SwapPrepareRequest, `${BAD_REQUEST} Name the wallet that signs.`);
-    const { row, heat } = await heatPool(c);
+    const { row, graduation, heat } = await heatPool(c);
     const rpc = createSolanaRpc(cfg.rpcUrl);
     const wallet = address(request.wallet);
-    const market = await readMarket(rpc, heat, row, wallet);
+    const market = await readMarket(rpc, heat, row, graduation, wallet);
     const { quote, first } = quoteOrRefuse(market, request);
     const held = market.wallet!;
     // The wrapped SOL account a swap opens is closed in the same transaction, its rent back with the proceeds.
-    const opening = (held.coinAccountOpen ? 0n : TOKEN_ACCOUNT_RENT) + (held.quoteAccountOpen ? 0n : TOKEN_ACCOUNT_RENT);
+    const rent = await rentOfTokenAccount(rpc);
+    const opening = (held.coinAccountOpen ? 0n : rent) + (held.quoteAccountOpen ? 0n : rent);
     if (request.side === "buy") {
       const needs = first.amountIn + opening + NETWORK_FEE;
       if (held.lamports < needs) throw new Refusal(400, `This wallet holds ${sol(held.lamports)}; the buy needs ${sol(needs)}, with its accounts' rent and the network fee.`);
@@ -226,6 +281,7 @@ export const prepareSwap = (c: Context<AppEnv>) =>
         minimumOut: BigInt(quote.minimumOut),
         mode: request.side === "buy" ? "partial_fill" : "exact_in",
         referralAccount: await referralAccountOf(heat.keys!.treasury, heat.quote.mint),
+        graduatedPool: graduation ? address(graduation.pool) : null,
       },
       { computeUnitPrice: cfg.computeUnitPrice, lifetime },
     );
@@ -276,14 +332,15 @@ export const reportTrade = (c: Context<AppEnv>) =>
   respond(c, async () => {
     const { cfg } = c.var;
     const { signature } = await body(c, SwapSent, "Send the trade's transaction signature.");
-    const { row, heat } = await heatPool(c);
+    const { row, graduation, heat } = await heatPool(c);
     const rpc = createSolanaRpc(cfg.rpcUrl);
     const until = Date.now() + SETTLE_WAIT_MS;
     const settled = (await settleSignatures(rpc, [signature], SETTLE_WAIT_MS, SETTLE_POLL_MS)).get(signature)!;
     const outcome: SwapOutcome = { signature, status: settled.status, error: settled.error, explorer: explorerUrl(cfg, "tx", signature), trades: [] };
     if (settled.status === "failed") {
       const code = customError(JSON.parse(settled.error ?? "null"));
-      outcome.error = (code !== null && DBC_ERRORS[code]) || `The trade failed on chain: ${settled.error}.`;
+      const known = graduation ? DAMM_ERRORS : DBC_ERRORS;
+      outcome.error = (code !== null && known[code]) || `The trade failed on chain: ${settled.error}.`;
     }
     if (settled.status !== "landed") return outcome;
     c.executionCtx.waitUntil(indexNow(c.env, [signature]));
@@ -295,7 +352,8 @@ export const reportTrade = (c: Context<AppEnv>) =>
     }
     if (!raw) return outcome;
     const configs = new Set<string>([heat.configs!.instant, heat.configs!.fairOpen]);
-    outcome.trades = decodeTransaction(raw, configs)
+    const graduated = new Map<string, GraduatedPoolRef>(graduation ? [[graduation.pool, { mint: graduation.mint, config: graduation.config }]] : []);
+    outcome.trades = decodeTransaction(raw, configs, graduated)
       .swaps.filter((s) => s.mint === row.mint)
       .map((s) => provisionalTrade(cfg, s, signature, raw.slot));
     return outcome;
