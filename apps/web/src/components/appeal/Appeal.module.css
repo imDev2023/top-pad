@@ -1,0 +1,84 @@
+/* An appeal against Vamp Shield's refusal */
+.layout {
+  display: grid;
+  gap: 16px;
+  max-width: 720px;
+}
+
+.head {
+  display: grid;
+  gap: 6px;
+}
+
+.subhead {
+  font-size: 1.05rem;
+}
+
+.facts {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.facts div {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 12px;
+}
+
+.facts dt {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.message {
+  min-height: 120px;
+  resize: vertical;
+  font: inherit;
+}
+
+.appeals {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.appeal {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content max-content;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+
+.appeal:first-child {
+  border-top: 0;
+}
+
+.appealCoin {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .facts div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+
+  .appeal {
+    grid-template-columns: minmax(0, 1fr) max-content;
+  }
+
+  .appeal :global(.note) {
+    grid-column: 1 / -1;
+  }
+}

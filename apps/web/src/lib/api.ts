@@ -20,7 +20,11 @@ import {
   PreparedSwap,
   SwapOutcome,
   SwapQuote,
+  ImageVerdict,
+  VampAppeal,
+  VampAppeals,
   VampShieldVerdict,
+  type VampAppealForm,
   type CandleSeconds,
   type ClaimRequest,
   type LaunchForm,
@@ -105,6 +109,19 @@ export const checkVampShield = (ticker: string, name: string, signal?: AbortSign
     body: JSON.stringify({ ticker, name }),
     signal,
   });
+
+/** Vamp Shield's verdict on a coin's image (spec 6.2): the vision service may wake for it, so it can take seconds. */
+export function checkImage(image: Blob, imageName: string, signal?: AbortSignal) {
+  const body = new FormData();
+  body.set("image", image, imageName);
+  return call(ImageVerdict, "/vamp-shield/image", { method: "POST", body, signal });
+}
+
+/** A creator's appeal against Vamp Shield's refusal, to the operator queue (spec 6.6). */
+export const submitAppeal = (form: VampAppealForm) =>
+  call(VampAppeal, "/vamp-shield/appeals", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(form) });
+
+export const getAppeals = () => call(VampAppeals, "/vamp-shield/appeals");
 
 export function prepareLaunch(form: LaunchForm, image: Blob, imageName: string) {
   const body = new FormData();

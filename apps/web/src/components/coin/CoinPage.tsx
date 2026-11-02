@@ -1,13 +1,14 @@
 "use client";
 
 import type { Coin, LiveBatch, Trade } from "@top-pad/contract";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { coinLiveUrl, getCoin, getCoinTrades } from "@/lib/api";
 import { ago, coinAmount, compactNumber, shortAddress } from "@/lib/format";
 import { CandleChart, type ChartFeed } from "./CandleChart";
 import styles from "./Coin.module.css";
 import { GraduationPanel } from "./GraduationPanel";
 import { QuickTrade } from "./QuickTrade";
+import { LooksLikeFlag, LooksLikePanel } from "../vampShield/LooksLike";
 import { RadarFlags } from "./RadarFlags";
 import { TaxBand } from "./TaxBand";
 import { TradeList } from "./TradeList";
@@ -30,6 +31,8 @@ export function CoinPage({ initial }: { initial: Coin }) {
   const [fresh, setFresh] = useState<ReadonlySet<string>>(new Set());
   // Bundle Radar's labels, read again on each change the coin's room reports.
   const [radarVersion, setRadarVersion] = useState(0);
+  const [looksLikeOpen, setLooksLikeOpen] = useState(false);
+  const looksLikeId = useId();
   // Trades this page sent, shown the moment they confirmed, until the indexer reports them (spec 10.2).
   const [pending, setPending] = useState<ReadonlySet<string>>(new Set());
   // The API's clock as the page was served: the server's render and the browser's first one must say the same.
@@ -208,6 +211,7 @@ export function CoinPage({ initial }: { initial: Coin }) {
                 </span>
               )}
               {coin.creator.handle && <span className="chip chip-info">@{coin.creator.handle}</span>}
+              <LooksLikeFlag labels={coin.looksLike} open={looksLikeOpen} onToggle={() => setLooksLikeOpen((o) => !o)} controls={looksLikeId} />
               <a className={`mono note ${styles.mint}`} href={coin.explorer.mint} target="_blank" rel="noreferrer" title={coin.mint}>
                 {shortAddress(coin.mint)}
               </a>
@@ -233,6 +237,8 @@ export function CoinPage({ initial }: { initial: Coin }) {
           </div>
         </dl>
       </header>
+
+      <LooksLikePanel labels={coin.looksLike} open={looksLikeOpen} id={looksLikeId} />
 
       {!coin.heat && (
         <div className="verdict verdict-stop" role="alert">

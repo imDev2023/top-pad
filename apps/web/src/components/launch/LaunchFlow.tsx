@@ -6,9 +6,9 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { LaunchRefusal, LaunchStatus, Me, Platform, VampShieldVerdict } from "@top-pad/contract";
+import type { ImageVerdict, LaunchRefusal, LaunchStatus, Me, Platform, VampShieldVerdict } from "@top-pad/contract";
 import { canonicalTicker, nameVerdict, NAME_MAX_BYTES, teaserVerdict, tickerVerdict } from "@top-pad/vamp-shield/rules";
-import { checkVampShield, getMe, getPlatform, linkXUrl, logout } from "@/lib/api";
+import { checkImage, checkVampShield, getMe, getPlatform, linkXUrl, logout } from "@/lib/api";
 import { shortAddress, sol } from "@/lib/format";
 import type { FittedImage } from "@/lib/image";
 import { WalletButton } from "../WalletButton";
@@ -18,6 +18,7 @@ import { ImagePicker } from "./ImagePicker";
 import { EMPTY_SCHEDULE, readSchedule, Schedule, span, when, type ScheduleDraft } from "./Schedule";
 import { SignFairOpen } from "./SignFairOpen";
 import { SignLaunch } from "./SignLaunch";
+import { VampVerdict, type ImageCheckState } from "./VampVerdict";
 import styles from "./Launch.module.css";
 
 type LinkOutcome = "linked" | "denied" | "failed" | null;
@@ -51,7 +52,11 @@ export function LaunchFlow({ linkOutcome: arrived }: { linkOutcome: LinkOutcome 
   const [touched, setTouched] = useState({ name: false, ticker: false });
   const [image, setImage] = useState<FittedImage | null>(null);
   const [checked, setChecked] = useState<{ key: string; verdict: VampShieldVerdict | null; problem: string | null } | null>(null);
-  const [refusal, setRefusal] = useState<LaunchRefusal | null>(null);
+  // The image's verdict, for the image it was asked for: a newer image is checked afresh.
+  const [imageChecked, setImageChecked] = useState<{ image: FittedImage; verdict: ImageVerdict | null; problem: string | null } | null>(null);
+  const [imageAsked, setImageAsked] = useState<{ image: FittedImage; at: number; attempt: number } | null>(null);
+  // The launch service's refusal, for the coin it refused: changing the ticker, the name or the image puts it away.
+  const [refusal, setRefusal] = useState<{ refusal: LaunchRefusal; image: FittedImage | null } | null>(null);
   const [landed, setLanded] = useState<LaunchStatus | null>(null);
   const [schedule, setSchedule] = useState<ScheduleDraft>(EMPTY_SCHEDULE);
   const [scheduleProblem, setScheduleProblem] = useState<string | null>(null);
@@ -115,11 +120,51 @@ export function LaunchFlow({ linkOutcome: arrived }: { linkOutcome: LinkOutcome 
     };
   }, [key, ticker, name, tickerRule.ok, nameRule.ok]);
 
+  // Vamp Shield's verdict on the image, asked once per image picked; the vision service may wake for it.
+  const attempt = imageAsked?.image === image ? imageAsked.attempt : 0;
+  useEffect(() => {
+    if (!image) return;
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      setImageAsked({ image, at: Date.now(), attempt });
+      checkImage(image.blob, image.name, controller.signal)
+        .then((verdict) => setImageChecked({ image, verdict, problem: null }))
+        .catch((e: Error) => {
+          if (!controller.signal.aborted) setImageChecked({ image, verdict: null, problem: e.message });
+        });
+    }, 0);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [image, attempt]);
+  const imageCurrent = imageChecked?.image === image ? imageChecked : null;
+  const imageState: ImageCheckState = !image
+    ? { state: "none" }
+    : imageCurrent?.verdict
+      ? { state: "done", verdict: imageCurrent.verdict }
+      : imageCurrent?.problem
+        ? { state: "problem", problem: imageCurrent.problem }
+        : { state: "checking", startedAt: imageAsked?.image === image ? imageAsked.at : Date.now() };
+  const retryImage = () => {
+    if (!image) return;
+    setImageChecked(null);
+    setImageAsked({ image, at: Date.now(), attempt: attempt + 1 });
+  };
+
   const current = checked?.key === key ? checked : null;
   const serverVerdict = current?.verdict ?? null;
   const tickerProblem = !tickerRule.ok ? tickerRule.reason : serverVerdict?.verdicts.ticker.status === "refused" ? serverVerdict.verdicts.ticker.reason : null;
   const nameProblem = !nameRule.ok ? nameRule.reason : serverVerdict?.verdicts.name.status === "refused" ? serverVerdict.verdicts.name.reason : null;
-  const coinReady = tickerRule.ok && nameRule.ok && serverVerdict?.clear === true && image !== null;
+  const imageVerdict = imageState.state === "done" ? imageState.verdict : null;
+  const coinReady = tickerRule.ok && nameRule.ok && serverVerdict?.clear === true && image !== null && imageVerdict !== null && imageVerdict.verdict.status !== "refused";
+  const shownRefusal =
+    refusal && refusal.image === image && (!refusal.refusal.verdict || (refusal.refusal.verdict.ticker === ticker && refusal.refusal.verdict.name === name)) ? refusal.refusal : null;
+  const appealHref = `/appeal?${new URLSearchParams({
+    ticker,
+    name,
+    ...((shownRefusal?.imageVerdict ?? imageVerdict?.verdict)?.status === "refused" && imageVerdict ? { image: imageVerdict.sha256 } : {}),
+  })}`;
 
   const creatorWallet = me?.creatorWallet ?? null;
   const wrongWallet = account && creatorWallet && account.address !== creatorWallet;
@@ -136,6 +181,8 @@ export function LaunchFlow({ linkOutcome: arrived }: { linkOutcome: LinkOutcome 
     setTouched({ name: false, ticker: false });
     setImage(null);
     setChecked(null);
+    setImageChecked(null);
+    setImageAsked(null);
     setRefusal(null);
     setLanded(null);
     setSchedule(EMPTY_SCHEDULE);
@@ -336,9 +383,12 @@ export function LaunchFlow({ linkOutcome: arrived }: { linkOutcome: LinkOutcome 
               <ImagePicker image={image} previewUrl={imageUrl} maxBytes={platform?.maxImageBytes ?? 98_304} onChange={setImage} />
               <VampVerdict
                 ready={tickerRule.ok && nameRule.ok}
-                verdict={serverVerdict}
-                problem={current?.problem ?? null}
-                refusal={refusal?.verdict && refusal.verdict.ticker === ticker && refusal.verdict.name === name ? refusal : null}
+                text={serverVerdict}
+                textProblem={current?.problem ?? null}
+                image={imageState}
+                refusal={shownRefusal}
+                appealHref={appealHref}
+                onRetryImage={retryImage}
               />
             </>
           )}
@@ -380,7 +430,7 @@ export function LaunchFlow({ linkOutcome: arrived }: { linkOutcome: LinkOutcome 
                       goTo(doneStep);
                     }}
                     onRefused={(r) => {
-                      setRefusal(r);
+                      setRefusal({ refusal: r, image });
                       if (r.code === "teaser" || r.code === "schedule") {
                         setScheduleProblem(r.error);
                         goTo(steps.indexOf("Schedule" as never));
@@ -414,7 +464,7 @@ export function LaunchFlow({ linkOutcome: arrived }: { linkOutcome: LinkOutcome 
                       goTo(doneStep);
                     }}
                     onRefused={(r) => {
-                      setRefusal(r);
+                      setRefusal({ refusal: r, image });
                       goTo(2);
                     }}
                   />
@@ -648,65 +698,6 @@ function Linked({ me, onUnlink }: { me: Me; onUnlink: () => void }) {
           Not you? Sign out
         </button>
       </span>
-    </div>
-  );
-}
-
-function VampVerdict({
-  ready,
-  verdict,
-  problem,
-  refusal,
-}: {
-  ready: boolean;
-  verdict: VampShieldVerdict | null;
-  problem: string | null;
-  refusal: LaunchRefusal | null;
-}) {
-  if (refusal) {
-    return (
-      <div className="verdict verdict-stop" role="alert">
-        <b>Refused</b>
-        <span className="note">{refusal.error}</span>
-      </div>
-    );
-  }
-  if (!ready) {
-    return (
-      <div className="verdict verdict-neutral">
-        <b>Vamp Shield</b>
-        <span className="note">Once the name and ticker read right, they are checked against every protected coin.</span>
-      </div>
-    );
-  }
-  if (problem) {
-    return (
-      <div className="verdict verdict-caution" role="status">
-        <b>Could not check against protected coins</b>
-        <span className="note">{problem}</span>
-      </div>
-    );
-  }
-  if (!verdict) {
-    return (
-      <div className="verdict verdict-neutral" role="status">
-        <b>Checking against protected coins…</b>
-      </div>
-    );
-  }
-  const match = verdict.verdicts.ticker.match ?? verdict.verdicts.name.match;
-  if (!verdict.clear) {
-    return (
-      <div className="verdict verdict-stop" role="status">
-        <b>{match ? `Refused: matches $${match.ticker}` : "Refused"}</b>
-        <span className="note">{verdict.verdicts.ticker.reason ?? verdict.verdicts.name.reason}</span>
-      </div>
-    );
-  }
-  return (
-    <div className="verdict verdict-go" role="status">
-      <b>Clear</b>
-      <span className="note">No protected coin matches this ticker or name.</span>
     </div>
   );
 }

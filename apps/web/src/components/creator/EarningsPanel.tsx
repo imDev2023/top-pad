@@ -9,6 +9,7 @@ import type { ClaimOutcome, CreatorEarnings, EarningsCoin } from "@top-pad/contr
 import { ApiProblem, getEarnings, prepareClaim, reportClaim } from "@/lib/api";
 import { shortAddress, sol } from "@/lib/format";
 import type { SolanaChain } from "../WalletProvider";
+import { LooksLikeChip } from "../vampShield/LooksLike";
 import styles from "./Creator.module.css";
 
 const SIGN_AND_SEND = "solana:signAndSendTransaction";
@@ -137,6 +138,7 @@ function CoinRow({ coin }: { coin: EarningsCoin }) {
         <span className={styles.names}>
           <b>{coin.name}</b>
           <span className="mono muted">{coin.ticker}</span>
+          <LooksLikeChip labels={coin.looksLike} />
         </span>
       </Link>
       <span className={styles.cell}>

@@ -36,7 +36,10 @@ export default function Home() {
         </li>
         <li className="panel pad">
           <span className="chip chip-stop flag">Vamp Shield</span>
-          <p>A launch that copies a protected coin&apos;s ticker or name, even with lookalike letters, is refused before it exists.</p>
+          <p>
+            A launch that copies a protected coin&apos;s ticker, name or picture, even with lookalike letters or the picture mirrored, is refused before it
+            exists. One that only looks close launches with a &ldquo;looks like&rdquo; label.
+          </p>
         </li>
       </ul>
     </div>
