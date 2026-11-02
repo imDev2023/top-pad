@@ -368,6 +368,9 @@ importers:
       '@top-pad/contract':
         specifier: workspace:*
         version: link:../../packages/contract
+      '@top-pad/db':
+        specifier: workspace:*
+        version: link:../../packages/db
       '@top-pad/tests-devnet':
         specifier: workspace:*
         version: link:../devnet
@@ -377,6 +380,9 @@ importers:
       '@types/node':
         specifier: ^24.19.2
         version: 24.19.2
+      drizzle-orm:
+        specifier: ^0.45.4
+        version: 0.45.4(@cloudflare/workers-types@5.20261027.1)(postgres@3.4.9)
 
   tests/x-stand-in:
     devDependencies:

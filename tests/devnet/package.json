@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./bundle": "./src/bundle.ts",
     "./devnet": "./src/devnet.ts",
     "./fair-open": "./src/fairOpen.ts"
   },
