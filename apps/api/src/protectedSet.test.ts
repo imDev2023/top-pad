@@ -143,6 +143,16 @@ describe("the hourly refresh", () => {
     }
   });
 
+  it("writes the deletions of rows that were stored without them", async () => {
+    await upsertListed(db, "coingecko_top", [listed("old-row", "OLDROW")]);
+    await db.update(protectedCoins).set({ tickerLooseDels: [], nameLooseDels: [] }).where(eq(protectedCoins.mint, "old-row"));
+    outside({});
+    const env = testBindings(url);
+    expect(await refreshLists(db, config(env), env, { coinGeckoPauseMs: 0 })).toMatchObject({ refolded: { refolded: 1 } });
+    const [row] = await db.select().from(protectedCoins).where(eq(protectedCoins.mint, "old-row"));
+    expect(row!.tickerLooseDels).toContain("OLDRO");
+  });
+
   it("keeps going when one provider fails, its error in the summary", async () => {
     outside({ "coins/markets": [], "tag?query=verified": () => new Response("down", { status: 500 }) });
     const env = testBindings(url);

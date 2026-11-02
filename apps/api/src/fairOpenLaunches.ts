@@ -49,7 +49,7 @@ import {
 } from "@top-pad/chain";
 import { LaunchForm, SubmitLaunch, type PreparedLaunch } from "@top-pad/contract";
 import { fairOpenRungs, launches, metadataItems, type Db } from "@top-pad/db";
-import { foldKeys } from "@top-pad/vamp-shield";
+import { tickerKey } from "@top-pad/vamp-shield";
 import { sessionCreator } from "./auth";
 import { fairOpenLaunchSetup, webApp, type Bindings, type Config } from "./env";
 import { startFairOpenKeeper } from "./fairOpenKeeper";
@@ -99,7 +99,7 @@ function lookupTable(rpc: Rpc, address: Address) {
 }
 
 /** The ticker's strict key (spec 6.2): what a Fair Open reserves for its window, so no other can hold the same one. */
-export const tickerKeyOf = (ticker: string) => foldKeys(ticker, "ticker").strict;
+export const tickerKeyOf = tickerKey;
 
 /** Whether a database error is the ticker reservation's unique index refusing a second holder. */
 const reservationTaken = (e: unknown) => {

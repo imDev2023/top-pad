@@ -210,8 +210,9 @@ export async function checkTeaser(db: Db, input: string): Promise<{ ok: true; te
   return rules;
 }
 
-/** The reason a refused launch shows first: the ticker's, else the name's. */
-export const firstRefusal = (v: VampShieldVerdict) => v.verdicts.ticker.reason ?? v.verdicts.name.reason ?? "Vamp Shield refused this launch.";
+/** The reason a refused launch shows first: the ticker's refusal, else the name's; never a field's "looks like" note. */
+export const firstRefusal = (v: VampShieldVerdict) =>
+  [v.verdicts.ticker, v.verdicts.name].find((f) => f.status === "refused")?.reason ?? "Vamp Shield refused this launch.";
 
 /** `POST /vamp-shield/check`: the launch flow's live text verdicts. */
 export async function checkRoute(c: Context<AppEnv>) {
@@ -244,14 +245,17 @@ async function signaturesOf(
   const vision = visionOf(env);
   if (!vision) return { ok: false, status: 503, reason: "Vamp Shield cannot check images on this deployment, so it cannot launch a coin." };
   let answer: Awaited<ReturnType<typeof vision.signatures>>;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     answer = await Promise.race([
       vision.signatures(bytes),
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`no answer in ${VISION_WAIT_MS / 1000} s`)), VISION_WAIT_MS)),
+      new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new Error(`no answer in ${VISION_WAIT_MS / 1000} s`)), VISION_WAIT_MS))),
     ]);
   } catch (e) {
     console.error("the vision service failed", (e as Error).message);
     return { ok: false, status: 503, reason: "Vamp Shield could not check the image just now. Try again in a minute." };
+  } finally {
+    clearTimeout(timer);
   }
   if ("error" in answer) {
     if (answer.status === 422 || answer.status === 413) return { ok: false, status: 422, reason: `The image could not be read: ${answer.error}` };
@@ -307,11 +311,12 @@ export async function nearestImages(db: Db, signatures: Signatures): Promise<(Im
     .select()
     .from(protectedCoins)
     .where(and(protectsNow(), inArray(protectedCoins.imageUrl, [...byUrl.keys()])));
-  const coins = dedupe(rows.map(matchedCoin));
+  const coins = rows.map(matchedCoin);
   const neighbours: (ImageNeighbour & { coin: MatchedCoin })[] = [];
   for (const [url, scores] of byUrl) {
-    // An image several coins share (a stock issuer's template, a coin and its bridged copy) is reported by the most
-    // authoritative of them.
+    // An image several rows share (a stock issuer's template, a coin and its bridged copy, one coin by two sources) is
+    // reported by the most authoritative of them; each row is matched by its own image, whatever another source of the
+    // same coin names.
     const coin = coins.filter((c) => c.imageUrl === url).sort((a, b) => SOURCE_RANK[a.source] - SOURCE_RANK[b.source])[0];
     if (coin) neighbours.push({ coin, ...scores });
   }
@@ -384,7 +389,11 @@ export async function checkImageRoute(c: Context<AppEnv>) {
   if (!(file instanceof File) || file.size === 0) return c.json({ error: "Send the coin's image." }, 400);
   if (file.size > cfg.maxImageBytes) return c.json({ error: `The image is too large: a coin's image can be at most ${Math.round(cfg.maxImageBytes / 1024)} KB.` }, 413);
   const check = await checkImage(db, cfg, c.env, new Uint8Array(await file.arrayBuffer()));
-  if (!check.ok) return c.json({ error: check.verdict.reason }, check.status as 422 | 503);
+  if (!check.ok) {
+    // Logged too: the rate limit counts every attempt, and the operator sees images the service could not read.
+    await db.insert(vampChecks).values({ stage: "image", creatorId: creator.id, imageSha256: check.sha256, outcome: "unchecked", matches: [] });
+    return c.json({ error: check.verdict.reason }, check.status as 422 | 503);
+  }
   await db.insert(vampChecks).values({
     stage: "image",
     creatorId: creator.id,
@@ -415,7 +424,7 @@ export type Preparing = { creatorId: string; launchId: string };
 /** What Vamp Shield decided for a launch being prepared: refused with the refusal, or its labels, maybe none. */
 export type LaunchVerdict =
   | { ok: true; ticker: string; name: string; imageSha256: string; looksLike: LooksLike[] }
-  | { ok: false; status: number; error: string; text: VampShieldVerdict; image: FieldVerdict | null };
+  | { ok: false; status: number; error: string; text: VampShieldVerdict; image: FieldVerdict | null; imageSha256: string | null };
 
 const logPrepared = (db: Db, at: Preparing, text: VampShieldVerdict, outcome: "looks_like" | "refused", matches: unknown[], imageSha256: string | null, nearest: unknown = null) =>
   db.insert(vampChecks).values({ stage: "prepare", creatorId: at.creatorId, launchId: at.launchId, ticker: text.ticker, name: text.name, imageSha256, outcome, matches, nearest });
@@ -440,12 +449,12 @@ export async function judgeLaunchText(db: Db, cfg: Config, at: Preparing, ticker
  */
 export async function judgeLaunch(db: Db, cfg: Config, env: Bindings, at: Preparing, text: TextCheck, image: Uint8Array): Promise<LaunchVerdict> {
   const check = await checkImage(db, cfg, env, image);
-  if (!check.ok) return { ok: false, status: check.status, error: check.verdict.reason!, text: text.verdict, image: check.verdict };
+  if (!check.ok) return { ok: false, status: check.status, error: check.verdict.reason!, text: text.verdict, image: check.verdict, imageSha256: check.sha256 };
   const textMatches = textMatchesOf(text.verdict);
   const imageMatches = check.verdict.match ? [{ field: "image", status: check.verdict.status, coin: check.verdict.match, reason: check.verdict.reason }] : [];
   if (check.verdict.status === "refused") {
     await logPrepared(db, at, text.verdict, "refused", [...textMatches, ...imageMatches], check.sha256, scoresOf(check.nearest));
-    return { ok: false, status: 422, error: check.verdict.reason!, text: text.verdict, image: check.verdict };
+    return { ok: false, status: 422, error: check.verdict.reason!, text: text.verdict, image: check.verdict, imageSha256: check.sha256 };
   }
   const byMint = new Map(text.matched.map((c) => [c.mint, c]));
   const labels: LooksLike[] = [];

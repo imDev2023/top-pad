@@ -163,7 +163,11 @@ export function LaunchFlow({ linkOutcome: arrived }: { linkOutcome: LinkOutcome 
   const appealHref = `/appeal?${new URLSearchParams({
     ticker,
     name,
-    ...((shownRefusal?.imageVerdict ?? imageVerdict?.verdict)?.status === "refused" && imageVerdict ? { image: imageVerdict.sha256 } : {}),
+    ...(shownRefusal?.imageVerdict?.status === "refused" && shownRefusal.imageSha256
+      ? { image: shownRefusal.imageSha256 }
+      : imageVerdict?.verdict.status === "refused"
+        ? { image: imageVerdict.sha256 }
+        : {}),
   })}`;
 
   const creatorWallet = me?.creatorWallet ?? null;

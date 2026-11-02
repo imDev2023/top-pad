@@ -158,6 +158,9 @@ function nameCoreWords(words: string[]): string[] {
 
 const nameCore = (words: string[]) => nameCoreWords(words).join("");
 
+/** A ticker's strict key: what the unique index holds for a Fair Open in its window and for a protected Heat coin. */
+export const tickerKey = (ticker: string) => strictKey(ticker);
+
 /**
  * A ticker's or a name's three keys (research/copycat-detection section 2). The field matters for the core key only, so
  * fold every text as what it is: a Protected coin's ticker as a ticker and its name as a name, as candidateKeys does.

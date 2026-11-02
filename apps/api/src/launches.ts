@@ -84,11 +84,17 @@ export async function readImage(c: Context<AppEnv>, body: Form): Promise<{ bytes
 }
 
 /** A launch Vamp Shield refused, as the launch flow reads it: the reason, the text's verdict and the image's if it was judged. */
-export const vampShieldRefusal = (verdict: { error: string; text: LaunchRefusal["verdict"]; image: LaunchRefusal["imageVerdict"] | null }): LaunchRefusal => ({
+export const vampShieldRefusal = (verdict: {
+  error: string;
+  text: LaunchRefusal["verdict"];
+  image: LaunchRefusal["imageVerdict"] | null;
+  imageSha256: string | null;
+}): LaunchRefusal => ({
   error: verdict.error,
   code: "vamp_shield",
   verdict: verdict.text,
   ...(verdict.image ? { imageVerdict: verdict.image } : {}),
+  ...(verdict.imageSha256 ? { imageSha256: verdict.imageSha256 } : {}),
 });
 
 /**

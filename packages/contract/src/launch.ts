@@ -75,8 +75,9 @@ export const LaunchRefusal = ApiError.extend({
   ]),
   /** The text's verdict, when Vamp Shield refused the ticker or the name. */
   verdict: VampShieldVerdict.optional(),
-  /** The image's verdict, when Vamp Shield refused it or could not check it. */
+  /** The image's verdict, when Vamp Shield refused it or could not check it, and the hash of the image it judged. */
   imageVerdict: FieldVerdict.optional(),
+  imageSha256: z.string().regex(/^[0-9a-f]{64}$/).optional(),
 });
 export type LaunchRefusal = z.infer<typeof LaunchRefusal>;
 

@@ -188,11 +188,28 @@ describe("Vamp Shield's image verdicts", () => {
     expect(vision.calls).toBe(3);
   });
 
-  it("says so when the vision service cannot answer", async () => {
+  it("says so when the vision service cannot answer, and counts the attempt", async () => {
     vision.down = true;
     const res = await checkImage(image("while-down"));
     expect(res.status).toBe(503);
     expect(await res.json()).toEqual({ error: "Vamp Shield could not check the image just now. Try again in a minute." });
+    const [logged] = await db.select().from(vampChecks).where(eq(vampChecks.imageSha256, await sha256(image("while-down"))));
+    expect(logged).toMatchObject({ stage: "image", outcome: "unchecked" });
+  });
+
+  it("matches an image a lower-ranked source names for a coin a higher one also protects", async () => {
+    const mint = "TwoSrc11111111111111111111111111111111111111";
+    await upsertListed(db, "jupiter_verified", [{ mint, ticker: "TWOS", name: "Two Sources", imageUrl: "https://img.test/two-verified.png", details: {} }]);
+    await upsertListed(db, "trending", [{ mint, ticker: "TWOS", name: "Two Sources", imageUrl: "https://img.test/two-trending.png", details: {} }]);
+    const trendingImage = fakeSignatures("two-trending");
+    await db
+      .update(protectedImages)
+      .set({ status: "done", sha256: trendingImage.sha256, pdq: trendingImage.pdq.bits, pdqQuality: 90, sscd: trendingImage.sscd })
+      .where(eq(protectedImages.url, "https://img.test/two-trending.png"));
+    const copy = image("two-copy");
+    await looksAs(copy, { pdq: { bits: trendingImage.pdq.bits, quality: 90, dihedral: [trendingImage.pdq.bits, ...fakeSignatures("x").pdq.dihedral.slice(1)] }, sscd: trendingImage.sscd });
+    const verdict = ImageVerdict.parse(await (await checkImage(copy)).json());
+    expect(verdict.verdict).toMatchObject({ status: "refused", match: { mint, source: "trending" } });
   });
 });
 
@@ -212,12 +229,22 @@ describe("a launch Vamp Shield judges as it is prepared", () => {
     expect(logged[0]).toMatchObject({ outcome: "refused", imageSha256: await sha256(rotated) });
   });
 
+  it("is refused for its name with the name's reason, not the ticker's \"looks like\" note", async () => {
+    await upsertListed(db, "jupiter_verified", [{ mint: "PepeMint1111111111111111111111111111111111111", ticker: "PEPE", name: "Pepe", imageUrl: null, details: {} }]);
+    const cookie = await linkX();
+    const res = await prepareInstant(cookie, { ticker: "BABYBONK", name: "P3pe", wallet: (await testKeypair()).signer.address, image: image("named") });
+    expect(res.status).toBe(422);
+    const refusal = LaunchRefusal.parse(await res.json());
+    expect(refusal.error).toBe(refusal.verdict!.verdicts.name.reason);
+    expect(refusal.verdict!.verdicts.ticker.status).toBe("looks_like");
+  });
+
   it("is refused when the image cannot be checked: the launch key never co-signs an unchecked image", async () => {
     const cookie = await linkX();
     vision.down = true;
     const res = await prepareInstant(cookie, { ticker: "UNSEEN", name: "Unseen", wallet: (await testKeypair()).signer.address, image: image("unseen") });
     expect(res.status).toBe(503);
-    expect(LaunchRefusal.parse(await res.json())).toMatchObject({ code: "vamp_shield", imageVerdict: { status: "refused" } });
+    expect(LaunchRefusal.parse(await res.json())).toMatchObject({ code: "vamp_shield", imageVerdict: { status: "refused" }, imageSha256: await sha256(image("unseen")) });
   });
 
   it("launches a near one with its \"looks like\" labels kept, and logged", async () => {

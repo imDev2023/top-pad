@@ -7,7 +7,7 @@
 import { and, eq, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { holderCount } from "@top-pad/indexer";
 import { coins, imageChecks, launches, pools, protectedCoins, protectedImages, trades, type Db } from "@top-pad/db";
-import { candidateKeys, deletions, FOLD_VERSION, PDQ_MIN_QUALITY } from "@top-pad/vamp-shield";
+import { candidateKeys, deletions, FOLD_VERSION, PDQ_MIN_QUALITY, tickerKey } from "@top-pad/vamp-shield";
 import type { Bindings, Config, SecretBinding } from "./env";
 import { visionOf } from "./vision";
 
@@ -282,7 +282,7 @@ export async function protectHeatCoin(db: Db, coin: HeatCoin, details: Record<st
   try {
     const rows = await db
       .update(launches)
-      .set({ tickerKey: candidateKeys(coin.ticker, coin.name).ticker.strict })
+      .set({ tickerKey: tickerKey(coin.ticker) })
       .where(and(eq(launches.id, coin.launchId), isNull(launches.tickerKey)))
       .returning({ id: launches.id });
     return { key: rows.length > 0 };
@@ -454,12 +454,22 @@ export async function refreshLists(db: Db, cfg: Config, env: Bindings, opts: { c
   return summary;
 }
 
-/** Rows folded under an older version, folded again: the lookup finds rows by their stored keys (spec 6.2). */
+/**
+ * Rows folded under an older version, or written without their deletions, folded again: the lookup finds rows by their
+ * stored keys (spec 6.2).
+ */
 async function refold(db: Db): Promise<{ refolded: number }> {
   const stale = await db
     .select({ id: protectedCoins.id, ticker: protectedCoins.ticker, name: protectedCoins.name })
     .from(protectedCoins)
-    .where(ne(protectedCoins.foldVersion, FOLD_VERSION))
+    .where(
+      or(
+        ne(protectedCoins.foldVersion, FOLD_VERSION),
+        // Rows written before the deletions existed: their one-edit neighbours would never be found.
+        sql`cardinality(${protectedCoins.tickerLooseDels}) = 0 and ${protectedCoins.tickerLoose} <> ''`,
+        sql`cardinality(${protectedCoins.nameLooseDels}) = 0 and ${protectedCoins.nameLoose} <> ''`,
+      ),
+    )
     .limit(2_000);
   for (const r of stale) await db.update(protectedCoins).set(keyColumns(r.ticker, r.name)).where(eq(protectedCoins.id, r.id));
   return { refolded: stale.length };

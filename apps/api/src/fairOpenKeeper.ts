@@ -592,12 +592,13 @@ export async function finishTicker(db: Db, launch: string): Promise<{ protected:
     await db.update(launches).set({ keeperDoneAt: sql`now()` }).where(and(eq(launches.id, row.id), isNull(launches.keeperDoneAt)));
     return { protected: true, released: false };
   }
-  const rows = await db
+  const held = await db
     .update(launches)
     .set({ tickerKey: null, keeperDoneAt: sql`coalesce(${launches.keeperDoneAt}, now())` })
-    .where(and(eq(launches.id, row.id), or(isNotNull(launches.tickerKey), isNull(launches.keeperDoneAt))))
-    .returning({ key: launches.tickerKey });
-  return { protected: false, released: rows.length > 0 };
+    .where(and(eq(launches.id, row.id), isNotNull(launches.tickerKey)))
+    .returning({ id: launches.id });
+  await db.update(launches).set({ keeperDoneAt: sql`now()` }).where(and(eq(launches.id, row.id), isNull(launches.keeperDoneAt)));
+  return { protected: false, released: held.length > 0 };
 }
 
 /**

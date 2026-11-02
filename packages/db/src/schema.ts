@@ -224,7 +224,8 @@ export const vampChecks = pgTable(
     ticker: text("ticker"),
     name: text("name"),
     imageSha256: text("image_sha256"),
-    outcome: text("outcome", { enum: ["clear", "looks_like", "refused"] }).notNull(),
+    /** `unchecked` when the vision service could not read or answer for the image. */
+    outcome: text("outcome", { enum: ["clear", "looks_like", "refused", "unchecked"] }).notNull(),
     /** Each refusing or near match: field, rule, the Protected coin and, for an image, its PDQ distance and SSCD similarity. */
     matches: jsonb("matches").notNull(),
     /** For an image, its closest Protected images whatever the outcome: the PDQ distances and SSCD similarities. */
