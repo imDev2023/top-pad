@@ -8,8 +8,10 @@ import type { RawTransaction } from "./decode";
 
 export * from "./candles";
 export * from "./decode";
+export * from "./funding";
 export * from "./heat";
 export * from "./live";
+export * from "./radar";
 
 /** What a batch wrote, counted by kind (trades, launches and so on, as each handler names them). */
 export type IndexResult = Record<string, number>;

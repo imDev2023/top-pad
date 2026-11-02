@@ -157,6 +157,8 @@ export const LiveEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("window_claim"), mint: Address, windowClaim: WindowClaim }),
   /** A coin's curve completed, or the coin graduated into DAMM v2 (spec 2.3): its page reads the coin again. */
   z.object({ type: z.literal("graduation"), mint: Address, stage: z.enum(["curve_complete", "graduated"]) }),
+  /** What Bundle Radar labels on a coin may have changed (spec 6.4): its page reads them again. */
+  z.object({ type: z.literal("radar"), mint: Address }),
   z.object({
     type: z.literal("fair_open"),
     launch: Address,
