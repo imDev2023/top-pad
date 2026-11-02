@@ -101,7 +101,9 @@ test("Vamp Shield refuses copies of a Protected coin and labels a near one", asy
   test.setTimeout(600_000);
   const errors = pageErrors(page);
   const copied = await protectedToCopy();
-  const label = `$${copied.ticker}`;
+  // The label names the most authoritative protected coin: for a ticker CoinGecko lists too, its Jupiter-verified spelling.
+  const label = new RegExp(`\\$${copied.ticker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i");
+  const labelled = (before: string, after = "") => new RegExp(`^${before}${label.source}${after}$`, "i");
   console.log(`copying ${copied.name} ($${copied.ticker}, ${copied.mint}), picture ${copied.imageUrl}`);
   const logo = Buffer.from(await (await fetch(copied.imageUrl!)).arrayBuffer());
 
@@ -120,7 +122,7 @@ test("Vamp Shield refuses copies of a Protected coin and labels a near one", asy
   await page.getByLabel("Ticker").fill(folded(copied.ticker));
   await page.getByLabel("Name").fill(runName("Vamp Check", ticker));
   await expect(page.getByTestId("vamp-ticker")).toContainText("Refused");
-  await expect(page.getByTestId("vamp-headline")).toHaveText(`Refused: copies ${label}`);
+  await expect(page.getByTestId("vamp-headline")).toHaveText(labelled("Refused: copies "));
   await expect(page.getByTestId("vamp-appeal")).toBeVisible();
   await expect(page.getByRole("button", { name: "Continue" })).toBeDisabled();
   await snap(page, "vamp-1-ticker-refused");
@@ -132,7 +134,7 @@ test("Vamp Shield refuses copies of a Protected coin and labels a near one", asy
   expect(rotated.verdict.verdict.status).toBe("refused");
   await expect(page.getByTestId("vamp-image")).toContainText("Refused");
   await expect(page.getByTestId("vamp-image")).toContainText(/rotated|copy detection/);
-  await expect(page.getByTestId("vamp-headline")).toHaveText(`Refused: copies ${label}`);
+  await expect(page.getByTestId("vamp-headline")).toHaveText(labelled("Refused: copies "));
   await snap(page, "vamp-2-image-rotated-refused");
 
   // Mirrored: refused too.
@@ -177,8 +179,8 @@ test("Vamp Shield refuses copies of a Protected coin and labels a near one", asy
   await page.getByLabel("Name").fill(runName("Vamp Near", ticker));
   const fresh = await pickImage(page, await uniqueCoinImage(page, ticker));
   console.log(`image check, a fresh picture: answered in ${fresh.verdict.answerMs} ms, woke ${fresh.verdict.woke}, the page waited ${fresh.waitedMs} ms`);
-  await expect(page.getByTestId("vamp-headline")).toHaveText(`Launches labelled "Looks like ${label}"`);
-  await expect(page.getByTestId("vamp-ticker")).toContainText(`Looks like ${label}`);
+  await expect(page.getByTestId("vamp-headline")).toHaveText(labelled('Launches labelled "Looks like ', '"'));
+  await expect(page.getByTestId("vamp-ticker")).toContainText(new RegExp(`Looks like ${label.source}`, "i"));
   await expect(page.getByRole("button", { name: "Continue" })).toBeEnabled();
   await snap(page, "vamp-6-near-labelled");
 
@@ -191,14 +193,18 @@ test("Vamp Shield refuses copies of a Protected coin and labels a near one", asy
 
   // The label on the coin's page, opening why.
   const flag = page.getByTestId("looks-like-flag");
-  await expect(flag).toHaveText(`Looks like ${label}`, { timeout: 60_000 });
+  await expect(flag).toHaveText(labelled("Looks like "), { timeout: 60_000 });
   await flag.click();
-  await expect(page.getByTestId("looks-like-panel")).toContainText(`Its ticker builds on ${label}`);
+  await expect(page.getByTestId("looks-like-panel")).toContainText(new RegExp(`Its ticker builds on ${label.source}`, "i"));
   await snap(page, "vamp-7-coin-page-label");
 
-  // And on the creator's coin row.
+  // And on the creator's coin row, the wallet that launched it connected.
   await page.goto("/creator");
-  await expect(page.getByTestId("looks-like-chip").first()).toHaveText(`Looks like ${label}`, { timeout: 60_000 });
+  const connect = page.getByRole("main").getByRole("button", { name: "Connect wallet" });
+  const chip = page.getByTestId("looks-like-chip").first();
+  await expect(chip.or(connect)).toBeVisible({ timeout: 60_000 });
+  if (await connect.isVisible()) await connectTestWallet(page, connect);
+  await expect(chip).toHaveText(labelled("Looks like "), { timeout: 60_000 });
   await snap(page, "vamp-8-creator-row-label");
 
   // A protected Heat coin's ticker: refused to a new launch, by the strict key the unique index also holds.

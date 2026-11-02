@@ -103,14 +103,17 @@ async function candidates(db: Db, lookup: ReturnType<typeof lookupValues>, near:
 /** Where a source ranks when one coin is protected by several: the label names the most authoritative. */
 const SOURCE_RANK: Record<ProtectedSource, number> = { jupiter_verified: 0, heat: 1, coingecko_top: 2, organic: 3, trending: 4 };
 
-/** One entry per coin, from its most authoritative source, so a coin protected twice is reported once. */
+/**
+ * One entry per coin, from its most authoritative source, so a coin protected twice is reported once; the most
+ * authoritative first, so a refusal or a label names a coin as Jupiter verifies it before CoinGecko or a trending list.
+ */
 function dedupe(coins: MatchedCoin[]): MatchedCoin[] {
   const best = new Map<string, MatchedCoin>();
   for (const coin of coins) {
     const held = best.get(coin.mint);
     if (!held || SOURCE_RANK[coin.source] < SOURCE_RANK[held.source]) best.set(coin.mint, coin);
   }
-  return [...best.values()];
+  return [...best.values()].sort((a, b) => SOURCE_RANK[a.source] - SOURCE_RANK[b.source]);
 }
 
 /** Where a trader sees a Protected coin: its page on Heat, Jupiter's for a Solana coin, CoinGecko's for another chain's. */
