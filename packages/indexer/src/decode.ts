@@ -74,7 +74,15 @@ export type RawInstruction = { programIdIndex: number; accounts: number[]; data:
 export type RawTransaction = {
   slot: number;
   blockTime: number | null;
-  transaction: { signatures: string[]; message: { accountKeys: string[]; instructions: RawInstruction[] } };
+  transaction: {
+    signatures: string[];
+    message: {
+      accountKeys: string[];
+      instructions: RawInstruction[];
+      /** How many of the first account keys signed, the fee payer first. */
+      header?: { numRequiredSignatures: number };
+    };
+  };
   meta: {
     err: unknown;
     logMessages?: string[] | null;
@@ -334,6 +342,12 @@ function identifyDamm(data: ReadonlyUint8Array): CpAmmInstruction | null {
   } catch {
     return null;
   }
+}
+
+/** A transaction's signers, the fee payer first; null when its header is not in the answer. */
+export function signersOf(tx: RawTransaction): string[] | null {
+  const count = tx.transaction.message.header?.numRequiredSignatures;
+  return count === undefined ? null : tx.transaction.message.accountKeys.slice(0, count);
 }
 
 /** The DAMM v2 pools a transaction's swaps and position fee claims name: what the indexer asks its database about. */

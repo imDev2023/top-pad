@@ -465,8 +465,16 @@ export const candles = pgTable(
 export const indexedTransactions = pgTable("indexed_transactions", {
   signature: text("signature").primaryKey(),
   slot: bigint("slot", { mode: "number" }).notNull(),
-  /** The transaction's place in its block, looked up only for a transaction with trades. */
+  /**
+   * The transaction's place in its block, looked up only for a transaction with trades or one that creates a pool, from
+   * which Bundle Radar counts the positions after a coin's creation (spec 6.4).
+   */
   blockIndex: integer("block_index"),
+  /**
+   * Its signers, the fee payer first: Bundle Radar's first direct link is a buy or deposit the Creator wallet signed or
+   * paid for (spec 6.5). Null for a transaction indexed before it was recorded.
+   */
+  signers: text("signers").array(),
   indexedAt: timestamp("indexed_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -649,4 +657,97 @@ export const admissions = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.launch, t.wallet] }), uniqueIndex("admissions_launch_cluster").on(t.launch, t.cluster)],
+);
+
+/**
+ * The funding graph (spec 6.5, 10.4): every direct transfer of SOL or a token to or from a Creator wallet, read from that
+ * wallet's history over the 7 days before each of its coins' opens and the 7 days after. A buyer who sent or received
+ * one is directly linked to the creator. Keyed by its transaction and its place among the transaction's instructions,
+ * inner ones included, in the order they ran.
+ */
+export const transfers = pgTable(
+  "transfers",
+  {
+    signature: text("signature").notNull(),
+    ordinal: integer("ordinal").notNull(),
+    slot: bigint("slot", { mode: "number" }).notNull(),
+    /** The block's time. */
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    /** The wallets: for a token, the sending account's authority and the receiving account's owner. */
+    source: text("source").notNull(),
+    destination: text("destination").notNull(),
+    /** `SOL` for lamports, else the token's mint, wrapped SOL's included. */
+    asset: text("asset").notNull(),
+    /** In the asset's raw units. */
+    amount: numeric("amount", { precision: 30, scale: 0 }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.signature, t.ordinal] }), index("transfers_source_idx").on(t.source, t.at), index("transfers_destination_idx").on(t.destination, t.at)],
+);
+
+/**
+ * How much of each Creator wallet's history Bundle Radar has read into `transfers`: everything from `covers_from` up to
+ * its newest signature, from which the next scan goes on, and the oldest it read, from which a scan reaching further
+ * back starts.
+ */
+export const fundingScans = pgTable("funding_scans", {
+  wallet: text("wallet").primaryKey(),
+  newestSignature: text("newest_signature"),
+  newestSlot: bigint("newest_slot", { mode: "number" }),
+  oldestSignature: text("oldest_signature"),
+  coversFrom: timestamp("covers_from", { withTimezone: true }).notNull(),
+  scannedAt: timestamp("scanned_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * Jito's public record of a transaction (spec 6.4, mainnet only: Jito runs no devnet block engine): the bundle it landed
+ * in, or null when it landed in none.
+ */
+export const jitoBundles = pgTable("jito_bundles", {
+  signature: text("signature").primaryKey(),
+  bundleId: text("bundle_id"),
+  checkedAt: timestamp("checked_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * Bundle Radar's review of each Heat coin (spec 6.5): first an hour after its open, then again while its 7 days after
+ * the open bring new transfers with its Creator wallet. What the wallets directly linked to the Creator wallet bought
+ * across the pot and the first hour, and whether that opened a case.
+ */
+export const bundleReviews = pgTable("bundle_reviews", {
+  mint: text("mint").primaryKey(),
+  outcome: text("outcome", { enum: ["case", "below_floor", "no_links"] }).notNull(),
+  linkedWallets: integer("linked_wallets").notNull(),
+  /** In the coin's raw units. */
+  linkedCoins: bigint("linked_coins", { mode: "bigint" }).notNull(),
+  firstReviewedAt: timestamp("first_reviewed_at", { withTimezone: true }).notNull().defaultNow(),
+  reviewedAt: timestamp("reviewed_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * A bundling case (spec 6.5, 6.6): opened by Bundle Radar's review when wallets directly linked to a coin's Creator
+ * wallet bought 1% or more of its supply across the pot and the first hour, never by a probabilistic signal. It holds
+ * the evidence pack, also kept in R2, for an operator to confirm; no Bar follows on its own. One per coin.
+ */
+export const bundleCases = pgTable(
+  "bundle_cases",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    mint: text("mint").notNull().unique(),
+    creatorWallet: text("creator_wallet").notNull(),
+    creatorId: uuid("creator_id").references(() => creators.id),
+    /** Open until an operator acts on it in the operator app (#54, #56). */
+    status: text("status", { enum: ["open"] })
+      .notNull()
+      .default("open"),
+    linkedWallets: integer("linked_wallets").notNull(),
+    /** What the linked wallets bought across the pot and the first hour, and the coin's supply, in raw units. */
+    linkedCoins: bigint("linked_coins", { mode: "bigint" }).notNull(),
+    supply: bigint("supply", { mode: "bigint" }).notNull(),
+    /** The evidence pack: the transactions, the Jito bundle ids and the transfers behind each link. */
+    evidence: jsonb("evidence").notNull(),
+    /** Where the same pack is kept in R2 (spec 10.4). */
+    evidenceKey: text("evidence_key").notNull(),
+    openedAt: timestamp("opened_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("bundle_cases_creator_wallet_idx").on(t.creatorWallet), index("bundle_cases_status_idx").on(t.status, t.openedAt)],
 );

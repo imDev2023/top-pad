@@ -115,12 +115,24 @@ describe("indexing Heat's transactions", () => {
     expect(published).toHaveLength(1);
   });
 
-  it("asks for no block position when a transaction has no trade", async () => {
+  it("records a pool's creation with its place in its block and its signers, though it has no trade", async () => {
     const { handle, asked } = handler();
-    expect(await indexTransactions(db, handle, [fixture("launch")])).toEqual({ transactions: 1, pools: 1, coins: 1 });
-    expect(asked).toEqual([]);
+    const tx = fixture("launch");
+    expect(await indexTransactions(db, handle, [tx])).toEqual({ transactions: 1, pools: 1, coins: 1 });
+    // Bundle Radar counts the positions after a coin's creation from it (spec 6.4).
+    expect(asked).toEqual([[tx.slot, tx.transaction.signatures[0]]]);
     const [pool] = await db.select().from(pools);
     expect(pool!.sqrtPrice).toBe(heat.sqrtStartPrice.toString());
+    const [indexed] = await db.select().from(indexedTransactions);
+    // The creator, the mint key and the launch key signed it, the creator paying.
+    expect(indexed).toMatchObject({ blockIndex: 17, signers: tx.transaction.message.accountKeys.slice(0, 3) });
+    expect(indexed!.signers![0]).toBe(tx.transaction.message.accountKeys[0]);
+  });
+
+  it("asks for no block position when a transaction has no trade and makes no pool", async () => {
+    const { handle, asked } = handler();
+    expect(await indexTransactions(db, handle, [fixture("window-claim")])).toEqual({ transactions: 1, claims: 1 });
+    expect(asked).toEqual([]);
   });
 
   it("writes a coin's window claim and its creator's claims, once each, and hands them to the live rooms", async () => {

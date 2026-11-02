@@ -39,6 +39,7 @@ import {
   type PoolCreated,
   type RawTransaction,
   type SeatEvent,
+  signersOf,
   type TaxShareCollection,
   type WindowClaimed,
 } from "./decode";
@@ -107,11 +108,16 @@ export function heatHandler({ heat, blockIndexOf, onIndexed }: HeatHandlerOption
       : [];
     const graduated = new Map<string, GraduatedPoolRef>(known.map((g) => [g.pool, { mint: g.mint, config: g.config }]));
     const decoded = decodeTransaction(tx, configs, graduated);
-    const blockIndex = decoded.swaps.length ? await blockIndexOf(tx.slot, signature) : null;
+    // A trade's place orders it among its slot's; a pool's creation is where Bundle Radar counts positions from (spec 6.4).
+    const blockIndex = decoded.swaps.length || decoded.pools.length ? await blockIndexOf(tx.slot, signature) : null;
     const blockTime = new Date((tx.blockTime ?? Math.floor(Date.now() / 1000)) * 1000);
 
     const added = await db.transaction(async (t) => {
-      const [claimed] = await t.insert(indexedTransactions).values({ signature, slot: tx.slot, blockIndex }).onConflictDoNothing().returning();
+      const [claimed] = await t
+        .insert(indexedTransactions)
+        .values({ signature, slot: tx.slot, blockIndex, signers: signersOf(tx) })
+        .onConflictDoNothing()
+        .returning();
       if (!claimed) return null;
 
       for (const p of decoded.pools) {

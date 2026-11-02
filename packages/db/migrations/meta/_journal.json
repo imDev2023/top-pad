@@ -71,6 +71,13 @@
       "when": 1793599929263,
       "tag": "0009_sealed_identity",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1793607857084,
+      "tag": "0010_bundle_radar",
+      "breakpoints": true
     }
   ]
 }
