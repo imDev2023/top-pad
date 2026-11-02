@@ -148,8 +148,10 @@ describe("a quick trade's quote", () => {
     const config = getPoolConfigDecoder().decode(configAccount().data);
     const at20 = quoteSwap({ pool, config, side: "buy", amountIn: SOL / 10n, currentPoint: ACTIVATION + 20n, hasReferral: true });
     expect(quote.steps[0]).toEqual({ from: Number(ACTIVATION) + 20, fee: `${at20.fee}`, quoteAmount: `${at20.quoteAmount}`, amountOut: `${at20.amountOut}` });
-    // The least it may return allows the slippage on the first, dearest, second.
-    expect(quote.minimumOut).toBe(`${(at20.amountOut * 9_900n) / 10_000n}`);
+    // The least it may return allows the slippage on the fee of two seconds before, where a lagging node may simulate it.
+    const at18 = quoteSwap({ pool, config, side: "buy", amountIn: SOL / 10n, currentPoint: ACTIVATION + 18n, hasReferral: true });
+    expect(quote.minimumOut).toBe(`${(at18.amountOut * 9_900n) / 10_000n}`);
+    expect(at18.amountOut).toBeLessThan(at20.amountOut);
   });
 
   it("is one step once the tax has ended", async () => {

@@ -39,6 +39,12 @@ const SETTLE_POLL_MS = 300;
 const TOKEN_ACCOUNT_RENT = 2_039_280n;
 /** A swap's network fee, one signature, with room for a priority fee on a busy cluster. */
 const NETWORK_FEE = 10_000n;
+/**
+ * How far behind the quote's clock a wallet's own node may simulate the trade: during the sniper tax each second earlier
+ * charges more, so the trade's minimum is set by the fee of this many seconds before, or a lagging node's preflight
+ * refuses it (seen on devnet, 2026-11-02).
+ */
+const SIMULATION_LAG_SECONDS = 2n;
 /** DBC's custom errors a quick trade can land with, in the trader's words. */
 const DBC_ERRORS: Record<number, string> = {
   6002: "The price moved more than your slippage allows before the trade ran, so nothing was traded. Try again, or allow more slippage.",
@@ -122,6 +128,8 @@ export function quoteOf(market: Market, request: SwapRequest, hasReferral: boole
   const taxEndsAt = market.pool.activationPoint + TAX_WINDOW_SECONDS;
   const at = (second: bigint) => quoteSwap({ pool: market.pool, config: market.config, side: request.side, amountIn, currentPoint: second, hasReferral });
   const first = at(market.chainTime);
+  const earliest = market.chainTime - SIMULATION_LAG_SECONDS;
+  const floor = at(earliest > market.pool.activationPoint ? earliest : market.pool.activationPoint);
   const steps: QuoteStep[] = [];
   for (let second = market.chainTime; ; second++) {
     const q = second === market.chainTime ? first : at(second);
@@ -138,7 +146,7 @@ export function quoteOf(market: Market, request: SwapRequest, hasReferral: boole
       taxEndsAt: Number(taxEndsAt),
       steps,
       slippageBps: request.slippageBps,
-      minimumOut: `${minimumOut(first.amountOut, request.slippageBps)}`,
+      minimumOut: `${minimumOut(floor.amountOut < first.amountOut ? floor.amountOut : first.amountOut, request.slippageBps)}`,
     },
   };
 }

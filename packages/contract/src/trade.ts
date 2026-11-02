@@ -51,8 +51,9 @@ export const SwapQuote = z.object({
   steps: z.array(QuoteStep).min(1),
   slippageBps: z.number().int(),
   /**
-   * The least the trade may return: the first step's, the highest fee it can pay, less the slippage allowed. The fee only
-   * falls, so a trade that lands later never pays more than its quote.
+   * The least the trade may return, less the slippage allowed: what it returns at the fee of two seconds before the
+   * quote's clock, since a wallet's node may simulate it that far behind and the sniper tax is higher there. The fee
+   * only falls, so the trade itself never pays more than its first step.
    */
   minimumOut: RawAmount,
 });

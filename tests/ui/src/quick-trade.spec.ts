@@ -92,11 +92,10 @@ test("a trader buys and sells from the coin's page, seeing the fee before signin
       const first = (await t.row.getAttribute("data-pending")) === "true" ? "fast path" : "indexer";
       const charged = await rateOf(t.row.locator("td").nth(4));
       runs.push({ at: Math.round(elapsed()), side, shown: t.shown, charged, first });
-      // Then the indexer's report replaces it in place: one row, never two.
-      await expect(traderPage.locator(`[data-trade="${t.signature}:0"]:not([data-pending])`)).toBeVisible({ timeout: 30_000 });
-      await expect(traderPage.locator(`[data-trade="${t.signature}:0"]`)).toHaveCount(1);
-      expect(await referralShare(t.signature), `Heat's referral share of ${t.signature}`).toBeGreaterThan(0n);
+      signatures.push(t.signature);
     };
+    const signatures: string[] = [];
+    console.log(`trading opens ${elapsed().toFixed(1)} s after the open`);
     const buy = await trade(traderPage, "buy", { amount: "0.02" }, "quick-1-buy-during-tax");
     expect(elapsed()).toBeLessThan(60);
     await record("buy", buy);
@@ -113,6 +112,13 @@ test("a trader buys and sells from the coin's page, seeing the fee before signin
     await snap(traderPage, "quick-4-sold-all");
 
     console.table(runs.map((r) => ({ ...r, shown: `${r.shown}%`, charged: `${r.charged}%` })));
+    // The indexer's report of each replaced the page's own in place: one row, never two; and each paid Heat's referral
+    // account its share.
+    for (const signature of signatures) {
+      await expect(traderPage.locator(`[data-trade="${signature}:0"]:not([data-pending])`)).toBeVisible({ timeout: 30_000 });
+      await expect(traderPage.locator(`[data-trade="${signature}:0"]`)).toHaveCount(1);
+      expect(await referralShare(signature), `Heat's referral share of ${signature}`).toBeGreaterThan(0n);
+    }
     for (const r of runs) expect(Math.abs(r.shown - r.charged), `the ${r.side} at ${r.at} s`).toBeLessThanOrEqual(STEP + 0.01);
     expect(runs.at(-1)!.charged).toBe(1.25);
     expect(await coinBalance(trader.address, address(mint))).toBe(0n);
