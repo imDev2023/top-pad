@@ -8,6 +8,75 @@
   },
   "instructions": [
     {
+      "name": "burn_leftover",
+      "docs": [
+        "The leftover at Graduation (spec 3.1, 5.2): any coins a migrated pool neither sold on its curve nor put into its",
+        "DAMM v2 pool, which DBC pays to the configs' leftover receiver, the `fee_claimer` PDA, and this instruction burns",
+        "at once (owner, 2026-10-27). Anyone may send it once the pool has migrated; DBC pays a leftover once. It burns",
+        "everything the fee claimer's account of the coin holds, so the fee program never holds a coin."
+      ],
+      "discriminator": [
+        58,
+        137,
+        245,
+        55,
+        2,
+        29,
+        142,
+        89
+      ],
+      "accounts": [
+        {
+          "name": "fee_claimer",
+          "address": "4Garg7N38ShAr8z38ZKkHrgP9Lj5nRKiy3HGtNDqTpko"
+        },
+        {
+          "name": "fee_claimer_coin_account",
+          "docs": [
+            "opened beforehand in the same transaction, as DBC requires it to exist."
+          ],
+          "writable": true
+        },
+        {
+          "name": "pool_authority",
+          "address": "FhVo3mqL8PW5pH5U2CN4XE33DokiyZnUwuGpH2hmHLuM"
+        },
+        {
+          "name": "config"
+        },
+        {
+          "name": "pool",
+          "writable": true
+        },
+        {
+          "name": "base_vault",
+          "writable": true
+        },
+        {
+          "name": "mint",
+          "writable": true
+        },
+        {
+          "name": "token_base_program"
+        },
+        {
+          "name": "dbc_event_authority",
+          "address": "8Ks12pbrD6PXxfty1hVQiE9sc289zgU1zHkvXhrSdriF"
+        },
+        {
+          "name": "dbc_program",
+          "address": "dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "claim_fair_open_window_fees",
       "docs": [
         "The window claim of a Fair Open's coin (spec 2.1 step 14, 4): its pool's partner fees once its Tax window has ended,",
@@ -262,6 +331,213 @@
           "type": "u64"
         }
       ]
+    },
+    {
+      "name": "claim_lp_fees",
+      "docs": [
+        "Heat's LP fees after Graduation (spec 4): the fees of Heat's half of a graduated pool's liquidity, a DAMM v2",
+        "position permanently locked and owned by the `fee_claimer` PDA, which signs DAMM v2's claim so the fees go",
+        "straight to the treasury's quote account. Anyone may send it, as often as they like. The graduated pool collects",
+        "its fees in the quote alone (spec 3.4), so the fee claimer's own account of the coin stands in DAMM v2's slot for",
+        "the coin's fees, where nothing is paid."
+      ],
+      "discriminator": [
+        72,
+        86,
+        212,
+        142,
+        60,
+        38,
+        74,
+        75
+      ],
+      "accounts": [
+        {
+          "name": "fee_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "treasury_token_account",
+          "writable": true
+        },
+        {
+          "name": "fee_claimer",
+          "address": "4Garg7N38ShAr8z38ZKkHrgP9Lj5nRKiy3HGtNDqTpko"
+        },
+        {
+          "name": "fee_claimer_coin_account",
+          "docs": [
+            "the coin's fees, which a pool collecting in the quote never pays."
+          ],
+          "writable": true
+        },
+        {
+          "name": "damm_pool_authority",
+          "address": "HLnpSz9h2S4hiLQ43rnSD9XkcUThA7B8hQMKmDaiTLcC"
+        },
+        {
+          "name": "pool"
+        },
+        {
+          "name": "position",
+          "writable": true
+        },
+        {
+          "name": "position_nft_account"
+        },
+        {
+          "name": "token_a_vault",
+          "writable": true
+        },
+        {
+          "name": "token_b_vault",
+          "writable": true
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "quote_mint"
+        },
+        {
+          "name": "token_base_program"
+        },
+        {
+          "name": "token_quote_program"
+        },
+        {
+          "name": "damm_event_authority",
+          "address": "3rmHSu74h1ZcmAisVcWerTCiRDQbUrBKmcwptYGjHfet"
+        },
+        {
+          "name": "damm_program",
+          "address": "cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "claim_surplus",
+      "docs": [
+        "The surplus at Graduation (spec 4): what a pool raised past its Graduation Target, of which DBC keeps a fifth",
+        "and gives the partner the rest. Anyone may send it once the curve is complete, and it runs once a pool, as DBC",
+        "pays a partner's surplus once. DBC pays the partner's share into the fee claimer's own quote account, and this",
+        "instruction pays it straight on, half (rounded down) to whoever holds the pool's creator role and the rest to the",
+        "treasury, so none of it rests here."
+      ],
+      "discriminator": [
+        195,
+        35,
+        205,
+        205,
+        177,
+        146,
+        141,
+        62
+      ],
+      "accounts": [
+        {
+          "name": "fee_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "creator_token_account",
+          "writable": true
+        },
+        {
+          "name": "treasury_token_account",
+          "writable": true
+        },
+        {
+          "name": "fee_claimer",
+          "address": "4Garg7N38ShAr8z38ZKkHrgP9Lj5nRKiy3HGtNDqTpko"
+        },
+        {
+          "name": "fee_claimer_token_account",
+          "docs": [
+            "leaves again in the same instruction."
+          ],
+          "writable": true
+        },
+        {
+          "name": "pool_authority",
+          "address": "FhVo3mqL8PW5pH5U2CN4XE33DokiyZnUwuGpH2hmHLuM"
+        },
+        {
+          "name": "config"
+        },
+        {
+          "name": "pool",
+          "writable": true
+        },
+        {
+          "name": "quote_vault",
+          "writable": true
+        },
+        {
+          "name": "quote_mint"
+        },
+        {
+          "name": "token_quote_program"
+        },
+        {
+          "name": "dbc_event_authority",
+          "address": "8Ks12pbrD6PXxfty1hVQiE9sc289zgU1zHkvXhrSdriF"
+        },
+        {
+          "name": "dbc_program",
+          "address": "dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
     },
     {
       "name": "claim_unlisted_window_fees",
@@ -1170,6 +1446,45 @@
       ]
     },
     {
+      "name": "LeftoverBurnt",
+      "discriminator": [
+        48,
+        87,
+        146,
+        106,
+        162,
+        244,
+        245,
+        223
+      ]
+    },
+    {
+      "name": "LpFeesClaimed",
+      "discriminator": [
+        106,
+        76,
+        240,
+        18,
+        233,
+        91,
+        163,
+        215
+      ]
+    },
+    {
+      "name": "SurplusClaimed",
+      "discriminator": [
+        190,
+        176,
+        212,
+        219,
+        106,
+        10,
+        46,
+        52
+      ]
+    },
+    {
       "name": "WindowFeesClaimed",
       "discriminator": [
         237,
@@ -1283,6 +1598,21 @@
       "code": 6019,
       "name": "NotTheTaxShare",
       "msg": "A Fair Open's window fees go to its launch's pot, its Tax Share"
+    },
+    {
+      "code": 6020,
+      "name": "NotATokenAccount",
+      "msg": "The account is not a token account"
+    },
+    {
+      "code": 6021,
+      "name": "UnexpectedBalance",
+      "msg": "A token account the instruction pays into held less afterwards"
+    },
+    {
+      "code": 6022,
+      "name": "NotADammV2Account",
+      "msg": "The account is not DAMM v2's"
     }
   ],
   "types": [
@@ -1520,6 +1850,114 @@
           },
           {
             "name": "Instant"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LeftoverBurnt",
+      "docs": [
+        "A migrated pool's leftover coins, withdrawn and burnt."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "config",
+            "type": "pubkey"
+          },
+          {
+            "name": "withdrawn",
+            "docs": [
+              "What DBC paid out as leftover, and what was burnt: everything the fee claimer's account of the coin held."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "burnt",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LpFeesClaimed",
+      "docs": [
+        "The fees of Heat's position in a graduated pool, paid to the treasury."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pool",
+            "docs": [
+              "The DAMM v2 pool and Heat's position in it."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "position",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "docs": [
+              "In the quote's raw units."
+            ],
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SurplusClaimed",
+      "docs": [
+        "A pool's surplus at Graduation, the partner's share of it split 50/50 like Creator Earnings."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "config",
+            "type": "pubkey"
+          },
+          {
+            "name": "creator",
+            "docs": [
+              "Who held the pool's DBC creator role at the claim, and was paid `creator_amount`."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "creator_amount",
+            "docs": [
+              "In the quote's raw units; the treasury's is the creator's, or one more when the surplus was odd."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "treasury_amount",
+            "type": "u64"
           }
         ]
       }

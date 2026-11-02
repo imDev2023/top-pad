@@ -1,7 +1,8 @@
 //! What the fee program's LiteSVM tests share: the built program (target/deploy/fee.so, from `pnpm programs`), a
 //! FeeConfig, and DBC pools and configs written in DBC's layout. DBC itself never runs here, only our stand-in for its
 //! partner fee claim (tests/dbc-stand-in, built by `pnpm programs`), so a claim moves real tokens out of a pool's vault;
-//! the devnet tests check the same claims against the real DBC.
+//! the devnet tests check the same claims against the real DBC. Graduation's claims run against our stand-ins for DBC's
+//! surplus and leftover and for DAMM v2's position fee claim (tests/damm-stand-in) in the same way.
 // LiteSVM's failed-transaction metadata is large by design; the helpers here only hand it back to the test.
 #![allow(clippy::result_large_err, dead_code)]
 use {
@@ -27,6 +28,7 @@ use {
 
 pub const PROGRAM: &[u8] = include_bytes!(concat!(env!("CARGO_TARGET_TMPDIR"), "/../deploy/fee.so"));
 const DBC_STAND_IN: &[u8] = include_bytes!(concat!(env!("CARGO_TARGET_TMPDIR"), "/../deploy/dbc_stand_in.so"));
+const DAMM_STAND_IN: &[u8] = include_bytes!(concat!(env!("CARGO_TARGET_TMPDIR"), "/../deploy/damm_stand_in.so"));
 
 /// The upgradeable loader, which owns every ProgramData account.
 pub const UPGRADEABLE_LOADER: Pubkey = anchor_lang::solana_program::bpf_loader_upgradeable::ID;
@@ -58,6 +60,9 @@ pub enum FeeErrorCode {
     NotTheFairOpenProgram,
     NotAFairOpen,
     NotTheTaxShare,
+    NotATokenAccount,
+    UnexpectedBalance,
+    NotADammV2Account,
 }
 
 /// A pool and config written with DBC's layout and owner, as DBC would have left them.
@@ -91,6 +96,7 @@ impl Test {
         let mut svm = LiteSVM::new();
         svm.add_program(fee::id(), PROGRAM).unwrap();
         svm.add_program(dbc::PROGRAM_ID, DBC_STAND_IN).unwrap();
+        svm.add_program(fee::damm_v2::PROGRAM_ID, DAMM_STAND_IN).unwrap();
         let payer = Keypair::new();
         svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
         let launch_key = Keypair::new();
@@ -317,20 +323,24 @@ impl Test {
         send(&mut self.svm, ixs, &payer, signers)
     }
 
-    fn edit_pool(&mut self, pool: &Pubkey, edit: impl FnOnce(&mut Vec<u8>)) {
+    pub fn edit_pool(&mut self, pool: &Pubkey, edit: impl FnOnce(&mut Vec<u8>)) {
         let mut account = self.svm.get_account(pool).unwrap();
         edit(&mut account.data);
         self.svm.set_account(*pool, account).unwrap();
     }
 
     fn set_dbc_account(&mut self, address: Pubkey, data: Vec<u8>) {
+        self.set_program_account(address, data, dbc::PROGRAM_ID);
+    }
+
+    /// An account `owner` holds, with `data`, rent-exempt.
+    pub fn set_program_account(&mut self, address: Pubkey, data: Vec<u8>, owner: Pubkey) {
         let lamports = self.svm.minimum_balance_for_rent_exemption(data.len());
-        let account =
-            solana_account::Account { lamports, data, owner: dbc::PROGRAM_ID, executable: false, rent_epoch: 0 };
+        let account = solana_account::Account { lamports, data, owner, executable: false, rent_epoch: 0 };
         self.svm.set_account(address, account).unwrap();
     }
 
-    fn set_token_account_data(&mut self, address: Pubkey, data: Vec<u8>) {
+    pub fn set_token_account_data(&mut self, address: Pubkey, data: Vec<u8>) {
         let lamports = self.svm.minimum_balance_for_rent_exemption(data.len());
         let account =
             solana_account::Account { lamports, data, owner: TOKEN_PROGRAM, executable: false, rent_epoch: 0 };
@@ -342,12 +352,12 @@ impl Test {
 const POOL_BASE_VAULT_OFFSET: usize = 168;
 const POOL_QUOTE_VAULT_OFFSET: usize = 200;
 
-fn put(data: &mut [u8], offset: usize, bytes: &[u8]) {
+pub fn put(data: &mut [u8], offset: usize, bytes: &[u8]) {
     data[offset..offset + bytes.len()].copy_from_slice(bytes);
 }
 
 /// An initialized SPL mint with no authorities.
-fn mint_data(decimals: u8) -> Vec<u8> {
+pub fn mint_data(decimals: u8) -> Vec<u8> {
     let mut data = vec![0u8; 82];
     data[44] = decimals;
     data[45] = 1;
@@ -355,7 +365,7 @@ fn mint_data(decimals: u8) -> Vec<u8> {
 }
 
 /// An initialized SPL token account, with no delegate and no close authority.
-fn token_account_data(mint: &Pubkey, owner: &Pubkey, amount: u64) -> Vec<u8> {
+pub fn token_account_data(mint: &Pubkey, owner: &Pubkey, amount: u64) -> Vec<u8> {
     let mut data = vec![0u8; 165];
     put(&mut data, 0, mint.as_ref());
     put(&mut data, 32, owner.as_ref());

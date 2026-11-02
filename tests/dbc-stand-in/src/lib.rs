@@ -5,7 +5,10 @@
 //! the coin, the pool and its vaults where DBC makes them and charging the payer what Metaplex's metadata costs it, and
 //! a buy, `swap2`, at a flat made-up price, paying the ending fee if it is the pool's first swap and passes the
 //! instructions sysvar, and the 99% cliff otherwise, the partner's share of the fee accruing in the pool as DBC accrues
-//! it. Meteora's own binary is never loaded (spec 5.1); the devnet tests run our programs against the real DBC.
+//! it. For the fee program's Graduation: the partner's surplus, `partner_withdraw_surplus`, and the leftover,
+//! `withdraw_leftover`, as DBC 0.2.2's `ix_withdraw_partner_surplus.rs` and `withdraw_leftover.rs` pay them, over pools
+//! the tests mark complete or migrated. Meteora's own binary is never loaded (spec 5.1); the devnet tests run our
+//! programs against the real DBC.
 use anchor_lang::{
     prelude::Pubkey,
     solana_program::{
@@ -38,6 +41,19 @@ pub const POOL_BASE_VAULT: usize = 168;
 pub const POOL_QUOTE_VAULT: usize = 200;
 pub const POOL_PARTNER_BASE_FEE: usize = 264;
 pub const POOL_PARTNER_QUOTE_FEE: usize = 272;
+/// `PoolConfig`'s Graduation Target and leftover receiver, and `VirtualPool`'s flags the surplus and leftover read.
+pub const CONFIG_MIGRATION_QUOTE_THRESHOLD: usize = 264;
+pub const CONFIG_LEFTOVER_RECEIVER: usize = 72;
+pub const POOL_IS_PARTNER_WITHDRAW_SURPLUS: usize = 306;
+pub const POOL_MIGRATION_PROGRESS: usize = 308;
+pub const POOL_IS_WITHDRAW_LEFTOVER: usize = 309;
+/// `MigrationProgress::CreatedPool`: the pool has migrated.
+pub const CREATED_POOL: u8 = 3;
+/// DBC's share of a surplus for the partner and creator together, the rest the protocol's; Heat's configs give the
+/// creator none of it, so it is all the partner's.
+pub const PARTNER_AND_CREATOR_SURPLUS_SHARE: u64 = 80;
+pub const PARTNER_WITHDRAW_SURPLUS_DISCRIMINATOR: [u8; 8] = [168, 173, 72, 100, 201, 98, 38, 92];
+pub const WITHDRAW_LEFTOVER_DISCRIMINATOR: [u8; 8] = [20, 198, 202, 237, 235, 243, 183, 66];
 
 /// An SPL mint's decimals.
 const MINT_DECIMALS: usize = 44;
@@ -71,6 +87,7 @@ pub const METAPLEX_CREATE_FEE: u64 = 10_000_000;
 const TOKEN_PROGRAM: Pubkey = anchor_lang::pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 const SYSTEM_PROGRAM: Pubkey = anchor_lang::pubkey!("11111111111111111111111111111111");
 const INSTRUCTIONS_SYSVAR: Pubkey = anchor_lang::pubkey!("Sysvar1nstructions1111111111111111111111111");
+const ASSOCIATED_TOKEN_PROGRAM: Pubkey = anchor_lang::pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 const MINT_LEN: u64 = 82;
 const TOKEN_ACCOUNT_LEN: u64 = 165;
 
@@ -81,6 +98,10 @@ pub fn process(_program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> P
         }
         Some((discriminator, _)) if discriminator == INITIALIZE_POOL_DISCRIMINATOR => initialize_pool(accounts),
         Some((discriminator, args)) if discriminator == SWAP2_DISCRIMINATOR => swap2(accounts, args),
+        Some((discriminator, _)) if discriminator == PARTNER_WITHDRAW_SURPLUS_DISCRIMINATOR => {
+            partner_withdraw_surplus(accounts)
+        }
+        Some((discriminator, _)) if discriminator == WITHDRAW_LEFTOVER_DISCRIMINATOR => withdraw_leftover(accounts),
         _ => Err(ProgramError::InvalidInstructionData),
     }
 }
@@ -364,4 +385,77 @@ fn transfer<'info>(
     };
     // A user's transfer is signed by the user in the transaction; the pool authority's by its seeds.
     system(instruction, &[from.clone(), mint.clone(), to.clone(), authority.clone(), token_program.clone()], signer)
+}
+
+/// `partner_withdraw_surplus`: once the pool's quote reserve holds its Graduation Target, the partner's share of what it
+/// holds past it, paid once out of the quote vault, signed for by the config's fee claimer.
+fn partner_withdraw_surplus(accounts: &[AccountInfo]) -> ProgramResult {
+    let [pool_authority, config, pool, token_quote_account, quote_vault, quote_mint, fee_claimer, token_quote_program, _event_authority, _program] =
+        accounts
+    else {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    };
+    require(config.owner == &ID && pool.owner == &ID, "not DBC's")?;
+    let config_data = config.try_borrow_data()?;
+    require(config_data.starts_with(&POOL_CONFIG_DISCRIMINATOR), "not a config")?;
+    require(*quote_mint.key == address(&config_data, CONFIG_QUOTE_MINT)?, "not the config's quote mint")?;
+    require(
+        fee_claimer.is_signer && *fee_claimer.key == address(&config_data, CONFIG_FEE_CLAIMER)?,
+        "not the fee claimer",
+    )?;
+    let threshold = number(&config_data, CONFIG_MIGRATION_QUOTE_THRESHOLD)?;
+    drop(config_data);
+    let (authority, bump) = Pubkey::find_program_address(&[POOL_AUTHORITY_SEED], &ID);
+    require(*pool_authority.key == authority, "not the pool authority")?;
+    let surplus = {
+        let mut data = pool.try_borrow_mut_data()?;
+        require(data.starts_with(&VIRTUAL_POOL_DISCRIMINATOR), "not a pool")?;
+        require(address(&data, POOL_CONFIG)? == *config.key, "the pool's config")?;
+        require(address(&data, POOL_QUOTE_VAULT)? == *quote_vault.key, "the pool's quote vault")?;
+        let reserve = number(&data, POOL_QUOTE_RESERVE)?;
+        require(reserve >= threshold, "the curve is not complete")?;
+        require(data[POOL_IS_PARTNER_WITHDRAW_SURPLUS] == 0, "the surplus has been withdrawn")?;
+        data[POOL_IS_PARTNER_WITHDRAW_SURPLUS] = 1;
+        (reserve - threshold) * PARTNER_AND_CREATOR_SURPLUS_SHARE / 100
+    };
+    msg!("DBC stand-in: partner surplus {}", surplus);
+    let signer: &[&[u8]] = &[POOL_AUTHORITY_SEED, &[bump]];
+    transfer(token_quote_program, quote_vault, quote_mint, token_quote_account, pool_authority, surplus, signer)
+}
+
+/// `withdraw_leftover`: once the pool has migrated, what its coin vault still holds, paid once to the leftover
+/// receiver's associated coin account; anyone may send it.
+fn withdraw_leftover(accounts: &[AccountInfo]) -> ProgramResult {
+    let [pool_authority, config, pool, token_base_account, base_vault, base_mint, leftover_receiver, token_base_program, _event_authority, _program] =
+        accounts
+    else {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    };
+    require(config.owner == &ID && pool.owner == &ID, "not DBC's")?;
+    let config_data = config.try_borrow_data()?;
+    require(config_data.starts_with(&POOL_CONFIG_DISCRIMINATOR), "not a config")?;
+    require(*leftover_receiver.key == address(&config_data, CONFIG_LEFTOVER_RECEIVER)?, "not the leftover receiver")?;
+    drop(config_data);
+    // DBC's `associated_token::authority = leftover_receiver` constraint.
+    let (expected, _) = Pubkey::find_program_address(
+        &[leftover_receiver.key.as_ref(), token_base_program.key.as_ref(), base_mint.key.as_ref()],
+        &ASSOCIATED_TOKEN_PROGRAM,
+    );
+    require(*token_base_account.key == expected, "not the leftover receiver's associated account")?;
+    let (authority, bump) = Pubkey::find_program_address(&[POOL_AUTHORITY_SEED], &ID);
+    require(*pool_authority.key == authority, "not the pool authority")?;
+    {
+        let mut data = pool.try_borrow_mut_data()?;
+        require(data.starts_with(&VIRTUAL_POOL_DISCRIMINATOR), "not a pool")?;
+        require(address(&data, POOL_CONFIG)? == *config.key, "the pool's config")?;
+        require(address(&data, POOL_BASE_MINT)? == *base_mint.key, "the pool's base mint")?;
+        require(address(&data, POOL_BASE_VAULT)? == *base_vault.key, "the pool's base vault")?;
+        require(data[POOL_MIGRATION_PROGRESS] == CREATED_POOL, "the pool has not migrated")?;
+        require(data[POOL_IS_WITHDRAW_LEFTOVER] == 0, "the leftover has been withdrawn")?;
+        data[POOL_IS_WITHDRAW_LEFTOVER] = 1;
+    }
+    let leftover = number(&base_vault.try_borrow_data()?, 64)?;
+    msg!("DBC stand-in: leftover {}", leftover);
+    let signer: &[&[u8]] = &[POOL_AUTHORITY_SEED, &[bump]];
+    transfer(token_base_program, base_vault, base_mint, token_base_account, pool_authority, leftover, signer)
 }

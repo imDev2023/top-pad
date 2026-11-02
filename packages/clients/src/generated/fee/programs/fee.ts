@@ -47,29 +47,41 @@ import {
   type WindowClaimArgs,
 } from "../accounts";
 import {
+  getBurnLeftoverInstruction,
   getClaimFairOpenWindowFeesInstructionAsync,
   getClaimFeesInstructionAsync,
+  getClaimLpFeesInstructionAsync,
+  getClaimSurplusInstructionAsync,
   getClaimUnlistedWindowFeesInstructionAsync,
   getClaimWindowFeesInstructionAsync,
   getInitializeInstructionAsync,
   getRegisterCoinInstructionAsync,
   getRegisterFairOpenCoinInstructionAsync,
   getUpdateFeeConfigInstructionAsync,
+  parseBurnLeftoverInstruction,
   parseClaimFairOpenWindowFeesInstruction,
   parseClaimFeesInstruction,
+  parseClaimLpFeesInstruction,
+  parseClaimSurplusInstruction,
   parseClaimUnlistedWindowFeesInstruction,
   parseClaimWindowFeesInstruction,
   parseInitializeInstruction,
   parseRegisterCoinInstruction,
   parseRegisterFairOpenCoinInstruction,
   parseUpdateFeeConfigInstruction,
+  type BurnLeftoverInput,
   type ClaimFairOpenWindowFeesAsyncInput,
   type ClaimFeesAsyncInput,
+  type ClaimLpFeesAsyncInput,
+  type ClaimSurplusAsyncInput,
   type ClaimUnlistedWindowFeesAsyncInput,
   type ClaimWindowFeesAsyncInput,
   type InitializeAsyncInput,
+  type ParsedBurnLeftoverInstruction,
   type ParsedClaimFairOpenWindowFeesInstruction,
   type ParsedClaimFeesInstruction,
+  type ParsedClaimLpFeesInstruction,
+  type ParsedClaimSurplusInstruction,
   type ParsedClaimUnlistedWindowFeesInstruction,
   type ParsedClaimWindowFeesInstruction,
   type ParsedInitializeInstruction,
@@ -142,6 +154,9 @@ export enum FeeEvent {
   CoinRegistered,
   FeeConfigChanged,
   FeesClaimed,
+  LeftoverBurnt,
+  LpFeesClaimed,
+  SurplusClaimed,
   WindowFeesClaimed,
 }
 
@@ -186,6 +201,39 @@ export function identifyFeeEvent(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([48, 87, 146, 106, 162, 244, 245, 223]),
+      ),
+      0,
+    )
+  ) {
+    return FeeEvent.LeftoverBurnt;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([106, 76, 240, 18, 233, 91, 163, 215]),
+      ),
+      0,
+    )
+  ) {
+    return FeeEvent.LpFeesClaimed;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([190, 176, 212, 219, 106, 10, 46, 52]),
+      ),
+      0,
+    )
+  ) {
+    return FeeEvent.SurplusClaimed;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
         new Uint8Array([237, 140, 43, 98, 103, 0, 173, 236]),
       ),
       0,
@@ -197,8 +245,11 @@ export function identifyFeeEvent(
 }
 
 export enum FeeInstruction {
+  BurnLeftover,
   ClaimFairOpenWindowFees,
   ClaimFees,
+  ClaimLpFees,
+  ClaimSurplus,
   ClaimUnlistedWindowFees,
   ClaimWindowFees,
   Initialize,
@@ -211,6 +262,17 @@ export function identifyFeeInstruction(
   instruction: { data: ReadonlyUint8Array } | ReadonlyUint8Array,
 ): FeeInstruction {
   const data = "data" in instruction ? instruction.data : instruction;
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([58, 137, 245, 55, 2, 29, 142, 89]),
+      ),
+      0,
+    )
+  ) {
+    return FeeInstruction.BurnLeftover;
+  }
   if (
     containsBytes(
       data,
@@ -232,6 +294,28 @@ export function identifyFeeInstruction(
     )
   ) {
     return FeeInstruction.ClaimFees;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([72, 86, 212, 142, 60, 38, 74, 75]),
+      ),
+      0,
+    )
+  ) {
+    return FeeInstruction.ClaimLpFees;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([195, 35, 205, 205, 177, 146, 141, 62]),
+      ),
+      0,
+    )
+  ) {
+    return FeeInstruction.ClaimSurplus;
   }
   if (
     containsBytes(
@@ -309,11 +393,20 @@ export type ParsedFeeInstruction<
   TProgram extends string = "HeatFEzySQiaWqxR7cDza9WP2B15AxMfsgSS5p6Bdn97",
 > =
   | ({
+      instructionType: FeeInstruction.BurnLeftover;
+    } & ParsedBurnLeftoverInstruction<TProgram>)
+  | ({
       instructionType: FeeInstruction.ClaimFairOpenWindowFees;
     } & ParsedClaimFairOpenWindowFeesInstruction<TProgram>)
   | ({
       instructionType: FeeInstruction.ClaimFees;
     } & ParsedClaimFeesInstruction<TProgram>)
+  | ({
+      instructionType: FeeInstruction.ClaimLpFees;
+    } & ParsedClaimLpFeesInstruction<TProgram>)
+  | ({
+      instructionType: FeeInstruction.ClaimSurplus;
+    } & ParsedClaimSurplusInstruction<TProgram>)
   | ({
       instructionType: FeeInstruction.ClaimUnlistedWindowFees;
     } & ParsedClaimUnlistedWindowFeesInstruction<TProgram>)
@@ -338,6 +431,13 @@ export function parseFeeInstruction<TProgram extends string>(
 ): ParsedFeeInstruction<TProgram> {
   const instructionType = identifyFeeInstruction(instruction);
   switch (instructionType) {
+    case FeeInstruction.BurnLeftover: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: FeeInstruction.BurnLeftover,
+        ...parseBurnLeftoverInstruction(instruction),
+      };
+    }
     case FeeInstruction.ClaimFairOpenWindowFees: {
       assertIsInstructionWithAccounts(instruction);
       return {
@@ -350,6 +450,20 @@ export function parseFeeInstruction<TProgram extends string>(
       return {
         instructionType: FeeInstruction.ClaimFees,
         ...parseClaimFeesInstruction(instruction),
+      };
+    }
+    case FeeInstruction.ClaimLpFees: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: FeeInstruction.ClaimLpFees,
+        ...parseClaimLpFeesInstruction(instruction),
+      };
+    }
+    case FeeInstruction.ClaimSurplus: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: FeeInstruction.ClaimSurplus,
+        ...parseClaimSurplusInstruction(instruction),
       };
     }
     case FeeInstruction.ClaimUnlistedWindowFees: {
@@ -421,6 +535,10 @@ export type FeePluginAccounts = {
 };
 
 export type FeePluginInstructions = {
+  burnLeftover: (
+    input: BurnLeftoverInput,
+    config?: { programAddress?: Address | HasAddress },
+  ) => ReturnType<typeof getBurnLeftoverInstruction> & SelfPlanAndSendFunctions;
   claimFairOpenWindowFees: (
     input: ClaimFairOpenWindowFeesAsyncInput,
     config?: { programAddress?: Address | HasAddress },
@@ -430,6 +548,16 @@ export type FeePluginInstructions = {
     input: ClaimFeesAsyncInput,
     config?: { programAddress?: Address | HasAddress },
   ) => ReturnType<typeof getClaimFeesInstructionAsync> &
+    SelfPlanAndSendFunctions;
+  claimLpFees: (
+    input: ClaimLpFeesAsyncInput,
+    config?: { programAddress?: Address | HasAddress },
+  ) => ReturnType<typeof getClaimLpFeesInstructionAsync> &
+    SelfPlanAndSendFunctions;
+  claimSurplus: (
+    input: ClaimSurplusAsyncInput,
+    config?: { programAddress?: Address | HasAddress },
+  ) => ReturnType<typeof getClaimSurplusInstructionAsync> &
     SelfPlanAndSendFunctions;
   claimUnlistedWindowFees: (
     input: MakeOptional<ClaimUnlistedWindowFeesAsyncInput, "payer">,
@@ -490,6 +618,14 @@ export function feeProgram(
           windowClaim: addSelfFetchFunctions(client, getWindowClaimCodec()),
         },
         instructions: {
+          burnLeftover: (input, instructionConfig) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getBurnLeftoverInstruction(input, {
+                programAddress:
+                  instructionConfig?.programAddress ?? config.programAddress,
+              }),
+            ),
           claimFairOpenWindowFees: (input, instructionConfig) =>
             addSelfPlanAndSendFunctions(
               client,
@@ -502,6 +638,22 @@ export function feeProgram(
             addSelfPlanAndSendFunctions(
               client,
               getClaimFeesInstructionAsync(input, {
+                programAddress:
+                  instructionConfig?.programAddress ?? config.programAddress,
+              }),
+            ),
+          claimLpFees: (input, instructionConfig) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getClaimLpFeesInstructionAsync(input, {
+                programAddress:
+                  instructionConfig?.programAddress ?? config.programAddress,
+              }),
+            ),
+          claimSurplus: (input, instructionConfig) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getClaimSurplusInstructionAsync(input, {
                 programAddress:
                   instructionConfig?.programAddress ?? config.programAddress,
               }),

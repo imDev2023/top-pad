@@ -3,7 +3,9 @@
 //! co-signed or a Fair Open opened. It pays out every curve fee by ADR 0003's rules: the window claim sends a pool's Tax
 //! window fees to the treasury, or a Fair Open's, less the pot's own fee, to its launch's Tax Share; and every later claim
 //! splits the pool's partner fees 50/50 between whoever holds its DBC creator role and the treasury. DBC pays each share straight from the pool to its owner's quote account, so no fee
-//! ever rests here.
+//! ever rests here. At Graduation (spec 2.3) it splits the partner's surplus the same way, burns any coins DBC leaves
+//! over, and claims the fees of Heat's permanently locked DAMM v2 position, which its `fee_claimer` PDA owns, to the
+//! treasury; what passes through its own accounts leaves them in the same instruction.
 use anchor_lang::{
     prelude::*,
     solana_program::{
@@ -70,6 +72,12 @@ pub mod dbc {
     /// `claim_trading_fee(max_amount_a, max_amount_b)`: the partner's accrued fees, the coin's then the quote's, each up to
     /// its maximum, paid to `token_a_account` and `token_b_account`. Only the config's fee claimer may sign it.
     pub const CLAIM_TRADING_FEE_DISCRIMINATOR: [u8; 8] = [8, 236, 89, 49, 152, 125, 177, 81];
+    /// `partner_withdraw_surplus`: once the curve is complete, the partner's share of what the pool raised past its
+    /// Graduation Target, paid once to `token_quote_account`. Only the config's fee claimer may sign it.
+    pub const PARTNER_WITHDRAW_SURPLUS_DISCRIMINATOR: [u8; 8] = [168, 173, 72, 100, 201, 98, 38, 92];
+    /// `withdraw_leftover`: once the pool has migrated, the coins neither sold nor migrated, paid once to the leftover
+    /// receiver's associated coin account. Anyone may send it.
+    pub const WITHDRAW_LEFTOVER_DISCRIMINATOR: [u8; 8] = [20, 198, 202, 237, 235, 243, 183, 66];
 
     /// The 32-byte address at `offset`, if the data holds one there.
     pub fn address_at(data: &[u8], offset: usize) -> Option<Pubkey> {
@@ -110,6 +118,21 @@ pub mod dbc {
             })
         }
     }
+}
+
+/// Meteora's DAMM v2, where a coin trades after Graduation (spec 2.3, 3.4), from the IDL of release 0.2.5 that the
+/// generated clients use (`packages/clients/idl/damm_v2.json`).
+pub mod damm_v2 {
+    use anchor_lang::prelude::*;
+
+    pub const PROGRAM_ID: Pubkey = pubkey!("cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG");
+    /// DAMM v2's pool authority, which owns every pool's vaults and signs what DAMM v2 pays out of them.
+    pub const POOL_AUTHORITY: Pubkey = pubkey!("HLnpSz9h2S4hiLQ43rnSD9XkcUThA7B8hQMKmDaiTLcC");
+    /// DAMM v2's event authority, the PDA its `emit_cpi!` events are signed by.
+    pub const EVENT_AUTHORITY: Pubkey = pubkey!("3rmHSu74h1ZcmAisVcWerTCiRDQbUrBKmcwptYGjHfet");
+    /// `claim_position_fee`: a position's accrued fees, paid to `token_a_account` and `token_b_account`; only the owner
+    /// of the position's NFT account may sign it, or a delegate it named.
+    pub const CLAIM_POSITION_FEE_DISCRIMINATOR: [u8; 8] = [180, 38, 154, 17, 133, 33, 162, 211];
 }
 
 #[cfg(not(feature = "no-entrypoint"))]
@@ -359,6 +382,250 @@ pub mod fee {
         });
         Ok(())
     }
+
+    /// The surplus at Graduation (spec 4): what a pool raised past its Graduation Target, of which DBC keeps a fifth
+    /// and gives the partner the rest. Anyone may send it once the curve is complete, and it runs once a pool, as DBC
+    /// pays a partner's surplus once. DBC pays the partner's share into the fee claimer's own quote account, and this
+    /// instruction pays it straight on, half (rounded down) to whoever holds the pool's creator role and the rest to the
+    /// treasury, so none of it rests here.
+    pub fn claim_surplus(ctx: Context<ClaimSurplus>) -> Result<()> {
+        let a = &ctx.accounts;
+        let pool = dbc::Pool::read(&a.pool)?;
+        require_keys_eq!(pool.config, a.config.key(), FeeError::PoolConfigMismatch);
+        require_keys_neq!(pool.creator, FEE_CLAIMER, FeeError::CreatorRoleHeldByFeeClaimer);
+        let quote = QuoteAccounts::new(&a.quote_mint, &a.token_quote_program);
+        quote.check(&a.creator_token_account, &pool.creator, FeeError::NotTheCreatorsAccount)?;
+        quote.check(&a.treasury_token_account, &a.fee_config.treasury, FeeError::NotTheTreasurysAccount)?;
+        quote.check(&a.fee_claimer_token_account, &FEE_CLAIMER, FeeError::NotTheFeeClaimersAccount)?;
+
+        let held = token_amount(&a.fee_claimer_token_account)?;
+        let instruction = Instruction {
+            program_id: dbc::PROGRAM_ID,
+            accounts: vec![
+                AccountMeta::new_readonly(a.pool_authority.key(), false),
+                AccountMeta::new_readonly(a.config.key(), false),
+                AccountMeta::new(a.pool.key(), false),
+                AccountMeta::new(a.fee_claimer_token_account.key(), false),
+                AccountMeta::new(a.quote_vault.key(), false),
+                AccountMeta::new_readonly(a.quote_mint.key(), false),
+                AccountMeta::new_readonly(FEE_CLAIMER, true),
+                AccountMeta::new_readonly(a.token_quote_program.key(), false),
+                AccountMeta::new_readonly(a.dbc_event_authority.key(), false),
+                AccountMeta::new_readonly(dbc::PROGRAM_ID, false),
+            ],
+            data: dbc::PARTNER_WITHDRAW_SURPLUS_DISCRIMINATOR.to_vec(),
+        };
+        let infos = [
+            a.pool_authority.to_account_info(),
+            a.config.to_account_info(),
+            a.pool.to_account_info(),
+            a.fee_claimer_token_account.to_account_info(),
+            a.quote_vault.to_account_info(),
+            a.quote_mint.to_account_info(),
+            a.fee_claimer.to_account_info(),
+            a.token_quote_program.to_account_info(),
+            a.dbc_event_authority.to_account_info(),
+            a.dbc_program.to_account_info(),
+        ];
+        invoke_signed(&instruction, &infos, &[&[FEE_CLAIMER_SEED, &[FEE_CLAIMER_BUMP]]])?;
+        // What DBC paid in: whatever else the account held stays where it was.
+        let amount =
+            token_amount(&a.fee_claimer_token_account)?.checked_sub(held).ok_or(FeeError::UnexpectedBalance)?;
+        let creator_amount = amount / 2;
+        let treasury_amount = amount - creator_amount;
+        for (to, amount) in [(&a.creator_token_account, creator_amount), (&a.treasury_token_account, treasury_amount)] {
+            if amount > 0 {
+                transfer_checked(
+                    &a.token_quote_program,
+                    &a.fee_claimer_token_account,
+                    &a.quote_mint,
+                    to,
+                    &a.fee_claimer,
+                    amount,
+                )?;
+            }
+        }
+        emit_cpi!(SurplusClaimed {
+            pool: a.pool.key(),
+            mint: pool.base_mint,
+            config: pool.config,
+            creator: pool.creator,
+            creator_amount,
+            treasury_amount,
+        });
+        Ok(())
+    }
+
+    /// The leftover at Graduation (spec 3.1, 5.2): any coins a migrated pool neither sold on its curve nor put into its
+    /// DAMM v2 pool, which DBC pays to the configs' leftover receiver, the `fee_claimer` PDA, and this instruction burns
+    /// at once (owner, 2026-10-27). Anyone may send it once the pool has migrated; DBC pays a leftover once. It burns
+    /// everything the fee claimer's account of the coin holds, so the fee program never holds a coin.
+    pub fn burn_leftover(ctx: Context<BurnLeftover>) -> Result<()> {
+        let a = &ctx.accounts;
+        let pool = dbc::Pool::read(&a.pool)?;
+        require_keys_eq!(pool.base_mint, a.mint.key(), FeeError::PoolMintMismatch);
+        let coins = QuoteAccounts::new(&a.mint, &a.token_base_program);
+        coins.check(&a.fee_claimer_coin_account, &FEE_CLAIMER, FeeError::NotTheFeeClaimersAccount)?;
+
+        let held = token_amount(&a.fee_claimer_coin_account)?;
+        let instruction = Instruction {
+            program_id: dbc::PROGRAM_ID,
+            accounts: vec![
+                AccountMeta::new_readonly(a.pool_authority.key(), false),
+                AccountMeta::new_readonly(a.config.key(), false),
+                AccountMeta::new(a.pool.key(), false),
+                AccountMeta::new(a.fee_claimer_coin_account.key(), false),
+                AccountMeta::new(a.base_vault.key(), false),
+                AccountMeta::new_readonly(a.mint.key(), false),
+                AccountMeta::new_readonly(FEE_CLAIMER, false),
+                AccountMeta::new_readonly(a.token_base_program.key(), false),
+                AccountMeta::new_readonly(a.dbc_event_authority.key(), false),
+                AccountMeta::new_readonly(dbc::PROGRAM_ID, false),
+            ],
+            data: dbc::WITHDRAW_LEFTOVER_DISCRIMINATOR.to_vec(),
+        };
+        let infos = [
+            a.pool_authority.to_account_info(),
+            a.config.to_account_info(),
+            a.pool.to_account_info(),
+            a.fee_claimer_coin_account.to_account_info(),
+            a.base_vault.to_account_info(),
+            a.mint.to_account_info(),
+            a.fee_claimer.to_account_info(),
+            a.token_base_program.to_account_info(),
+            a.dbc_event_authority.to_account_info(),
+            a.dbc_program.to_account_info(),
+        ];
+        invoke_signed(&instruction, &infos, &[])?;
+        let burnt = token_amount(&a.fee_claimer_coin_account)?;
+        let withdrawn = burnt.checked_sub(held).ok_or(FeeError::UnexpectedBalance)?;
+        if burnt > 0 {
+            burn_checked(&a.token_base_program, &a.fee_claimer_coin_account, &a.mint, &a.fee_claimer, burnt)?;
+        }
+        emit_cpi!(LeftoverBurnt { pool: a.pool.key(), mint: a.mint.key(), config: pool.config, withdrawn, burnt });
+        Ok(())
+    }
+
+    /// Heat's LP fees after Graduation (spec 4): the fees of Heat's half of a graduated pool's liquidity, a DAMM v2
+    /// position permanently locked and owned by the `fee_claimer` PDA, which signs DAMM v2's claim so the fees go
+    /// straight to the treasury's quote account. Anyone may send it, as often as they like. The graduated pool collects
+    /// its fees in the quote alone (spec 3.4), so the fee claimer's own account of the coin stands in DAMM v2's slot for
+    /// the coin's fees, where nothing is paid.
+    pub fn claim_lp_fees(ctx: Context<ClaimLpFees>) -> Result<()> {
+        let a = &ctx.accounts;
+        let quote = QuoteAccounts::new(&a.quote_mint, &a.token_quote_program);
+        quote.check(&a.treasury_token_account, &a.fee_config.treasury, FeeError::NotTheTreasurysAccount)?;
+        let coins = QuoteAccounts::new(&a.mint, &a.token_base_program);
+        coins.check(&a.fee_claimer_coin_account, &FEE_CLAIMER, FeeError::NotTheFeeClaimersAccount)?;
+
+        let held = token_amount(&a.treasury_token_account)?;
+        let instruction = Instruction {
+            program_id: damm_v2::PROGRAM_ID,
+            accounts: vec![
+                AccountMeta::new_readonly(a.damm_pool_authority.key(), false),
+                AccountMeta::new_readonly(a.pool.key(), false),
+                AccountMeta::new(a.position.key(), false),
+                AccountMeta::new(a.fee_claimer_coin_account.key(), false),
+                AccountMeta::new(a.treasury_token_account.key(), false),
+                AccountMeta::new(a.token_a_vault.key(), false),
+                AccountMeta::new(a.token_b_vault.key(), false),
+                AccountMeta::new_readonly(a.mint.key(), false),
+                AccountMeta::new_readonly(a.quote_mint.key(), false),
+                AccountMeta::new_readonly(a.position_nft_account.key(), false),
+                AccountMeta::new_readonly(FEE_CLAIMER, true),
+                AccountMeta::new_readonly(a.token_base_program.key(), false),
+                AccountMeta::new_readonly(a.token_quote_program.key(), false),
+                AccountMeta::new_readonly(a.damm_event_authority.key(), false),
+                AccountMeta::new_readonly(damm_v2::PROGRAM_ID, false),
+            ],
+            data: damm_v2::CLAIM_POSITION_FEE_DISCRIMINATOR.to_vec(),
+        };
+        let infos = [
+            a.damm_pool_authority.to_account_info(),
+            a.pool.to_account_info(),
+            a.position.to_account_info(),
+            a.fee_claimer_coin_account.to_account_info(),
+            a.treasury_token_account.to_account_info(),
+            a.token_a_vault.to_account_info(),
+            a.token_b_vault.to_account_info(),
+            a.mint.to_account_info(),
+            a.quote_mint.to_account_info(),
+            a.position_nft_account.to_account_info(),
+            a.fee_claimer.to_account_info(),
+            a.token_base_program.to_account_info(),
+            a.token_quote_program.to_account_info(),
+            a.damm_event_authority.to_account_info(),
+            a.damm_program.to_account_info(),
+        ];
+        invoke_signed(&instruction, &infos, &[&[FEE_CLAIMER_SEED, &[FEE_CLAIMER_BUMP]]])?;
+        let amount = token_amount(&a.treasury_token_account)?.checked_sub(held).ok_or(FeeError::UnexpectedBalance)?;
+        emit_cpi!(LpFeesClaimed { pool: a.pool.key(), position: a.position.key(), mint: a.mint.key(), amount });
+        Ok(())
+    }
+}
+
+/// An SPL token account's balance, after its mint and owner; the same in Token-2022's base layout.
+fn token_amount(account: &AccountInfo) -> Result<u64> {
+    let data = account.try_borrow_data()?;
+    dbc::u64_at(&data, 64).ok_or_else(|| error!(FeeError::NotATokenAccount))
+}
+
+/// A mint's decimals, which `TransferChecked` and `BurnChecked` restate.
+fn decimals(mint: &AccountInfo) -> Result<u8> {
+    mint.try_borrow_data()?.get(44).copied().ok_or_else(|| error!(FeeError::NotATokenAccount))
+}
+
+/// SPL Token's `TransferChecked` (12) out of an account the `fee_claimer` PDA owns, signed by it; the same instruction
+/// under Token-2022, so the quote's token program may be either.
+fn transfer_checked<'info>(
+    token_program: &AccountInfo<'info>,
+    from: &AccountInfo<'info>,
+    mint: &AccountInfo<'info>,
+    to: &AccountInfo<'info>,
+    fee_claimer: &AccountInfo<'info>,
+    amount: u64,
+) -> Result<()> {
+    let mut data = vec![12];
+    data.extend_from_slice(&amount.to_le_bytes());
+    data.push(decimals(mint)?);
+    let instruction = Instruction {
+        program_id: token_program.key(),
+        accounts: vec![
+            AccountMeta::new(from.key(), false),
+            AccountMeta::new_readonly(mint.key(), false),
+            AccountMeta::new(to.key(), false),
+            AccountMeta::new_readonly(FEE_CLAIMER, true),
+        ],
+        data,
+    };
+    let infos = [from.clone(), mint.clone(), to.clone(), fee_claimer.clone(), token_program.clone()];
+    invoke_signed(&instruction, &infos, &[&[FEE_CLAIMER_SEED, &[FEE_CLAIMER_BUMP]]])?;
+    Ok(())
+}
+
+/// SPL Token's `BurnChecked` (15) from an account the `fee_claimer` PDA owns, signed by it.
+fn burn_checked<'info>(
+    token_program: &AccountInfo<'info>,
+    from: &AccountInfo<'info>,
+    mint: &AccountInfo<'info>,
+    fee_claimer: &AccountInfo<'info>,
+    amount: u64,
+) -> Result<()> {
+    let mut data = vec![15];
+    data.extend_from_slice(&amount.to_le_bytes());
+    data.push(decimals(mint)?);
+    let instruction = Instruction {
+        program_id: token_program.key(),
+        accounts: vec![
+            AccountMeta::new(from.key(), false),
+            AccountMeta::new(mint.key(), false),
+            AccountMeta::new_readonly(FEE_CLAIMER, true),
+        ],
+        data,
+    };
+    let infos = [from.clone(), mint.clone(), fee_claimer.clone(), token_program.clone()];
+    invoke_signed(&instruction, &infos, &[&[FEE_CLAIMER_SEED, &[FEE_CLAIMER_BUMP]]])?;
+    Ok(())
 }
 
 /// The pool a coin's record describes: a DBC pool of the mint, on a config that names our `fee_claimer`, so a record
@@ -898,6 +1165,129 @@ pub struct ClaimFees<'info> {
     pub dbc_program: UncheckedAccount<'info>,
 }
 
+#[event_cpi]
+#[derive(Accounts)]
+pub struct ClaimSurplus<'info> {
+    #[account(seeds = [FEE_CONFIG_SEED], bump = fee_config.bump)]
+    pub fee_config: Account<'info, FeeConfig>,
+    /// CHECK: the creator role holder's associated quote account, checked in the handler; half goes here.
+    #[account(mut)]
+    pub creator_token_account: UncheckedAccount<'info>,
+    /// CHECK: the treasury's associated quote account, checked in the handler; the rest goes here.
+    #[account(mut)]
+    pub treasury_token_account: UncheckedAccount<'info>,
+    /// CHECK: the fee program's `fee_claimer` PDA, which signs DBC's withdrawal and the two payments after it.
+    #[account(address = FEE_CLAIMER)]
+    pub fee_claimer: UncheckedAccount<'info>,
+    /// CHECK: the fee claimer's own associated quote account, checked in the handler: DBC pays the surplus in, and it
+    /// leaves again in the same instruction.
+    #[account(mut)]
+    pub fee_claimer_token_account: UncheckedAccount<'info>,
+    /// CHECK: DBC's pool authority, owner of the pool's vaults.
+    #[account(address = dbc::POOL_AUTHORITY)]
+    pub pool_authority: UncheckedAccount<'info>,
+    /// CHECK: the pool's config; checked against the pool in the handler, and by DBC.
+    pub config: UncheckedAccount<'info>,
+    /// CHECK: owned by DBC; its discriminator and config are checked in the handler, the rest by DBC.
+    #[account(mut, owner = dbc::PROGRAM_ID @ FeeError::NotADbcPool)]
+    pub pool: UncheckedAccount<'info>,
+    /// CHECK: the pool's quote vault, which DBC pays from; DBC checks it.
+    #[account(mut)]
+    pub quote_vault: UncheckedAccount<'info>,
+    /// CHECK: the config's quote mint; DBC checks it.
+    pub quote_mint: UncheckedAccount<'info>,
+    /// CHECK: the quote's token program; DBC checks it.
+    pub token_quote_program: UncheckedAccount<'info>,
+    /// CHECK: DBC's event authority.
+    #[account(address = dbc::EVENT_AUTHORITY)]
+    pub dbc_event_authority: UncheckedAccount<'info>,
+    /// CHECK: DBC itself.
+    #[account(address = dbc::PROGRAM_ID)]
+    pub dbc_program: UncheckedAccount<'info>,
+}
+
+#[event_cpi]
+#[derive(Accounts)]
+pub struct BurnLeftover<'info> {
+    /// CHECK: the fee program's `fee_claimer` PDA, the configs' leftover receiver, which signs the burn.
+    #[account(address = FEE_CLAIMER)]
+    pub fee_claimer: UncheckedAccount<'info>,
+    /// CHECK: the fee claimer's associated account of the coin, checked in the handler, where DBC pays the leftover;
+    /// opened beforehand in the same transaction, as DBC requires it to exist.
+    #[account(mut)]
+    pub fee_claimer_coin_account: UncheckedAccount<'info>,
+    /// CHECK: DBC's pool authority, owner of the pool's vaults.
+    #[account(address = dbc::POOL_AUTHORITY)]
+    pub pool_authority: UncheckedAccount<'info>,
+    /// CHECK: the pool's config; DBC checks it, and that it names the fee claimer as leftover receiver.
+    pub config: UncheckedAccount<'info>,
+    /// CHECK: owned by DBC; its discriminator and coin are checked in the handler, the rest by DBC.
+    #[account(mut, owner = dbc::PROGRAM_ID @ FeeError::NotADbcPool)]
+    pub pool: UncheckedAccount<'info>,
+    /// CHECK: the pool's coin vault, which DBC pays from; DBC checks it.
+    #[account(mut)]
+    pub base_vault: UncheckedAccount<'info>,
+    /// CHECK: the coin, the pool's base mint, whose supply the burn lowers; checked in the handler and by DBC.
+    #[account(mut)]
+    pub mint: UncheckedAccount<'info>,
+    /// CHECK: the coin's token program; DBC checks it.
+    pub token_base_program: UncheckedAccount<'info>,
+    /// CHECK: DBC's event authority.
+    #[account(address = dbc::EVENT_AUTHORITY)]
+    pub dbc_event_authority: UncheckedAccount<'info>,
+    /// CHECK: DBC itself.
+    #[account(address = dbc::PROGRAM_ID)]
+    pub dbc_program: UncheckedAccount<'info>,
+}
+
+#[event_cpi]
+#[derive(Accounts)]
+pub struct ClaimLpFees<'info> {
+    #[account(seeds = [FEE_CONFIG_SEED], bump = fee_config.bump)]
+    pub fee_config: Account<'info, FeeConfig>,
+    /// CHECK: the treasury's associated quote account, checked in the handler; DAMM v2 pays the fees here.
+    #[account(mut)]
+    pub treasury_token_account: UncheckedAccount<'info>,
+    /// CHECK: the fee program's `fee_claimer` PDA, owner of Heat's position's NFT account, which signs DAMM v2's claim.
+    #[account(address = FEE_CLAIMER)]
+    pub fee_claimer: UncheckedAccount<'info>,
+    /// CHECK: the fee claimer's associated account of the coin, checked in the handler: it stands in DAMM v2's slot for
+    /// the coin's fees, which a pool collecting in the quote never pays.
+    #[account(mut)]
+    pub fee_claimer_coin_account: UncheckedAccount<'info>,
+    /// CHECK: DAMM v2's pool authority, owner of the pool's vaults.
+    #[account(address = damm_v2::POOL_AUTHORITY)]
+    pub damm_pool_authority: UncheckedAccount<'info>,
+    /// CHECK: the graduated pool; DAMM v2 checks it against the position, the vaults and the mints.
+    #[account(owner = damm_v2::PROGRAM_ID @ FeeError::NotADammV2Account)]
+    pub pool: UncheckedAccount<'info>,
+    /// CHECK: Heat's position in the pool; DAMM v2 checks it and that the fee claimer owns its NFT.
+    #[account(mut, owner = damm_v2::PROGRAM_ID @ FeeError::NotADammV2Account)]
+    pub position: UncheckedAccount<'info>,
+    /// CHECK: the position's NFT account, which the fee claimer owns; DAMM v2 checks it.
+    pub position_nft_account: UncheckedAccount<'info>,
+    /// CHECK: the pool's coin vault; DAMM v2 checks it.
+    #[account(mut)]
+    pub token_a_vault: UncheckedAccount<'info>,
+    /// CHECK: the pool's quote vault, which DAMM v2 pays from; DAMM v2 checks it.
+    #[account(mut)]
+    pub token_b_vault: UncheckedAccount<'info>,
+    /// CHECK: the coin, the pool's token A; DAMM v2 checks it.
+    pub mint: UncheckedAccount<'info>,
+    /// CHECK: the quote, the pool's token B; DAMM v2 checks it.
+    pub quote_mint: UncheckedAccount<'info>,
+    /// CHECK: the coin's token program; DAMM v2 checks it.
+    pub token_base_program: UncheckedAccount<'info>,
+    /// CHECK: the quote's token program; DAMM v2 checks it.
+    pub token_quote_program: UncheckedAccount<'info>,
+    /// CHECK: DAMM v2's event authority.
+    #[account(address = damm_v2::EVENT_AUTHORITY)]
+    pub damm_event_authority: UncheckedAccount<'info>,
+    /// CHECK: DAMM v2 itself.
+    #[account(address = damm_v2::PROGRAM_ID)]
+    pub damm_program: UncheckedAccount<'info>,
+}
+
 #[event]
 pub struct FeeConfigChanged {
     pub treasury: Pubkey,
@@ -953,6 +1343,41 @@ pub struct FeesClaimed {
     pub treasury_amount: u64,
 }
 
+/// A pool's surplus at Graduation, the partner's share of it split 50/50 like Creator Earnings.
+#[event]
+pub struct SurplusClaimed {
+    pub pool: Pubkey,
+    pub mint: Pubkey,
+    pub config: Pubkey,
+    /// Who held the pool's DBC creator role at the claim, and was paid `creator_amount`.
+    pub creator: Pubkey,
+    /// In the quote's raw units; the treasury's is the creator's, or one more when the surplus was odd.
+    pub creator_amount: u64,
+    pub treasury_amount: u64,
+}
+
+/// A migrated pool's leftover coins, withdrawn and burnt.
+#[event]
+pub struct LeftoverBurnt {
+    pub pool: Pubkey,
+    pub mint: Pubkey,
+    pub config: Pubkey,
+    /// What DBC paid out as leftover, and what was burnt: everything the fee claimer's account of the coin held.
+    pub withdrawn: u64,
+    pub burnt: u64,
+}
+
+/// The fees of Heat's position in a graduated pool, paid to the treasury.
+#[event]
+pub struct LpFeesClaimed {
+    /// The DAMM v2 pool and Heat's position in it.
+    pub pool: Pubkey,
+    pub position: Pubkey,
+    pub mint: Pubkey,
+    /// In the quote's raw units.
+    pub amount: u64,
+}
+
 #[error_code]
 pub enum FeeError {
     #[msg("Only the program's upgrade authority can change Heat's settings")]
@@ -995,4 +1420,10 @@ pub enum FeeError {
     NotAFairOpen,
     #[msg("A Fair Open's window fees go to its launch's pot, its Tax Share")]
     NotTheTaxShare,
+    #[msg("The account is not a token account")]
+    NotATokenAccount,
+    #[msg("A token account the instruction pays into held less afterwards")]
+    UnexpectedBalance,
+    #[msg("The account is not DAMM v2's")]
+    NotADammV2Account,
 }

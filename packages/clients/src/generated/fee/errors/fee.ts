@@ -55,15 +55,23 @@ export const FEE_ERROR__NOT_THE_FAIR_OPEN_PROGRAM = 0x1781; // 6017
 export const FEE_ERROR__NOT_A_FAIR_OPEN = 0x1782; // 6018
 /** NotTheTaxShare: A Fair Open's window fees go to its launch's pot, its Tax Share */
 export const FEE_ERROR__NOT_THE_TAX_SHARE = 0x1783; // 6019
+/** NotATokenAccount: The account is not a token account */
+export const FEE_ERROR__NOT_A_TOKEN_ACCOUNT = 0x1784; // 6020
+/** UnexpectedBalance: A token account the instruction pays into held less afterwards */
+export const FEE_ERROR__UNEXPECTED_BALANCE = 0x1785; // 6021
+/** NotADammV2Account: The account is not DAMM v2's */
+export const FEE_ERROR__NOT_A_DAMM_V2_ACCOUNT = 0x1786; // 6022
 
 export type FeeError =
   | typeof FEE_ERROR__CREATOR_ROLE_HELD_BY_FEE_CLAIMER
   | typeof FEE_ERROR__FAIR_OPEN_TAX_SHARE
   | typeof FEE_ERROR__MISSING_SETTING
+  | typeof FEE_ERROR__NOT_A_DAMM_V2_ACCOUNT
   | typeof FEE_ERROR__NOT_A_DBC_CONFIG
   | typeof FEE_ERROR__NOT_A_DBC_POOL
   | typeof FEE_ERROR__NOT_A_FAIR_OPEN
   | typeof FEE_ERROR__NOT_A_HEAT_CONFIG
+  | typeof FEE_ERROR__NOT_A_TOKEN_ACCOUNT
   | typeof FEE_ERROR__NOT_THE_CREATORS_ACCOUNT
   | typeof FEE_ERROR__NOT_THE_FAIR_OPEN_PROGRAM
   | typeof FEE_ERROR__NOT_THE_FEE_CLAIMERS_ACCOUNT
@@ -75,6 +83,7 @@ export type FeeError =
   | typeof FEE_ERROR__POOL_MINT_MISMATCH
   | typeof FEE_ERROR__POOL_MISMATCH
   | typeof FEE_ERROR__TAX_WINDOW_OPEN
+  | typeof FEE_ERROR__UNEXPECTED_BALANCE
   | typeof FEE_ERROR__WINDOW_ALREADY_CLAIMED
   | typeof FEE_ERROR__WINDOW_NOT_CLAIMED;
 
@@ -84,10 +93,12 @@ if (process.env["NODE_ENV"] !== "production") {
     [FEE_ERROR__CREATOR_ROLE_HELD_BY_FEE_CLAIMER]: `The fee claimer holds the pool's creator role, so its creator's half has nowhere to go`,
     [FEE_ERROR__FAIR_OPEN_TAX_SHARE]: `A Fair Open's window fees go to its Tax Share, through the Fair Open program's collect_tax_share`,
     [FEE_ERROR__MISSING_SETTING]: `A setting is the default address`,
+    [FEE_ERROR__NOT_A_DAMM_V2_ACCOUNT]: `The account is not DAMM v2's`,
     [FEE_ERROR__NOT_A_DBC_CONFIG]: `The config is not a DBC config`,
     [FEE_ERROR__NOT_A_DBC_POOL]: `The pool is not a DBC pool`,
     [FEE_ERROR__NOT_A_FAIR_OPEN]: `The coin is not a Fair Open's`,
     [FEE_ERROR__NOT_A_HEAT_CONFIG]: `The config does not name the fee program's fee claimer`,
+    [FEE_ERROR__NOT_A_TOKEN_ACCOUNT]: `The account is not a token account`,
     [FEE_ERROR__NOT_THE_CREATORS_ACCOUNT]: `The creator's half goes to the creator role holder's associated quote account`,
     [FEE_ERROR__NOT_THE_FAIR_OPEN_PROGRAM]: `Only the Fair Open program registers a Fair Open's coin or collects its Tax Share`,
     [FEE_ERROR__NOT_THE_FEE_CLAIMERS_ACCOUNT]: `DBC's coin fee slot takes the fee claimer's associated quote account`,
@@ -99,6 +110,7 @@ if (process.env["NODE_ENV"] !== "production") {
     [FEE_ERROR__POOL_MINT_MISMATCH]: `The pool trades another mint`,
     [FEE_ERROR__POOL_MISMATCH]: `The record or window claim is another pool's`,
     [FEE_ERROR__TAX_WINDOW_OPEN]: `The pool's Tax window has not ended`,
+    [FEE_ERROR__UNEXPECTED_BALANCE]: `A token account the instruction pays into held less afterwards`,
     [FEE_ERROR__WINDOW_ALREADY_CLAIMED]: `The pool's window claim has already run`,
     [FEE_ERROR__WINDOW_NOT_CLAIMED]: `The pool's window claim has not run yet`,
   };

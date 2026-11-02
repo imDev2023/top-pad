@@ -6,8 +6,11 @@
  * @see https://github.com/codama-idl/codama
  */
 
+export * from "./burnLeftover";
 export * from "./claimFairOpenWindowFees";
 export * from "./claimFees";
+export * from "./claimLpFees";
+export * from "./claimSurplus";
 export * from "./claimUnlistedWindowFees";
 export * from "./claimWindowFees";
 export * from "./initialize";

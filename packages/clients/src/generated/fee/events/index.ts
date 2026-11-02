@@ -9,4 +9,7 @@
 export * from "./coinRegistered";
 export * from "./feeConfigChanged";
 export * from "./feesClaimed";
+export * from "./leftoverBurnt";
+export * from "./lpFeesClaimed";
+export * from "./surplusClaimed";
 export * from "./windowFeesClaimed";
