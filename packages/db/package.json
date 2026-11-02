@@ -10,7 +10,8 @@
   "scripts": {
     "typecheck": "tsc -p .",
     "generate": "drizzle-kit generate",
-    "migrate": "tsx src/cli.ts"
+    "migrate": "tsx src/cli.ts",
+    "serve-times": "tsx src/serveTimes.ts"
   },
   "dependencies": {
     "drizzle-orm": "^0.45.4",

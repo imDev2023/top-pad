@@ -95,22 +95,24 @@ export class FairOpenKeeper extends WorkflowEntrypoint<Bindings, FairOpenKeeperP
     if (schedule.status === "scheduled") {
       const uploadAt = schedule.opensAtMs - UPLOAD_LEAD_MS;
       if (uploadAt > Date.now()) await step.sleepUntil("wait until 15 s before the open", uploadAt);
-      // Never in the open's way: tried for about the 15 s before the open, after which the open goes out anyway, holding
-      // up to 10 s for the coin's URI to be served (spec 2.1 step 10), and the metadata goes up after it.
+      // Never in the open's way: tried for about the 15 s before the open, and the gateway watched no later than the
+      // open's own step starts; after it the open goes out anyway, holding up to 10 s for the coin's URI to be served
+      // (spec 2.1 step 10), uploading first whatever is not up yet. A pot that cannot open as it stands uploads nothing.
       const upload = { retries: { limit: 4, delay: "2 seconds", backoff: "constant" }, timeout: "30 seconds" } as const;
-      const uploaded = await step
-        .do("upload the coin's metadata", upload, () => withDb((db) => uploadMetadata(db, cfg, blobs, launch)))
-        .then(() => true)
-        .catch((e: Error) => (console.error(`the metadata of ${launch} did not go up before the open`, e.message), false));
       const openAt = schedule.opensAtMs - OPEN_LEAD_MS;
+      await step
+        .do("upload the coin's metadata", upload, () => withDb((db) => uploadMetadata(db, cfg, blobs, launch, { watchUntilMs: openAt })))
+        .then((u) => console.log(`metadata of ${launch}: ${JSON.stringify(u)}`))
+        .catch((e: Error) => console.error(`the metadata of ${launch} did not go up before the open`, e.message));
       if (openAt > Date.now()) await step.sleepUntil("wait for the open", openAt);
       // One long try: it watches the chain's clock, sends the rung once it can, and waits for a creator signing at the
       // open until the open is late. Tried again only if the try itself fails, after which it starts by reading the chain.
       const open = await step.do("send the open", { retries: { limit: 20, delay: "1 second", backoff: "constant" }, timeout: "20 minutes" }, () =>
-        withDb((db) => sendOpen(db, cfg, key, launch)),
+        withDb((db) => sendOpen(db, cfg, blobs, key, launch)),
       );
       console.log(`open of ${launch}: ${JSON.stringify(open)}`);
-      if (!uploaded) await step.do("upload the coin's metadata after the open", quick, () => withDb((db) => uploadMetadata(db, cfg, blobs, launch)));
+      // The coin exists now: anything the hold could not upload goes up, and nothing at all for a launch that never opens.
+      if (open.outcome === "opened") await step.do("upload the coin's metadata after the open", quick, () => withDb((db) => uploadMetadata(db, cfg, blobs, launch)));
       cannotOpen = open.outcome === "cannot_open";
       if (open.outcome === "opened" && open.signature) {
         const signature = open.signature;

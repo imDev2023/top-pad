@@ -137,7 +137,7 @@ async function prepareInstant(c: Context<AppEnv>, creator: Creator, body: Form) 
   const mint = await generateKeyPairSigner();
   const id = crypto.randomUUID();
   const coin = { name: verdict.name, ticker: verdict.ticker, mint: mint.address, xHandle: creator.xHandle };
-  const items = await signItems(keeper.secret, id, coin, { bytes, type: imageType }, { gateway: cfg.arweaveGateway, site: webApp(cfg) });
+  const items = await signItems({ keeper: keeper.secret }, id, coin, { bytes, type: imageType }, { gateway: cfg.arweaveGateway, site: webApp(cfg) });
 
   const rpc = createSolanaRpc(cfg.rpcUrl);
   const { value: lifetime } = await rpc.getLatestBlockhash({ commitment: "confirmed" }).send(limited());

@@ -129,14 +129,15 @@ export const FairOpen = z.object({
   allocation: z.object({ spend: RawAmount, others: FairOpenLevel, unverified: FairOpenLevel, rung: RawAmount.nullable() }),
   /**
    * Once it has opened (spec 2.1 step 10): its coin, revealed, and its pool; the rung the pot spent and the coins it
-   * bought, in the coin's raw units; and how many seats have their coins and refund. The coin's name and ticker come
-   * from the indexer, and are null until it has seen the open.
+   * bought, in the coin's raw units; and how many seats have their coins and refund. The coin's name, ticker and metadata
+   * URI, which `identityHash` sealed, come from the indexer, as the creation transaction carried them, and are null
+   * until it has seen the open; so is its image, which the metadata names. Nothing about the coin shows before the open.
    */
   open: z
     .object({
       mint: Address,
       pool: Address,
-      coin: z.object({ name: z.string(), ticker: z.string() }).nullable(),
+      coin: z.object({ name: z.string(), ticker: z.string(), uri: z.string(), imageUri: z.string().url().nullable() }).nullable(),
       spent: RawAmount,
       coins: RawAmount,
       coinDecimals: z.number().int().nonnegative(),

@@ -64,6 +64,13 @@
       "when": 1793596194499,
       "tag": "0008_graduation",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1793599929263,
+      "tag": "0009_sealed_identity",
+      "breakpoints": true
     }
   ]
 }

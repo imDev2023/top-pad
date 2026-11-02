@@ -164,7 +164,7 @@ export async function prepareFairOpen(c: Context<AppEnv>, creator: Creator, body
   const { launch } = await fairOpenAccounts(nonce.address);
   const id = crypto.randomUUID();
   const coin = { name: verdict.name, ticker: verdict.ticker, mint: mint.address, xHandle: creator.xHandle };
-  const items = await signItems(keeper.secret, id, coin, image, { gateway: cfg.arweaveGateway, site: webApp(cfg) });
+  const items = await signItems("sealed", id, coin, image, { gateway: cfg.arweaveGateway, site: webApp(cfg) });
   const sealed = { name: coin.name, ticker: coin.ticker, uri: items.metadataUri };
   const rpc = createSolanaRpc(cfg.rpcUrl);
   const [nonceRent, table, pool] = await Promise.all([

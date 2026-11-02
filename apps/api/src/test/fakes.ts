@@ -94,6 +94,8 @@ export class Fakes {
   // Turbo and the gateway
   uploads: string[] = [];
   turboFails = false;
+  /** What a failing Turbo answers, given the id of the item it was sent. */
+  turboFailure: (id: string) => string = () => "upstream unavailable";
 
   readonly fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const request = new Request(input, init);
@@ -208,8 +210,8 @@ export class Fakes {
 
   private async turbo(url: URL, request: Request) {
     if (url.pathname !== "/v1/tx/solana" || request.method !== "POST") return json({ error: "not found" }, 404);
-    if (this.turboFails) return new Response("upstream unavailable", { status: 503 });
     const item = await parseDataItem(new Uint8Array(await request.arrayBuffer()));
+    if (this.turboFails) return new Response(this.turboFailure(item.id), { status: 503 });
     if (!item.valid) return new Response("invalid signature", { status: 400 });
     this.uploads.push(item.id);
     return json({ id: item.id, winc: "0", timestamp: Date.now(), version: "0.2.0", deadlineHeight: 1, owner: "keeper", dataCaches: ["arweave.net"], fastFinalityIndexes: [] });

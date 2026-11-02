@@ -1,5 +1,6 @@
 import {
   decompileTransactionMessage,
+  getAddressEncoder,
   getBase64EncodedWireTransaction,
   getCompiledTransactionMessageDecoder,
   getPublicKeyFromAddress,
@@ -29,6 +30,7 @@ import { CREATE_LAUNCH_DISCRIMINATOR, getCreateLaunchInstructionDataDecoder } fr
 import { FairOpen, FairOpenOutcome, FairOpenRefusal, LaunchRefusal, LaunchStatus, Platform, PreparedFairOpenTransaction, PreparedLaunch } from "@top-pad/contract";
 import { createDb, creatorWallets, fairOpenRungs, launches, protectedCoins, type Db } from "@top-pad/db";
 import { createTestDatabase } from "@top-pad/db/testing";
+import { parseDataItem } from "@top-pad/arweave";
 import { candidateKeys, FOLD_VERSION } from "@top-pad/vamp-shield";
 import { app } from "./index";
 import { decode, Fakes, fairOpenLaunch, lookupTableAccount, MemoryBlobs, ORIGINS, testBindings, testContext, testKeypair } from "./test/fakes";
@@ -110,6 +112,7 @@ async function linkX(user: { id: string; username: string }) {
 }
 
 const nowSeconds = () => Math.floor(Date.now() / 1000);
+const publicKeyBytes = (address: Address) => getAddressEncoder().encode(address);
 type Schedule = { name?: string; ticker?: string; wallet: Address; depositsOpenAt?: number; minRaise?: bigint; teaser?: string };
 
 function prepare(cookie: string, s: Schedule) {
@@ -344,16 +347,16 @@ describe("signing the open at the open", { timeout: 30_000 }, () => {
     await submit(cookie, launch, wallet, { atOpen: true });
     const depositsOpenAt = BigInt(nowSeconds()) - ago;
     fakes.accounts.set(launch.launch, fairOpenLaunch({ creator: wallet.address, nonce: launch.nonce as Address, depositsOpenAt, asks }));
-    return { launch, wallet };
+    return { launch, wallet, cookie, ticker };
   }
 
   it("hands the Creator wallet the rung the pot covers once the window has closed, and our keeper co-signs and sends it", async () => {
     const asks: [number, Tier][] = [[60, Tier.Verified], [10, Tier.Unverified]];
-    const { launch, wallet } = await scheduledAtOpen(605n, asks);
+    const { launch, wallet, cookie } = await scheduledAtOpen(605n, asks);
     const page = FairOpen.parse(await (await request(`/fair-opens/${launch.launch}`)).json());
     expect(page.ladder).toBe("at_open");
 
-    const prepared = PreparedFairOpenTransaction.parse(await (await json(`/fair-opens/${launch.launch}/open`, { wallet: wallet.address })).json());
+    const prepared = PreparedFairOpenTransaction.parse(await (await json(`/fair-opens/${launch.launch}/open`, { wallet: wallet.address }, cookie)).json());
     const rung = rungAtOrBelow(POT_CAP, 700_000_000n)!;
     expect(prepared.transaction).toBe(launch.rungs.find((r) => r.rung === `${rung}`)!.transaction);
 
@@ -364,15 +367,75 @@ describe("signing the open at the open", { timeout: 30_000 }, () => {
     expect(sent).toHaveLength(1);
     for (const signer of Object.keys(sent[0]!.signatures)) expect(await valid(sent[0]!, signer)).toBe(true);
     expect(FairOpen.parse(await (await request(`/fair-opens/${launch.launch}`)).json()).ladder).toBe("at_open_signed");
-    expect(FairOpenRefusal.parse(await (await json(`/fair-opens/${launch.launch}/open`, { wallet: wallet.address })).json()).code).toBe("already_signed");
+    expect(FairOpenRefusal.parse(await (await json(`/fair-opens/${launch.launch}/open`, { wallet: wallet.address }, cookie)).json()).code).toBe("already_signed");
   });
 
-  it("refuses before the window closes, and refuses any wallet but the creator's", async () => {
-    const { launch, wallet } = await scheduledAtOpen(60n, [[60, Tier.Verified]]);
-    expect(FairOpenRefusal.parse(await (await json(`/fair-opens/${launch.launch}/open`, { wallet: wallet.address })).json()).code).toBe("not_due");
+  it("refuses before the window closes, and refuses anyone but the creator who scheduled it, signed in", async () => {
+    const { launch, wallet, cookie, ticker } = await scheduledAtOpen(60n, [[60, Tier.Verified]]);
+    expect(FairOpenRefusal.parse(await (await json(`/fair-opens/${launch.launch}/open`, { wallet: wallet.address }, cookie)).json()).code).toBe("not_due");
     fakes.accounts.set(launch.launch, fairOpenLaunch({ creator: wallet.address, nonce: launch.nonce as Address, depositsOpenAt: BigInt(nowSeconds()) - 605n, asks: [[60, Tier.Verified]] }));
     const someone = (await testKeypair()).signer.address;
-    expect(FairOpenRefusal.parse(await (await json(`/fair-opens/${launch.launch}/open`, { wallet: someone })).json()).code).toBe("not_the_creator");
+    const other = await linkX({ id: "4999", username: "onlooker" });
+    // The rung carries the sealed coin, so naming the Creator wallet, which the page shows, is not enough: neither with
+    // no session nor with another creator's.
+    for (const [sender, session] of [[someone, cookie], [wallet.address, undefined], [wallet.address, other]] as const) {
+      const res = await json(`/fair-opens/${launch.launch}/open`, { wallet: sender }, session);
+      const text = await res.text();
+      expect(res.status).toBe(403);
+      expect(FairOpenRefusal.parse(JSON.parse(text)).code).toBe("not_the_creator");
+      expect(text).not.toContain(ticker);
+    }
+  });
+});
+
+describe("the sealed coin", { timeout: 30_000 }, () => {
+  it("signs its two items with a key of their own and tags them with their content type alone", async () => {
+    // Arweave gateways list an item by its owner and its tags the moment it is uploaded, 15 s before the open: nothing
+    // in a sealed item may point at Heat, its keeper or the coin.
+    const cookie = await linkX({ id: "4013", username: "item_signer" });
+    const owners: string[] = [];
+    for (const ticker of ["ITEMA", "ITEMB"]) {
+      const wallet = (await testKeypair()).signer;
+      const launch = await prepared(await prepare(cookie, { ticker, wallet: wallet.address }));
+      const items = await Promise.all(["image", "metadata"].map(async (item) => parseDataItem(blobs.objects.get(`launches/${launch.id}/${item}`)!)));
+      for (const item of items) {
+        expect(item.valid).toBe(true);
+        expect(item.tags.map((t) => t.name)).toEqual(["Content-Type"]);
+        expect(Buffer.from(item.owner).equals(Buffer.from(await publicKeyBytes(keeper().signer.address)))).toBe(false);
+      }
+      expect(Buffer.from(items[0]!.owner).equals(Buffer.from(items[1]!.owner))).toBe(true);
+      owners.push(Buffer.from(items[0]!.owner).toString("hex"));
+    }
+    expect(owners[0]).not.toBe(owners[1]);
+  });
+
+  it("shows nothing of the coin before the open, through any of the Fair Open's routes", async () => {
+    const cookie = await linkX({ id: "4011", username: "sealer" });
+    const wallet = (await testKeypair()).signer;
+    const coin = { name: "Quokka Sealed", ticker: "QSEAL" };
+    const launch = await prepared(await prepare(cookie, { ...coin, wallet: wallet.address }));
+    await submit(cookie, launch, wallet, { atOpen: true });
+    const [row] = await db.select().from(launches).where(eq(launches.id, launch.id));
+    const secrets = [coin.name, coin.ticker, row!.mint, row!.metadataUri, row!.imageUri, row!.metadataUri.split("/").at(-1)!, row!.imageUri.split("/").at(-1)!];
+    const sealed = async (res: Response) => {
+      const text = await res.text();
+      for (const secret of secrets) expect(text).not.toContain(secret);
+      return text;
+    };
+    const other = await linkX({ id: "4012", username: "watcher" });
+    for (const ago of [-600n, 300n, 605n]) {
+      // Before the window, in it, and once it has closed with the open due.
+      fakes.accounts.set(launch.launch, fairOpenLaunch({ creator: wallet.address, nonce: launch.nonce as Address, depositsOpenAt: BigInt(nowSeconds()) - ago, asks: [[60, Tier.Verified], [10, Tier.Unverified]] }));
+      for (const session of [undefined, cookie, other]) {
+        const headers = session ? { cookie: session } : undefined;
+        const page = FairOpen.parse(JSON.parse(await sealed(await request(`/fair-opens/${launch.launch}`, { headers }))));
+        expect(page.open).toBeNull();
+        await sealed(await request(`/fair-opens/${launch.launch}?wallet=${wallet.address}`, { headers }));
+        await sealed(await json(`/fair-opens/${launch.launch}/open`, { wallet: wallet.address }, session === cookie ? other : session));
+        await sealed(await json(`/fair-opens/${launch.launch}/deposit`, { wallet: wallet.address, amount: "10000000" }, session));
+      }
+    }
+    await sealed(await request(`/coins/${row!.mint}`));
   });
 });
 

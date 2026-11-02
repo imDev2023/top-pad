@@ -6,10 +6,10 @@ import { eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { CLUSTERS, fairOpenLookupTableAddresses, seatAddress, Tier } from "@top-pad/chain";
 import { PreparedLaunch } from "@top-pad/contract";
-import { createDb, launches, type Db } from "@top-pad/db";
+import { createDb, launches, metadataItems, type Db } from "@top-pad/db";
 import { createTestDatabase } from "@top-pad/db/testing";
 import { config, type Bindings } from "./env";
-import { closeLaunchNonce, failAndRefund, pushSeats, readSchedule, releaseTicker, sendOpen, uploadMetadata } from "./fairOpenKeeper";
+import { closeLaunchNonce, failAndRefund, pushSeats, readSchedule, releaseTicker, sendOpen, SERVE_WITHIN_MS, uploadMetadata } from "./fairOpenKeeper";
 import { app } from "./index";
 import { decode, Fakes, fairOpenLaunch, fairOpenSeat, lookupTableAccount, MemoryBlobs, ORIGINS, testBindings, testContext, testKeypair } from "./test/fakes";
 
@@ -62,7 +62,7 @@ const request = (path: string, init: RequestInit = {}) => app.request(path, init
 
 let creatorId = 5000;
 /** A Fair Open scheduled through the launch service, its whole ladder signed: what the keeper's Workflow starts from. */
-async function scheduled(o: { atOpen?: boolean } = {}) {
+async function scheduled(o: { atOpen?: boolean; name?: string } = {}) {
   fakes.xUser = { id: `${creatorId++}`, username: "keeper_test", name: "Keeper Test" };
   const start = await request("/auth/x/start");
   const state = new URL(start.headers.get("location")!).searchParams.get("state")!;
@@ -70,7 +70,7 @@ async function scheduled(o: { atOpen?: boolean } = {}) {
   const cookie = linked.headers.getSetCookie().find((c) => c.startsWith("heat_session="))!.split(";")[0]!;
   const wallet = (await testKeypair()).signer;
   const form = new FormData();
-  for (const [k, v] of Object.entries({ mode: "fair_open", name: "Kept", ticker: `K${Math.random().toString(36).slice(2, 7).toUpperCase()}`, wallet: wallet.address })) form.set(k, v);
+  for (const [k, v] of Object.entries({ mode: "fair_open", name: o.name ?? "Kept", ticker: `K${Math.random().toString(36).slice(2, 7).toUpperCase()}`, wallet: wallet.address })) form.set(k, v);
   form.set("depositsOpenAt", `${nowSeconds() + 3600n}`);
   form.set("minRaise", "0");
   form.set("teaser", "");
@@ -94,24 +94,98 @@ function onChain(s: { launch: Address; nonce: Address; wallet: KeyPairSigner }, 
   fakes.accounts.set(s.launch, fairOpenLaunch({ creator: s.wallet.address, nonce: s.nonce, depositsOpenAt: nowSeconds() - ago, ...o }));
 }
 
+/** A console argument as a log line would show it. */
+function logged(a: unknown): string {
+  if (a instanceof Error) return `${a.message} ${a.stack}`;
+  if (typeof a === "string") return a;
+  try {
+    return JSON.stringify(a, (_, v: unknown) => (typeof v === "bigint" ? `${v}` : v));
+  } catch {
+    return String(a);
+  }
+}
+
+/** Asks that fill a pot past its lowest rung, so it can open: 0.7 SOL. */
+const OPENS: [number, Tier][] = [[60, Tier.Verified], [10, Tier.Unverified]];
+
 describe("the keeper's steps, each run twice", { timeout: 30_000 }, () => {
-  it("uploads the coin's metadata once", async () => {
+  it("uploads the coin's metadata once, for a pot that can open, and records when the gateway served it", async () => {
     const s = await scheduled();
-    expect(await uploadMetadata(db, cfg(), blobs, s.launch)).toEqual({ uploaded: 2 });
-    expect(await uploadMetadata(db, cfg(), blobs, s.launch)).toEqual({ uploaded: 0 });
+    onChain(s, 585n, { asks: OPENS });
+    const first = await uploadMetadata(db, cfg(), blobs, s.launch);
+    expect(first).toMatchObject({ uploaded: 2, held: null });
+    expect(first.servedAfterMs.image).toBeGreaterThanOrEqual(0);
+    expect(first.servedAfterMs.metadata).toBeLessThan(SERVE_WITHIN_MS);
+    const items = await db.select().from(metadataItems).where(eq(metadataItems.launchId, s.row.id));
+    expect(items.every((i) => i.uploadedAt !== null && i.servedAt !== null && i.servedAt >= i.uploadedAt)).toBe(true);
+    expect(await uploadMetadata(db, cfg(), blobs, s.launch)).toEqual({ ...first, uploaded: 0 });
     expect(fakes.uploads).toHaveLength(2);
+  });
+
+  it("keeps the coin's items back while its pot cannot open, and for good once it has failed", async () => {
+    const s = await scheduled();
+    onChain(s, 585n, { asks: [[1, Tier.Unverified]] });
+    expect(await uploadMetadata(db, cfg(), blobs, s.launch)).toMatchObject({ uploaded: 0, held: "cannot_open" });
+    onChain(s, 601n, { asks: OPENS, failure: 1 });
+    expect(await uploadMetadata(db, cfg(), blobs, s.launch)).toMatchObject({ uploaded: 0, held: "failed" });
+    // Its account closed after a failure: no coin was ever created, so no pool either.
+    fakes.accounts.delete(s.launch);
+    expect(await uploadMetadata(db, cfg(), blobs, s.launch)).toMatchObject({ uploaded: 0, held: "failed" });
+    expect(fakes.uploads).toHaveLength(0);
+  });
+
+  it("uploads at the open, before the rung, a pot that filled in the window's last seconds", async () => {
+    const s = await scheduled();
+    onChain(s, 601n, { asks: OPENS });
+    const opened = { mint: s.row.mint as Address, spend: 0n, spent: 0n, coins: 0n, othersLevel: 0n, unverifiedLevel: 0n, delivered: 0 };
+    let uploadedFirst: number | null = null;
+    fakes.onSend = () => {
+      uploadedFirst = fakes.uploads.length;
+      onChain(s, 601n, { asks: OPENS, opened });
+    };
+    expect(await sendOpen(db, cfg(), blobs, keeperKey, s.launch)).toMatchObject({ outcome: "opened" });
+    expect(uploadedFirst).toBe(2);
+    const items = await db.select().from(metadataItems).where(eq(metadataItems.launchId, s.row.id));
+    expect(items.every((i) => i.servedAt !== null)).toBe(true);
+  });
+
+  it("names nothing of the sealed coin in its logs, from scheduling to the open, even when Turbo fails", async () => {
+    const logs: string[] = [];
+    const spies = (["log", "info", "warn", "error"] as const).map((level) =>
+      vi.spyOn(console, level).mockImplementation((...args: unknown[]) => void logs.push(args.map(logged).join(" "))),
+    );
+    try {
+      const s = await scheduled({ name: "Wombat Hidden" });
+      const ids = (await db.select().from(metadataItems).where(eq(metadataItems.launchId, s.row.id))).map((i) => i.arweaveId);
+      // Turbo answers with the item's own id in its error: the keeper's errors leave it out.
+      fakes.turboFails = true;
+      fakes.turboFailure = (id) => `upstream unavailable for ${id}`;
+      onChain(s, 585n, { asks: OPENS });
+      await expect(uploadMetadata(db, cfg(), blobs, s.launch)).rejects.toThrow(/the image: upload failed with 503/);
+      onChain(s, 601n, { asks: OPENS });
+      const opened = { mint: s.row.mint as Address, spend: 0n, spent: 0n, coins: 0n, othersLevel: 0n, unverifiedLevel: 0n, delivered: 0 };
+      fakes.onSend = () => onChain(s, 601n, { asks: OPENS, opened });
+      expect(await sendOpen(db, cfg(), blobs, keeperKey, s.launch)).toMatchObject({ outcome: "opened" });
+      expect(logs.some((l) => l.includes("did not go up at the open"))).toBe(true);
+      for (const secret of ["Wombat Hidden", s.row.ticker, s.row.mint, s.row.metadataUri, s.row.imageUri, ...ids]) {
+        for (const line of logs) expect(line).not.toContain(secret);
+      }
+    } finally {
+      for (const spy of spies) spy.mockRestore();
+    }
   });
 
   it("sends the rung the pot covers once, at the open, and measures how late it was", async () => {
     const s = await scheduled();
+    onChain(s, 585n, { asks: OPENS });
     await uploadMetadata(db, cfg(), blobs, s.launch);
-    const asks: [number, Tier][] = [[60, Tier.Verified], [10, Tier.Unverified]];
+    const asks = OPENS;
     onChain(s, 601n, { asks });
     const opened = { mint: s.row.mint as Address, spend: 0n, spent: 0n, coins: 0n, othersLevel: 0n, unverifiedLevel: 0n, delivered: 0 };
     // The rung lands: the launch account records the open.
     fakes.onSend = () => onChain(s, 601n, { asks, opened });
     const before = fakes.sent.length;
-    const first = await sendOpen(db, cfg(), keeperKey, s.launch);
+    const first = await sendOpen(db, cfg(), blobs, keeperKey, s.launch);
     expect(first).toMatchObject({ outcome: "opened" });
     const sent = fakes.sent.slice(before);
     expect(sent).toHaveLength(1);
@@ -122,7 +196,7 @@ describe("the keeper's steps, each run twice", { timeout: 30_000 }, () => {
     expect(row!.openSentAt).not.toBeNull();
     expect(first.outcome === "opened" && first.sentLateMs !== null && first.landedLateS !== null).toBe(true);
 
-    expect(await sendOpen(db, cfg(), keeperKey, s.launch)).toMatchObject({ outcome: "opened", signature: row!.openSignature });
+    expect(await sendOpen(db, cfg(), blobs, keeperKey, s.launch)).toMatchObject({ outcome: "opened", signature: row!.openSignature });
     expect(fakes.sent.length).toBe(before + 1);
   });
 
@@ -130,7 +204,7 @@ describe("the keeper's steps, each run twice", { timeout: 30_000 }, () => {
     const s = await scheduled();
     onChain(s, 601n, { asks: [[1, Tier.Unverified]] });
     const before = fakes.sent.length;
-    expect(await sendOpen(db, cfg(), keeperKey, s.launch)).toEqual({ outcome: "cannot_open", failure: "below_lowest_rung" });
+    expect(await sendOpen(db, cfg(), blobs, keeperKey, s.launch)).toEqual({ outcome: "cannot_open", failure: "below_lowest_rung" });
     expect(fakes.sent.length).toBe(before);
   });
 
@@ -138,7 +212,7 @@ describe("the keeper's steps, each run twice", { timeout: 30_000 }, () => {
     const s = await scheduled({ atOpen: true });
     onChain(s, 601n, { asks: [[60, Tier.Verified]] });
     const before = fakes.sent.length;
-    const open = sendOpen(db, cfg(), keeperKey, s.launch);
+    const open = sendOpen(db, cfg(), blobs, keeperKey, s.launch);
     await new Promise((r) => setTimeout(r, 2_500));
     expect(fakes.sent.length).toBe(before);
     // The launch fails meanwhile (as at the late time): the step returns without having sent anything.

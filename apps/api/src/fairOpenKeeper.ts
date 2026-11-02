@@ -49,10 +49,10 @@ import {
 import { fetchVirtualPool } from "@top-pad/clients/dbc";
 import { fetchMaybeLaunch, getSeatDecoder, getSeatSize, LaunchStatus, type Launch } from "@top-pad/clients/fair-open";
 import { fetchMaybeCoinRecord, findCoinRecordPda } from "@top-pad/clients/fee";
-import { fairOpenRungs, launches, metadataItems, type Db } from "@top-pad/db";
+import { fairOpenRungs, launches, metadataItems, pools, type Db } from "@top-pad/db";
 import type { BlobStore, Bindings, Config, SecretBinding } from "./env";
 import { loadKeeper, type Keeper } from "./keeper";
-import { MetadataUploadFailed, uploadItem, waitServed } from "./metadata";
+import { servedAt, uploadItem } from "./metadata";
 import { keeperSignatureOn, wireOf } from "./rungs";
 import { confirmed, preflightRefusal, sendAndConfirm, sendWire, TransactionFailed } from "./send";
 
@@ -129,10 +129,63 @@ export async function readSchedule(db: Db, cfg: Config, launch: Address): Promis
   return { status, opensAtMs: Number(data.opensAt) * 1000, lateAtMs: Number(data.opensAt + LATE_OPEN_SECONDS) * 1000 };
 }
 
-/** Step 1: the coin's image and metadata go up through Turbo, so its URI is served when the coin appears (spec 2.1 step 5). */
-export async function uploadMetadata(db: Db, cfg: Config, blobs: BlobStore, launch: string): Promise<{ uploaded: number }> {
+/** How long the gateway is watched for a coin's items after their upload (spec 11.2: served within 10 s of it). */
+export const SERVE_WITHIN_MS = 10_000;
+
+/** Whether a pot could open if its window closed now: it covers the lowest rung and its minimum raise (spec 2.1 step 15). */
+const couldOpen = (launch: Launch) => {
+  const { spend } = allocate(launch.counts, launch.unverifiedCounts, launch.step, launch.potCap);
+  return spend >= launch.lowestRung && spend >= launch.minRaise;
+};
+
+/** What the upload step did: the items it sent, and how long after its upload the gateway first served each. */
+export type UploadOutcome = {
+  uploaded: number;
+  /** Why nothing went up: the pot could not open as it stood, or the launch failed, so its coin stays sealed for good. */
+  held: "cannot_open" | "failed" | null;
+  servedAfterMs: { image: number | null; metadata: number | null };
+};
+
+/**
+ * Step 1, 15 s before the open: the coin's image and metadata go up through Turbo, so its URI is served by the time the
+ * coin appears (spec 2.1 step 5, 10.2). Only for a launch that can still create its coin: a Fair Open that fails never
+ * reveals the coin it sealed, so a pot that cannot open as it stands keeps its items back, and if deposits in the
+ * window's last seconds let it open after all, the open's step uploads them before it sends the rung. Then it watches
+ * the gateway until `watchUntilMs` at the latest, at most 10 s, and records when it first served each item (spec 11.2).
+ */
+export async function uploadMetadata(
+  db: Db,
+  cfg: Config,
+  blobs: BlobStore,
+  launch: string,
+  o: { watchUntilMs?: number } = {},
+): Promise<UploadOutcome> {
   const row = await launchRow(db, launch);
   if (!row) throw new Error(`Heat did not schedule ${launch}`);
+  const held = await heldBack(db, cfg, launch as Address, row);
+  if (held) return { uploaded: 0, held, servedAfterMs: { image: null, metadata: null } };
+  const uploaded = await uploadItems(db, cfg, blobs, row);
+  const watchMs = Math.min(SERVE_WITHIN_MS, (o.watchUntilMs ?? Infinity) - Date.now());
+  return { uploaded, held: null, servedAfterMs: await watchServed(db, row, Math.max(watchMs, 0)) };
+}
+
+/** Why a launch's items must stay back, if they must: it failed, or its pot could not open as it stands. */
+async function heldBack(db: Db, cfg: Config, launch: Address, row: LaunchRow): Promise<UploadOutcome["held"]> {
+  const rpc = createSolanaRpc(cfg.rpcUrl);
+  const account = await fetchMaybeLaunch(rpc, launch, { commitment: "confirmed", ...limited() });
+  if (!account.exists) {
+    // A closed launch: one that opened has its coin's pool, and one that failed has none.
+    const [pool] = await db.select({ mint: pools.mint }).from(pools).where(eq(pools.mint, row.mint));
+    return pool ? null : "failed";
+  }
+  const { data } = account;
+  if (data.status === LaunchStatus.Opened) return null;
+  if (data.status === LaunchStatus.Failed || data.failure.__option === "Some") return "failed";
+  return couldOpen(data) ? null : "cannot_open";
+}
+
+/** Uploads every item of the launch not yet uploaded; says how many went up. */
+async function uploadItems(db: Db, cfg: Config, blobs: BlobStore, row: LaunchRow): Promise<number> {
   const items = await db
     .select()
     .from(metadataItems)
@@ -142,7 +195,52 @@ export async function uploadMetadata(db: Db, cfg: Config, blobs: BlobStore, laun
     const receipt = await uploadItem(blobs, cfg.turbo, item);
     await db.update(metadataItems).set({ uploadedAt: sql`now()`, receipt }).where(and(eq(metadataItems.launchId, row.id), eq(metadataItems.item, item.item)));
   }
-  return { uploaded: items.length };
+  return items.length;
+}
+
+/**
+ * Watches the gateway, up to `watchMs`, for each uploaded item it has not yet been seen to serve, and records when it
+ * first did; says how long after its upload each item was served, null for one not seen within the watch.
+ */
+async function watchServed(db: Db, row: LaunchRow, watchMs: number): Promise<UploadOutcome["servedAfterMs"]> {
+  const items = await db.select().from(metadataItems).where(eq(metadataItems.launchId, row.id));
+  const uri = { image: row.imageUri, metadata: row.metadataUri };
+  const after = { image: null as number | null, metadata: null as number | null };
+  await Promise.all(
+    items
+      .filter((item) => item.uploadedAt !== null)
+      .map(async (item) => {
+        let served = item.servedAt;
+        if (!served) {
+          served = await servedAt(uri[item.item], watchMs);
+          if (!served) return;
+          await db
+            .update(metadataItems)
+            .set({ servedAt: served })
+            .where(and(eq(metadataItems.launchId, row.id), eq(metadataItems.item, item.item), isNull(metadataItems.servedAt)));
+        }
+        after[item.item] = served.getTime() - item.uploadedAt!.getTime();
+      }),
+  );
+  return after;
+}
+
+/**
+ * The open's hold (spec 2.1 step 10): uploads whatever is not up yet, now that the pot can open, and waits for the
+ * metadata to be served, 10 s at most in all, so a Turbo that hangs never holds the open longer. The open goes out
+ * after it either way; the Workflow uploads anything still missing once the coin exists.
+ */
+async function holdForMetadata(db: Db, cfg: Config, blobs: BlobStore, row: LaunchRow, launch: Address) {
+  const until = Date.now() + SERVE_WAIT_MS;
+  const up = await Promise.race([
+    uploadItems(db, cfg, blobs, row).then(
+      () => true,
+      (e: Error) => (console.error(`the metadata of ${launch} did not go up at the open`, e.message), false),
+    ),
+    sleep(SERVE_WAIT_MS).then(() => false),
+  ]);
+  const { metadata } = up ? await watchServed(db, row, Math.max(until - Date.now(), 0)) : { metadata: null };
+  if (metadata === null) console.warn(`the metadata of ${launch} is not served yet; opening anyway`);
 }
 
 /** What the open's step did. */
@@ -166,14 +264,14 @@ export type OpenOutcome =
  * who signs at the open is waited for until the open is late. Returns once the launch has opened, by this rung or any
  * other sender, or once it cannot.
  */
-export async function sendOpen(db: Db, cfg: Config, keeperKey: SecretBinding, launch: Address): Promise<OpenOutcome> {
+export async function sendOpen(db: Db, cfg: Config, blobs: BlobStore, keeperKey: SecretBinding, launch: Address): Promise<OpenOutcome> {
   const heat = cfg.heat;
   if (!heat?.keys) throw new Error(`Heat has no keeper on ${cfg.cluster}`);
   const rpc = createSolanaRpc(cfg.rpcUrl);
   const row = await launchRow(db, launch);
   if (!row) throw new Error(`Heat did not schedule ${launch}`);
   const keeper = await loadKeeper(keeperKey, heat.keys.keeper);
-  let served = false;
+  let held = false;
   for (;;) {
     const account = await fetchMaybeLaunch(rpc, launch, { commitment: "confirmed", ...limited() });
     if (!account.exists) return { outcome: "gone" };
@@ -202,9 +300,9 @@ export async function sendOpen(db: Db, cfg: Config, keeperKey: SecretBinding, la
       rung = { ...rung, keeperSignature };
     }
     // The open holds up to 10 s for the coin's metadata to be served, once.
-    if (!served) {
-      served = true;
-      if (!(await waitServed(row.metadataUri, SERVE_WAIT_MS))) console.warn("the coin's metadata is not served yet; opening anyway", row.metadataUri);
+    if (!held) {
+      held = true;
+      await holdForMetadata(db, cfg, blobs, row, launch);
     }
     const wire = wireOf(rung, { keeper: keeper.signer.address, creator: row.wallet, mint: row.mint });
     const signature = rung.keeperSignature!;
@@ -548,4 +646,3 @@ export async function reclaimUnscheduled(db: Db, cfg: Config, keeperKey: SecretB
 }
 
 export type { Launch };
-export { MetadataUploadFailed };

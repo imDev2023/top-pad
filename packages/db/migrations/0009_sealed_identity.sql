@@ -1,0 +1,1 @@
+ALTER TABLE "metadata_items" ADD COLUMN "served_at" timestamp with time zone;

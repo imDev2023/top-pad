@@ -1,5 +1,6 @@
 import {
   decompileTransactionMessage,
+  getAddressEncoder,
   getBase58Decoder,
   getBase64EncodedWireTransaction,
   getCompiledTransactionMessageDecoder,
@@ -162,6 +163,9 @@ describe("an Instant launch", () => {
     });
     expect(image.data).toEqual(PNG);
     expect(image.tags).toContainEqual({ name: "Content-Type", value: "image/png" });
+    // Not sealed: signed by the keeper and tagged with Heat's name and the coin, as it goes up when the coin is created.
+    expect(image.tags).toContainEqual({ name: "App-Name", value: "Heat" });
+    expect(Buffer.from(image.owner).equals(Buffer.from(getAddressEncoder().encode(keeper().signer.address)))).toBe(true);
   });
 
   it("is co-signed by the launch key and sent once the Creator wallet has signed, and binds that wallet to the record", async () => {

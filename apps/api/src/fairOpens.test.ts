@@ -431,7 +431,8 @@ describe("an opened launch", () => {
       sqrtPrice: "1",
       quoteReserve: 0n,
     });
-    expect((await view(launch, wallet)).open!.coin).toEqual({ name: "Opened Coin", ticker: "OPEN" });
+    // The coin as the creation transaction carried it, the identity hash's three parts; no launch here, so no image.
+    expect((await view(launch, wallet)).open!.coin).toEqual({ name: "Opened Coin", ticker: "OPEN", uri: "https://turbo-gateway.com/opened", imageUri: null });
   });
 
   it("builds a seat's own claim, and refuses one before the open, the creator's, a delivered one and a wallet with no seat", async () => {

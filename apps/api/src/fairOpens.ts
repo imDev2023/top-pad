@@ -64,7 +64,7 @@ import {
   type FairOpenSeat,
   type PreparedFairOpenTransaction,
 } from "@top-pad/contract";
-import { creators, creatorWallets, fairOpenRungs, fairOpens, launches, pools, type Db } from "@top-pad/db";
+import { coins, creators, creatorWallets, fairOpenRungs, fairOpens, launches, pools, type Db } from "@top-pad/db";
 import { admit, AdmissionRefused, loadAdmissionKey, personOf, refusalOf, tierName } from "./admission";
 import { closedSeatOf, creatorLockOf, deliveredSeats, taxShareOf } from "./afterOpen";
 import { sessionCreator } from "./auth";
@@ -283,7 +283,14 @@ async function openOf(c: Context<AppEnv>, launch: Launch | null, row: LaunchRow 
   return {
     mint,
     pool: live ? await dbcPoolAddress(live.dbcConfig, live.mint, live.quoteMint) : row!.pool!,
-    coin: (await db.select({ name: pools.name, ticker: pools.ticker }).from(pools).where(eq(pools.mint, mint)))[0] ?? null,
+    coin:
+      (
+        await db
+          .select({ name: pools.name, ticker: pools.ticker, uri: pools.uri, imageUri: coins.imageUri })
+          .from(pools)
+          .leftJoin(coins, eq(coins.mint, pools.mint))
+          .where(eq(pools.mint, mint))
+      )[0] ?? null,
     spent: `${live?.spent ?? row!.spent ?? 0n}`,
     coins: `${live?.coins ?? row!.coins ?? 0n}`,
     coinDecimals: COIN_DECIMALS,
@@ -537,7 +544,11 @@ async function openRungFor(c: Context<AppEnv>, rpc: Rpc) {
   return { address, launch, scheduled, rung } as const;
 }
 
-/** `POST /fair-opens/:launch/open`: the rung the pot covers, for the Creator wallet to sign at the open. */
+/**
+ * `POST /fair-opens/:launch/open`: the rung the pot covers, for the Creator wallet to sign at the open. The rung carries
+ * the sealed coin's name, ticker, metadata URI and mint before the open lands, so it goes only to the X account that
+ * scheduled the launch, signed in, and never to someone who merely names the Creator wallet, which the page shows.
+ */
 export async function prepareOpenSignature(c: Context<AppEnv>) {
   const { cfg } = c.var;
   const sender = FairOpenSender.safeParse(await c.req.json().catch(() => null));
@@ -548,7 +559,10 @@ export async function prepareOpenSignature(c: Context<AppEnv>) {
   const found = await openRungFor(c, rpc);
   if ("refusal" in found) return found.refusal;
   const { scheduled, rung } = found;
-  if (sender.data.wallet !== scheduled.wallet) return refuse(c, 403, { error: "Only the Creator wallet that scheduled this Fair Open signs its open.", code: "not_the_creator" });
+  const session = await sessionCreator(c);
+  if (sender.data.wallet !== scheduled.wallet || session?.id !== scheduled.creatorId) {
+    return refuse(c, 403, { error: "Only the creator who scheduled this Fair Open signs its open: link the X account that scheduled it, with its Creator wallet.", code: "not_the_creator" });
+  }
   if (rung.creatorSignature) return refuse(c, 409, { error: "You have signed your open: our keeper is sending it.", code: "already_signed" });
   const body: PreparedFairOpenTransaction = { transaction: wireOf(rung, { keeper: heat.keys.keeper, creator: scheduled.wallet, mint: scheduled.mint }), admission: null };
   return c.json(body);

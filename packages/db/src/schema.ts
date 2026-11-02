@@ -257,6 +257,11 @@ export const metadataItems = pgTable(
     storageKey: text("storage_key").notNull(),
     uploadedAt: timestamp("uploaded_at", { withTimezone: true }),
     receipt: jsonb("receipt"),
+    /**
+     * When the gateway first served the item after its upload, as the keeper saw it (spec 11.2: within 10 s of the
+     * upload, before the open's rung lands); null until seen, or for an Instant launch's items, which nobody times.
+     */
+    servedAt: timestamp("served_at", { withTimezone: true }),
   },
   (t) => [primaryKey({ columns: [t.launchId, t.item] })],
 );
