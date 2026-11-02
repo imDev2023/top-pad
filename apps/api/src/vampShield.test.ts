@@ -270,6 +270,16 @@ describe("a launch Vamp Shield judges as it is prepared", () => {
     expect(logged).toMatchObject({ outcome: "looks_like", ticker: "BABYBONK" });
   });
 
+  it("labels a coin two sources protect under two ids once, by its most authoritative source", async () => {
+    await upsertListed(db, "coingecko_top", [{ mint: "bonk", ticker: "BONK", name: "Bonk", imageUrl: null, details: {} }]);
+    const cookie = await linkX();
+    const res = await prepareInstant(cookie, { ticker: "KINGBONK", name: "King Frog", wallet: (await testKeypair()).signer.address, image: image("king") });
+    expect(res.status).toBe(201);
+    const launch = PreparedLaunch.parse(await res.json());
+    const [row] = await db.select().from(launches).where(eq(launches.id, launch.id));
+    expect(row!.looksLike).toEqual([expect.objectContaining({ field: "ticker", label: "Looks like $Bonk", coin: expect.objectContaining({ source: "jupiter_verified" }) })]);
+  });
+
   it("refuses a protected Heat coin's strict key to a new launch", async () => {
     const cookie = await linkX();
     const wallet = (await testKeypair()).signer;

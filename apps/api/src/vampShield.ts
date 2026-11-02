@@ -458,9 +458,15 @@ export async function judgeLaunch(db: Db, cfg: Config, env: Bindings, at: Prepar
   }
   const byMint = new Map(text.matched.map((c) => [c.mint, c]));
   const labels: LooksLike[] = [];
+  // One label per coin a trader would call one: the same coin listed by two sources under two ids (Jupiter's mint and
+  // CoinGecko's id for Bonk) has the same folded ticker and name, and is named once, by its most authoritative source.
+  const labelled: MatchedCoin[] = [];
+  const same = (a: MatchedCoin, b: MatchedCoin) => a.mint === b.mint || (a.keys.ticker.strict === b.keys.ticker.strict && a.keys.name.strict === b.keys.name.strict);
   for (const near of text.near) {
     const coin = byMint.get(near.coin.mint)!;
-    if (!labels.some((l) => l.field === near.field && l.coin.mint === coin.mint)) labels.push(textLabel(cfg, near, coin));
+    if (labels.some((l, i) => l.field === near.field && same(labelled[i]!, coin))) continue;
+    labels.push(textLabel(cfg, near, coin));
+    labelled.push(coin);
   }
   if (check.label) labels.push(check.label);
   if (labels.length > 0) await logPrepared(db, at, text.verdict, "looks_like", [...textMatches, ...imageMatches], check.sha256, scoresOf(check.nearest));

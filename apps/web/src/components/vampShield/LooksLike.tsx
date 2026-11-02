@@ -5,13 +5,17 @@
 import type { LooksLike } from "@top-pad/contract";
 import styles from "./LooksLike.module.css";
 
-/** One entry per protected coin, its reasons together: a coin near $BONK by ticker and by image says both. */
+/**
+ * One entry per protected coin as a trader names it, its reasons together: a coin near $BONK by ticker and by image says
+ * both, even when two sources list Bonk under two ids.
+ */
 function byCoin(labels: LooksLike[]) {
   const grouped = new Map<string, { label: LooksLike; reasons: string[] }>();
   for (const l of labels) {
-    const held = grouped.get(l.coin.mint);
+    const key = l.label.toLowerCase();
+    const held = grouped.get(key);
     if (held) held.reasons.push(l.reason);
-    else grouped.set(l.coin.mint, { label: l, reasons: [l.reason] });
+    else grouped.set(key, { label: l, reasons: [l.reason] });
   }
   return [...grouped.values()];
 }
@@ -55,7 +59,7 @@ export function LooksLikePanel({ labels, open, id }: { labels: LooksLike[]; open
       <b>Vamp Shield: close to a protected coin, not that coin</b>
       <ul className={styles.list}>
         {coins.map(({ label, reasons }) => (
-          <li key={label.coin.mint} className={styles.item}>
+          <li key={label.label} className={styles.item}>
             <a className={styles.coin} href={label.coin.url} target="_blank" rel="noreferrer">
               {label.coin.imageUrl ? (
                 <img src={label.coin.imageUrl} alt="" width={32} height={32} referrerPolicy="no-referrer" loading="lazy" />
