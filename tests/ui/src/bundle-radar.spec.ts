@@ -119,8 +119,10 @@ test("Bundle Radar flags a creator's bundle within seconds, and a case opens an 
     let attempt: Attempt | null = null;
     let creationSlot = 0n;
     let inSlot: { buyer: Address; signature: Signature }[] = [];
-    // When the deployed site's labels first linked the 4 funded wallets, watched from the moment each coin lands.
-    let linkedSeen: Promise<{ at: number; radar: BundleRadar } | null> = Promise.resolve(null);
+    // When the site first labelled the coin with a wallet linked to the creator, and when it had linked all 4 funded
+    // wallets, watched from the moment each coin lands: the indexer reads a slot's transactions one by one, 2 to 3 s each
+    // on Helius's free tier, so a bundle of many transactions is linked wallet by wallet.
+    let linkedSeen: Promise<{ first: number; all: number } | null> = Promise.resolve(null);
     for (let tries = 0; tries < 5; tries++) {
       if (tries) {
         // A fresh page: the test wallet is installed once a page.
@@ -133,9 +135,12 @@ test("Bundle Radar flags a creator's bundle within seconds, and a case opens an 
       mint = attempt.mint;
       mints.push(mint);
       const watched = mint;
-      linkedSeen = waitFor(() => api(`/coins/${watched}/radar`, BundleRadar), fundedLinked, 120_000)
-        .then((radar) => ({ at: Date.now(), radar }))
-        .catch(() => null);
+      linkedSeen = (async () => {
+        await waitFor(() => api(`/coins/${watched}/radar`, BundleRadar), (r) => r.linked.wallets > 0, 120_000);
+        const first = Date.now();
+        await waitFor(() => api(`/coins/${watched}/radar`, BundleRadar), fundedLinked, 120_000);
+        return { first, all: Date.now() };
+      })().catch(() => null);
       const radar = await waitFor(() => api(`/coins/${mint}/radar`, BundleRadar), (r) => r.creation.blockIndex !== null, 60_000);
       creationSlot = BigInt(radar.creation.slot);
       const landed = await landings([...attempt.copies, ...attempt.sniperCopies].map((c) => c.signature));
@@ -164,9 +169,12 @@ test("Bundle Radar flags a creator's bundle within seconds, and a case opens an 
     const seen = await linkedSeen;
     expect(seen, "the 4 funded wallets were linked within 2 minutes").not.toBeNull();
     const radar = await api(`/coins/${coin}/radar`, BundleRadar);
-    const labelledAfter = (seen!.at - Date.parse(radar.openedAt)) / 1000;
-    console.log(`Bundle Radar linked the 4 funded wallets ${labelledAfter.toFixed(1)} s after the open (block time)`);
-    expect(labelledAfter).toBeLessThan(30);
+    const opened = Date.parse(radar.openedAt);
+    const [labelledAfter, allAfter] = [(seen!.first - opened) / 1000, (seen!.all - opened) / 1000];
+    // The open's block time counts whole seconds, so these are up to a second long.
+    console.log(`Bundle Radar labelled the coin red ${labelledAfter.toFixed(1)} s after the open, and linked all 4 funded wallets after ${allAfter.toFixed(1)} s`);
+    expect(labelledAfter).toBeLessThan(20);
+    expect(allAfter).toBeLessThan(90);
     for (const f of funded) expect(radar.wallets.find((w) => w.wallet === f.address)!.labels).toEqual(expect.arrayContaining(["same_slot", "creator_funded"]));
     expect(radar.wallets.find((w) => w.wallet === creator.address)).toMatchObject({ creator: true, linked: false, labels: expect.arrayContaining(["same_slot"]) });
     const sniperRow = radar.wallets.find((w) => w.wallet === sniper.address);
@@ -188,7 +196,6 @@ test("Bundle Radar flags a creator's bundle within seconds, and a case opens an 
 
     // Past the sniper tax, the 4 funded wallets buy on: over 1% of supply between them in the first hour. The sniper
     // buys more than any of them, and is still nothing to the case.
-    const opened = Date.parse(radar.openedAt);
     await sleep(Math.max(0, opened + 65_000 - Date.now()));
     for (const f of funded) await swap(f, coin, "buy", PAST_TAX);
     await swap(sniper, coin, "buy", PAST_TAX * 2n);
