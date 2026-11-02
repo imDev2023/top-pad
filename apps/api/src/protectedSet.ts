@@ -36,6 +36,11 @@ export const BAR_DAYS = 7;
 const JUPITER = "https://api.jup.ag/tokens/v2";
 const COINGECKO = "https://api.coingecko.com/api/v3";
 const FETCH_TIMEOUT_MS = 30_000;
+/**
+ * Sent with every list request: a Worker's fetch sends no User-Agent, and CoinGecko answers a request without one 403
+ * (measured from the deployed Worker and with curl on 2026-11-02).
+ */
+export const USER_AGENT = "Heat/1.0 (+https://github.com/imDev2023/top-pad)";
 
 // Lists from outside.
 
@@ -65,8 +70,9 @@ async function secret(value: SecretBinding | string | undefined): Promise<string
 export async function jupiterList(env: Bindings, path: string): Promise<JupiterToken[]> {
   const key = await secret(env.JUPITER_API_KEY);
   const url = `${JUPITER}/${path}`;
-  let res = await fetch(url, { headers: key ? { "x-api-key": key } : {}, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
-  if (res.status === 429 && key) res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+  const headers = { "user-agent": USER_AGENT, accept: "application/json" };
+  let res = await fetch(url, { headers: key ? { ...headers, "x-api-key": key } : headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+  if (res.status === 429 && key) res = await fetch(url, { headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
   if (!res.ok) throw new Error(`Jupiter answered ${res.status} for ${path}`);
   const body = (await res.json()) as unknown;
   if (!Array.isArray(body)) throw new Error(`Jupiter's ${path} is not a list`);
@@ -121,7 +127,7 @@ export async function coinGeckoTop(pauseMs = 3_000): Promise<Listed[]> {
   for (let page = 1; page <= 4; page++) {
     if (page > 1) await new Promise((r) => setTimeout(r, pauseMs));
     const res = await fetch(`${COINGECKO}/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page=${page}`, {
-      headers: { accept: "application/json" },
+      headers: { accept: "application/json", "user-agent": USER_AGENT },
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
     if (!res.ok) throw new Error(`CoinGecko answered ${res.status} for page ${page}`);

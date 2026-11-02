@@ -8,7 +8,7 @@ import { coins, createDb, pools, protectedCoins, protectedImages, trades, type D
 import { createTestDatabase } from "@top-pad/db/testing";
 import { heatHandler, indexTransactions, type RawTransaction } from "@top-pad/indexer";
 import { config } from "./env";
-import { coinGeckoTop, refreshHeat, refreshLists, refreshTrending, signImages, upsertListed, type Listed } from "./protectedSet";
+import { coinGeckoTop, refreshHeat, refreshLists, refreshTrending, signImages, upsertListed, USER_AGENT, type Listed } from "./protectedSet";
 import { FakeVision, fakeSignatures, testBindings } from "./test/fakes";
 import { protectsNow } from "./vampShield";
 
@@ -41,10 +41,10 @@ const hoursFromNow = (d: Date | null) => (d ? Math.round((d.getTime() - Date.now
 
 /** Jupiter's and CoinGecko's answers, by path, and what each request carried. */
 function outside(routes: Record<string, unknown | ((req: Request) => Response)>) {
-  const asked: { url: string; key: string | null }[] = [];
+  const asked: { url: string; key: string | null; agent: string | null }[] = [];
   vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
     const req = new Request(input, init);
-    asked.push({ url: req.url, key: req.headers.get("x-api-key") });
+    asked.push({ url: req.url, key: req.headers.get("x-api-key"), agent: req.headers.get("user-agent") });
     const route = Object.entries(routes).find(([path]) => req.url.includes(path));
     if (!route) return new Response("not found", { status: 404 });
     return typeof route[1] === "function" ? (route[1] as (r: Request) => Response)(req) : Response.json(route[1]);
@@ -95,7 +95,7 @@ describe("the protected set's sources", () => {
 
   it("reads CoinGecko's top 1,000 as four pages, tickers upper-cased", async () => {
     const pages: number[] = [];
-    outside({
+    const asked = outside({
       "coins/markets": (req: Request) => {
         const page = Number(new URL(req.url).searchParams.get("page"));
         pages.push(page);
@@ -104,6 +104,8 @@ describe("the protected set's sources", () => {
     });
     const top = await coinGeckoTop(0);
     expect(pages).toEqual([1, 2, 3, 4]);
+    // CoinGecko refuses a request without a User-Agent, as a Worker's fetch sends.
+    expect(asked.every((a) => a.agent === USER_AGENT)).toBe(true);
     expect(top[0]).toEqual({ mint: "coin-1", ticker: "BTC", name: "Coin 1", imageUrl: "https://cg.test/1.png", details: { rank: 1, mcap: null } });
   });
 });
