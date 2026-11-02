@@ -24,6 +24,7 @@ import { getCoinRecordEncoder, LaunchMode } from "@top-pad/clients/fee";
 import { getLaunchEncoder, getSeatEncoder, LaunchStatus, type LaunchArgs } from "@top-pad/clients/fair-open";
 import type { RawTransaction } from "@top-pad/indexer";
 import type { BlobStore, Bindings } from "../env";
+import type { FetchedSignatures, Signatures, VisionAnswer, VisionService } from "../vision";
 
 export const ORIGINS = {
   web: "http://web.test",
@@ -379,8 +380,87 @@ export function fairOpenSeat(p: {
 }
 
 /** The Worker's bindings for a test: devnet's configs, every outside service faked. */
+/** A deterministic stand-in for random numbers, so a fake signature is the same for the same seed. */
+function seeded(seed: string) {
+  let h = 2166136261;
+  for (const c of seed) h = Math.imul(h ^ c.charCodeAt(0), 16777619);
+  return () => {
+    h ^= h << 13;
+    h ^= h >>> 17;
+    h ^= h << 5;
+    return ((h >>> 0) % 1_000_000) / 1_000_000;
+  };
+}
+
+/** A fake image's signatures, from a seed: unrelated for different seeds, like different pictures. */
+export function fakeSignatures(seed: string, sha256 = seed.padEnd(64, "0").slice(0, 64)): Signatures {
+  const random = seeded(seed);
+  const bits = () => Array.from({ length: 256 }, () => (random() < 0.5 ? "0" : "1")).join("");
+  const dihedral = Array.from({ length: 8 }, bits);
+  const raw = Array.from({ length: 512 }, () => random() - 0.5);
+  const norm = Math.hypot(...raw);
+  return { sha256, pdq: { bits: dihedral[0]!, quality: 90, dihedral }, sscd: raw.map((v) => v / norm) };
+}
+
+/** A PDQ hash with its first `n` bits flipped: at Hamming distance `n` from the original. */
+export const flipBits = (bits: string, n: number) => [...bits].map((b, i) => (i < n ? (b === "0" ? "1" : "0") : b)).join("");
+
+/** A unit vector at cosine `cos` from `v`: v times cos plus an orthogonal unit vector times sin. */
+export function atCosine(v: number[], cos: number, seed = "orthogonal"): number[] {
+  const random = seeded(seed);
+  const r = v.map(() => random() - 0.5);
+  const dot = r.reduce((a, x, i) => a + x * v[i]!, 0);
+  const orth = r.map((x, i) => x - dot * v[i]!);
+  const n = Math.hypot(...orth);
+  const sin = Math.sqrt(1 - cos * cos);
+  return v.map((x, i) => x * cos + (orth[i]! / n) * sin);
+}
+
+/**
+ * The vision service as a Durable Object binding: an image's signatures are fakeSignatures of its bytes' SHA-256, unless
+ * a test set them for those bytes, and a fetched URL's are what the test set for it. It counts its calls and its sleeps.
+ */
+export class FakeVision implements VisionService {
+  readonly byImage = new Map<string, Signatures>();
+  readonly byUrl = new Map<string, Signatures | { error: string }>();
+  calls = 0;
+  fetched: string[] = [];
+  slept = 0;
+  /** Whether it answers as a Container woken from sleep; a refusal to answer makes it throw. */
+  woke = true;
+  down = false;
+
+  async signatures(bytes: Uint8Array): Promise<VisionAnswer> {
+    this.calls++;
+    if (this.down) throw new Error("the Container did not start");
+    const sha256 = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes as BufferSource)), (b) => b.toString(16).padStart(2, "0")).join("");
+    const set = this.byImage.get(sha256);
+    return { ...(set ?? fakeSignatures(sha256)), sha256, answerMs: this.woke ? 4_200 : 300, woke: this.woke };
+  }
+
+  async fetchSignatures(images: { id: string; url: string }[]): Promise<FetchedSignatures[]> {
+    return images.map(({ id, url }) => {
+      this.fetched.push(url);
+      const set = this.byUrl.get(url);
+      if (!set) return { id, ok: false, error: "404 Not Found" };
+      if ("error" in set) return { id, ok: false, error: set.error };
+      return { id, ok: true, ...set };
+    });
+  }
+
+  async sleep() {
+    this.slept++;
+  }
+
+  /** The binding the Worker reads it through. */
+  binding(): Bindings["VISION"] {
+    return { idFromName: () => "vision", get: () => this } as unknown as Bindings["VISION"];
+  }
+}
+
 export function testBindings(connectionString: string, extra: Partial<Bindings> = {}): Bindings {
   return {
+    VISION: new FakeVision().binding(),
     CLUSTER: "devnet",
     WEB_ORIGIN: ORIGINS.web,
     API_ORIGIN: ORIGINS.api,

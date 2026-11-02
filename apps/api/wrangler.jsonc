@@ -8,19 +8,25 @@
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "observability": { "enabled": true },
   // Every five minutes: the indexer woken if a deploy stopped it, the keeper's float against its floor, housekeeping,
-  // then any open alert to the operator.
-  "triggers": { "crons": ["*/5 * * * *"] },
-  // The indexer and the live rooms (spec 10.2), SQLite-backed; environments inherit this.
+  // then any open alert to the operator. Every minute: Vamp Shield's protected set (spec 6.2), and at minute 2 of each
+  // hour its hourly lists and the images not yet signed.
+  "triggers": { "crons": ["*/5 * * * *", "* * * * *"] },
+  // The indexer, the live rooms and the vision service's Container (spec 10.2), SQLite-backed; environments inherit this.
   "exports": {
     "Indexer": { "type": "durable-object", "storage": "sqlite" },
-    "LiveRoom": { "type": "durable-object", "storage": "sqlite" }
+    "LiveRoom": { "type": "durable-object", "storage": "sqlite" },
+    "Vision": { "type": "durable-object", "storage": "sqlite" }
   },
   "durable_objects": {
     "bindings": [
       { "name": "INDEXER", "class_name": "Indexer" },
-      { "name": "LIVE_ROOMS", "class_name": "LiveRoom" }
+      { "name": "LIVE_ROOMS", "class_name": "LiveRoom" },
+      { "name": "VISION", "class_name": "Vision" }
     ]
   },
+  // The vision service (apps/vision): PDQ and SSCD on CPU, one instance, asleep when idle. `basic` is a quarter of a vCPU
+  // and 1 GiB, which the Workers Paid plan's included 25 GiB-hours a month cover if it is awake under 50 minutes a day.
+  "containers": [{ "class_name": "Vision", "image": "../vision/Dockerfile", "instance_type": "basic", "max_instances": 1 }],
   // The keeper's Workflows (spec 10.2): each Instant launch's, keyed by its coin, sends the window claim at 60 s; each
   // Fair Open's, keyed by its launch account, uploads its coin's metadata, opens it at its time and pushes every seat.
   "workflows": [
@@ -56,7 +62,7 @@
     "devnet": {
       "name": "top-pad-api-devnet",
       "workers_dev": true,
-      "triggers": { "crons": ["*/5 * * * *"] },
+      "triggers": { "crons": ["*/5 * * * *", "* * * * *"] },
       "vars": {
         "CLUSTER": "devnet",
         "WEB_ORIGIN": "https://top-pad-web-devnet.imdev2023.workers.dev",
@@ -76,9 +82,11 @@
       "durable_objects": {
         "bindings": [
           { "name": "INDEXER", "class_name": "Indexer" },
-          { "name": "LIVE_ROOMS", "class_name": "LiveRoom" }
+          { "name": "LIVE_ROOMS", "class_name": "LiveRoom" },
+          { "name": "VISION", "class_name": "Vision" }
         ]
       },
+      "containers": [{ "class_name": "Vision", "image": "../vision/Dockerfile", "instance_type": "basic", "max_instances": 1 }],
       "workflows": [
         { "name": "top-pad-instant-launches-devnet", "binding": "INSTANT_LAUNCHES", "class_name": "InstantLaunchKeeper" },
         { "name": "top-pad-fair-opens-devnet", "binding": "FAIR_OPENS", "class_name": "FairOpenKeeper" },
@@ -90,7 +98,9 @@
       // there by the owner on 2026-10-29 and 2026-10-30, read only when a launch or an admission is signed.
       "secrets_store_secrets": [
         { "binding": "KEEPER_KEY", "store_id": "bbb2e2aa36724838a433d7495bbe9baf", "secret_name": "top-pad-devnet-keeper-key" },
-        { "binding": "ADMISSION_KEY", "store_id": "bbb2e2aa36724838a433d7495bbe9baf", "secret_name": "top-pad-devnet-admission-key" }
+        { "binding": "ADMISSION_KEY", "store_id": "bbb2e2aa36724838a433d7495bbe9baf", "secret_name": "top-pad-devnet-admission-key" },
+        // Jupiter's API key, for the protected set's lists; made from the owner's shared key on 2026-11-02 (#52).
+        { "binding": "JUPITER_API_KEY", "store_id": "bbb2e2aa36724838a433d7495bbe9baf", "secret_name": "top-pad-devnet-jupiter-key" }
       ]
     }
   }

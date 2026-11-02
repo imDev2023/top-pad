@@ -10,6 +10,7 @@
     "deploy:devnet": "env -u CLOUDFLARE_API_TOKEN wrangler deploy --env devnet --durable-objects-code-update-mode immediate"
   },
   "dependencies": {
+    "@cloudflare/containers": "0.3.7",
     "@solana/kit": "^8.5.0",
     "@top-pad/arweave": "workspace:*",
     "@top-pad/chain": "workspace:*",

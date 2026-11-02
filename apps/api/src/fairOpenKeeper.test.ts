@@ -6,10 +6,10 @@ import { eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { CLUSTERS, fairOpenLookupTableAddresses, seatAddress, Tier } from "@top-pad/chain";
 import { PreparedLaunch } from "@top-pad/contract";
-import { createDb, launches, metadataItems, type Db } from "@top-pad/db";
+import { createDb, launches, metadataItems, protectedCoins, protectedImages, type Db } from "@top-pad/db";
 import { createTestDatabase } from "@top-pad/db/testing";
 import { config, type Bindings } from "./env";
-import { closeLaunchNonce, failAndRefund, pushSeats, readSchedule, releaseTicker, sendOpen, SERVE_WITHIN_MS, uploadMetadata } from "./fairOpenKeeper";
+import { closeLaunchNonce, failAndRefund, finishTicker, pushSeats, readSchedule, sendOpen, SERVE_WITHIN_MS, uploadMetadata } from "./fairOpenKeeper";
 import { app } from "./index";
 import { decode, Fakes, fairOpenLaunch, fairOpenSeat, lookupTableAccount, MemoryBlobs, ORIGINS, testBindings, testContext, testKeypair } from "./test/fakes";
 
@@ -276,15 +276,35 @@ describe("the keeper's steps, each run twice", { timeout: 30_000 }, () => {
     expect((await readSchedule(db, cfg(), s.launch)).status).toBe("gone");
   });
 
-  it("closes the nonce to the creator once, and releases the ticker once", async () => {
+  it("closes the nonce to the creator once, and releases a failed launch's ticker once", async () => {
     const s = await scheduled();
     onChain(s, 700n, { failure: 0 });
     fakes.accounts.set(s.nonce, { ...fakes.accounts.get(s.nonce)!, lamports: 1_447_680n });
     fakes.onSend = () => fakes.accounts.set(s.nonce, { ...fakes.accounts.get(s.nonce)!, lamports: 0n });
     expect((await closeLaunchNonce(db, cfg(), keeperKey, s.launch)).closed).not.toBeNull();
     expect(await closeLaunchNonce(db, cfg(), keeperKey, s.launch)).toEqual({ closed: null });
-    expect(await releaseTicker(db, s.launch)).toEqual({ released: true });
-    expect(await releaseTicker(db, s.launch)).toEqual({ released: false });
+    expect(s.row.tickerKey).not.toBeNull();
+    expect(await finishTicker(db, s.launch)).toEqual({ protected: false, released: true });
+    expect(await finishTicker(db, s.launch)).toEqual({ protected: false, released: false });
+    const [row] = await db.select().from(launches).where(eq(launches.id, s.row.id));
+    expect(row!.tickerKey).toBeNull();
+    expect(row!.keeperDoneAt).not.toBeNull();
+    expect(await db.select().from(protectedCoins).where(eq(protectedCoins.mint, s.row.mint))).toEqual([]);
+  });
+
+  it("keeps an opened launch's ticker key, protects its coin, and its image's signatures come from its own check", async () => {
+    const s = await scheduled({ name: "Kept Open" });
+    await db.update(launches).set({ openLandedAt: new Date() }).where(eq(launches.id, s.row.id));
+    expect(await finishTicker(db, s.launch)).toEqual({ protected: true, released: false });
+    expect(await finishTicker(db, s.launch)).toEqual({ protected: true, released: false });
+    const [row] = await db.select().from(launches).where(eq(launches.id, s.row.id));
+    expect(row!.tickerKey).toBe(s.row.tickerKey);
+    expect(row!.keeperDoneAt).not.toBeNull();
+    const [kept] = await db.select().from(protectedCoins).where(eq(protectedCoins.mint, s.row.mint));
+    expect(kept).toMatchObject({ source: "heat", ticker: s.row.ticker, name: "Kept Open", imageUrl: s.row.imageUri, protectedUntil: null });
+    const [image] = await db.select().from(protectedImages).where(eq(protectedImages.url, s.row.imageUri));
+    expect(image).toMatchObject({ status: "done", sha256: s.row.imageSha256 });
+    expect(image!.sscd).toHaveLength(512);
   });
 });
 

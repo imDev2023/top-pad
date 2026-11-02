@@ -32,10 +32,11 @@ import { indexerOf } from "./indexing";
 import { config, fairOpenLaunchSetup, instantLaunchSetup, type Bindings } from "./env";
 import { sameOriginWrites, withConfig, withDb, type AppEnv } from "./http";
 import { checkKeeperFloat } from "./keeper";
+import { refreshLists, refreshTrending, signImages } from "./protectedSet";
 import { getLaunch, prepareLaunch, submitLaunch } from "./launches";
 import { IMAGE_TYPES } from "./metadata";
 import { getHoldings, prepareSwap, quote, reportTrade } from "./trading";
-import { checkRoute } from "./vampShield";
+import { appealRoute, checkImageRoute, checkRoute, listAppealsRoute } from "./vampShield";
 import { sweepWindowClaims } from "./windowClaims";
 
 export const app = new Hono<AppEnv>();
@@ -100,14 +101,14 @@ app.get("/platform", (c) => {
   return c.json(platform);
 });
 
-// Bodies are read whole, so their size is capped before anything reads them; only a launch's form carries an image,
-// and only a Fair Open's submit carries a ladder, 64 signed transactions of about 1.5 KB each in base64.
+// Bodies are read whole, so their size is capped before anything reads them; only a launch's form and an image's check
+// carry an image, and only a Fair Open's submit carries a ladder, 64 signed transactions of about 1.5 KB each in base64.
 const LADDER_SUBMIT = /^\/launches\/[^/]+\/submit$/;
 app.post("*", async (c, next) => {
   const { maxImageBytes } = c.var.cfg;
   const tooLarge = (c: Context) => c.json({ error: "The request is too large." }, 413);
   if (LADDER_SUBMIT.test(c.req.path)) return bodyLimit({ maxSize: 192 * 1024, onError: tooLarge })(c, next);
-  if (c.req.path !== "/launches") return bodyLimit({ maxSize: 16 * 1024, onError: tooLarge })(c, next);
+  if (c.req.path !== "/launches" && c.req.path !== "/vamp-shield/image") return bodyLimit({ maxSize: 16 * 1024, onError: tooLarge })(c, next);
   const refusal: LaunchRefusal = { error: `The image is too large: a coin's image can be at most ${Math.round(maxImageBytes / 1024)} KB.`, code: "image" };
   return bodyLimit({ maxSize: maxImageBytes + 16 * 1024, onError: (c) => c.json(refusal, 413) })(c, next);
 });
@@ -117,6 +118,9 @@ app.get("/auth/x/callback", finishXLink);
 app.post("/auth/logout", logout);
 app.get("/me", me);
 app.post("/vamp-shield/check", checkRoute);
+app.post("/vamp-shield/image", checkImageRoute);
+app.post("/vamp-shield/appeals", appealRoute);
+app.get("/vamp-shield/appeals", listAppealsRoute);
 app.post("/launches", prepareLaunch);
 app.post("/launches/:id/submit", submitLaunch);
 app.get("/launches/:id", getLaunch);
@@ -172,12 +176,36 @@ async function housekeeping(db: Db, env: Bindings) {
   return { authorizations: authorizations.length, sessions: expiredSessions.length, expiredLaunches: stale.length, fairOpens, candles: await pruneCandles(db) };
 }
 
+/** The minute of each hour the protected set's hourly lists and image batch run, apart from the five-minute jobs. */
+const PROTECTED_LISTS_MINUTE = 2;
+/** How long an image batch may keep the vision service busy, inside the cron's 15 minutes. */
+const IMAGE_BATCH_MS = 10 * 60_000;
+
 /**
- * The Cron Trigger: the indexer kept running, the keeper's float, any window claim, Fair Open or Graduation the keeper's
- * Workflows missed, Bundle Radar's case job, Heat's LP fees once an hour, housekeeping, then every open alert to the
- * operator.
+ * The minute's Cron Trigger: Vamp Shield's protected set (spec 6.2, 10.2), Jupiter's trending coins every minute, and
+ * once an hour its verified and organic lists, Heat's coins, CoinGecko's daily top 1,000 and the images not yet signed.
+ */
+async function everyMinute(controller: ScheduledController, env: Bindings, ctx: ExecutionContext) {
+  const cfg = config(env);
+  const { db, close } = createDb(env.HYPERDRIVE.connectionString);
+  try {
+    await runJob(db, "protected-trending", () => refreshTrending(db, env), { exclusive: true }).catch(() => undefined);
+    if (new Date(controller.scheduledTime).getUTCMinutes() === PROTECTED_LISTS_MINUTE) {
+      await runJob(db, "protected-lists", () => refreshLists(db, cfg, env), { exclusive: true }).catch(() => undefined);
+      await runJob(db, "protected-images", () => signImages(db, env, IMAGE_BATCH_MS), { exclusive: true }).catch(() => undefined);
+    }
+  } finally {
+    ctx.waitUntil(close());
+  }
+}
+
+/**
+ * The Cron Triggers. Every five minutes: the indexer kept running, the keeper's float, any window claim, Fair Open or
+ * Graduation the keeper's Workflows missed, Bundle Radar's case job, Heat's LP fees once an hour, housekeeping, then every
+ * open alert to the operator. Every minute: the protected set (everyMinute).
  */
 async function scheduled(_controller: ScheduledController, env: Bindings, ctx: ExecutionContext) {
+  if (_controller.cron === EVERY_MINUTE) return everyMinute(_controller, env, ctx);
   const cfg = config(env);
   const indexer = indexerOf(env);
   if (indexer) ctx.waitUntil(indexer.wake(env.CF_VERSION_METADATA?.id).catch((e) => console.error("waking the indexer failed", e)));
@@ -203,6 +231,9 @@ async function scheduled(_controller: ScheduledController, env: Bindings, ctx: E
     ctx.waitUntil(close());
   }
 }
+
+/** The minute's Cron Trigger, as wrangler.jsonc names it. */
+const EVERY_MINUTE = "* * * * *";
 
 const ADDRESS = "[1-9A-HJ-NP-Za-km-z]{32,44}";
 const LIVE_PATH = new RegExp(`^/live/(?:board|coins/(${ADDRESS})|fair-opens/(${ADDRESS}))$`);

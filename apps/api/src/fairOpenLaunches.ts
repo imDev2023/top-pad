@@ -66,6 +66,7 @@ import {
   ownLaunch,
   readImage,
   Refused,
+  vampShieldRefusal,
   sendError,
   settle,
   type Launch,
@@ -73,7 +74,7 @@ import {
 import { signItems, storeItems } from "./metadata";
 import { keeperSignatureOn, wireOf } from "./rungs";
 import { sendAndConfirm } from "./send";
-import { checkTeaser, checkText, firstRefusal } from "./vampShield";
+import { checkTeaser, firstRefusal, judgeLaunch, judgeLaunchText } from "./vampShield";
 
 /** How far ahead a window may start (spec 2.1 step 4), as `create_launch` allows it. */
 export const MAX_AHEAD_SECONDS = 7 * 24 * 60 * 60;
@@ -126,8 +127,10 @@ export async function prepareFairOpen(c: Context<AppEnv>, creator: Creator, body
   }
   const { wallet } = form.data;
 
-  const verdict = await checkText(db, form.data.ticker, form.data.name);
-  if (!verdict.clear) return refuse(c, 422, { error: firstRefusal(verdict), code: "vamp_shield", verdict });
+  const id = crypto.randomUUID();
+  const preparing = { creatorId: creator.id, launchId: id };
+  const text = await judgeLaunchText(db, cfg, preparing, form.data.ticker, form.data.name);
+  if (!text.verdict.clear) return refuse(c, 422, { error: firstRefusal(text.verdict), code: "vamp_shield", verdict: text.verdict });
   const teaser = await checkTeaser(db, form.data.teaser);
   if (!teaser.ok) return refuse(c, 422, { error: teaser.reason, code: "teaser" });
 
@@ -143,6 +146,9 @@ export async function prepareFairOpen(c: Context<AppEnv>, creator: Creator, body
   if ("error" in image) return refuse(c, 422, image);
   const problem = await launchProblem(db, creator.id, wallet);
   if (problem) return refuse(c, problem.status, problem.refusal);
+  // The image last, since checking it may wake the vision service: a launch refused for anything else never does.
+  const verdict = await judgeLaunch(db, cfg, c.env, preparing, text, image.bytes);
+  if (!verdict.ok) return refuse(c, verdict.status as 422, vampShieldRefusal(verdict));
   const tickerKey = tickerKeyOf(verdict.ticker);
   const reserved = () =>
     refuse(c, 409, {
@@ -162,7 +168,6 @@ export async function prepareFairOpen(c: Context<AppEnv>, creator: Creator, body
   const mint = await generateKeyPairSigner();
   const nonce = await generateKeyPairSigner();
   const { launch } = await fairOpenAccounts(nonce.address);
-  const id = crypto.randomUUID();
   const coin = { name: verdict.name, ticker: verdict.ticker, mint: mint.address, xHandle: creator.xHandle };
   const items = await signItems("sealed", id, coin, image, { gateway: cfg.arweaveGateway, site: webApp(cfg) });
   const sealed = { name: coin.name, ticker: coin.ticker, uri: items.metadataUri };
@@ -225,6 +230,8 @@ export async function prepareFairOpen(c: Context<AppEnv>, creator: Creator, body
         config: setup.config,
         metadataUri: items.metadataUri,
         imageUri: items.imageUri,
+        imageSha256: verdict.imageSha256,
+        looksLike: verdict.looksLike.length > 0 ? verdict.looksLike : null,
         message: toBase64(new Uint8Array(schedule.messageBytes)),
         lastValidBlockHeight: lifetime.lastValidBlockHeight,
         tickerKey,

@@ -27,7 +27,7 @@ import { fetchAllMaybePool, fetchAllMaybePosition } from "@top-pad/clients/damm-
 import { getVirtualPoolDecoder, getVirtualPoolSize } from "@top-pad/clients/dbc";
 import { fetchAllMaybeCoinRecord, findCoinRecordPda } from "@top-pad/clients/fee";
 import { Address, ClaimRequest, ClaimSent, type ClaimOutcome, type CreatorEarnings, type EarningsCoin, type PreparedClaim } from "@top-pad/contract";
-import { coins, feeClaims, graduations, lpFeeClaims, type Db } from "@top-pad/db";
+import { coins, feeClaims, graduations, launches, lpFeeClaims, type Db } from "@top-pad/db";
 import { dammPoolsIn, decodeTransaction, fetchRawTransaction, type GraduatedPoolRef } from "@top-pad/indexer";
 import { unclaimedPositionFees } from "@top-pad/meteora/damm";
 import { positionsOf } from "./graduation";
@@ -35,6 +35,7 @@ import { explorerUrl } from "./env";
 import type { AppEnv } from "./http";
 import { indexNow } from "./indexing";
 import { settleSignatures } from "./send";
+import { storedLabels } from "./vampShield";
 
 const RPC_TIMEOUT_MS = 15_000;
 const limited = () => ({ abortSignal: AbortSignal.timeout(RPC_TIMEOUT_MS) });
@@ -128,7 +129,9 @@ export async function getEarnings(c: Context<AppEnv>) {
   const held = await heatCoins(rpc, await heldPools(rpc, heat, wallet as KitAddress));
 
   const mints = held.map((h) => h.pool.mint);
-  const rows = mints.length ? await db.select().from(coins).where(inArray(coins.mint, mints)) : [];
+  const rows = mints.length
+    ? await db.select({ coin: coins, looksLike: launches.looksLike }).from(coins).leftJoin(launches, eq(launches.mint, coins.mint)).where(inArray(coins.mint, mints))
+    : [];
   const paid = await db
     .select({ mint: feeClaims.mint, amount: sql<string>`sum(${feeClaims.creatorAmount})::text` })
     .from(feeClaims)
@@ -144,9 +147,10 @@ export async function getEarnings(c: Context<AppEnv>) {
   const lp = await lpPositions(rpc, db, heat, wallet, mints);
 
   const shown: EarningsCoin[] = held.flatMap((h) => {
-    const coin = rows.find((r) => r.mint === h.pool.mint);
+    const row = rows.find((r) => r.coin.mint === h.pool.mint);
     // A coin registered moments ago that the indexer has not written yet shows on the next load.
-    if (!coin) return [];
+    if (!row) return [];
+    const { coin } = row;
     const partnerFees = partnerFeesOf(h);
     const lpFees = lp.get(coin.mint)?.fees ?? 0n;
     return [
@@ -156,6 +160,7 @@ export async function getEarnings(c: Context<AppEnv>) {
         name: coin.name,
         ticker: coin.ticker,
         imageUri: coin.imageUri,
+        looksLike: storedLabels(row.looksLike),
         partnerFees: partnerFees.toString(),
         lpFees: lpFees.toString(),
         waiting: (creatorShare(partnerFees) + lpFees).toString(),

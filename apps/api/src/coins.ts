@@ -5,12 +5,13 @@ import { and, asc, desc, eq, gt, gte, lt, lte } from "drizzle-orm";
 import type { Context } from "hono";
 import { COIN_DECIMALS, COIN_SUPPLY, FEE_DENOMINATOR, marketCapOfSqrtPrice, priceOfSqrtPrice, SNIPER_TAX } from "@top-pad/chain";
 import { Address, CandleSeconds, type Coin, type CoinCandles, type CoinTrades, type Trade, type WindowClaim } from "@top-pad/contract";
-import { candles, coins, creators, fairOpens, graduations, pools, trades, windowClaims, type Db } from "@top-pad/db";
+import { candles, coins, creators, fairOpens, graduations, launches, pools, trades, windowClaims, type Db } from "@top-pad/db";
 import { graduatedPoolFeeNumerator } from "@top-pad/meteora";
 import { holderCount } from "@top-pad/indexer";
 import { creatorLockOf, taxShareOf } from "./afterOpen";
 import { explorerUrl, type Config } from "./env";
 import type { AppEnv } from "./http";
+import { storedLabels } from "./vampShield";
 
 /** How long a holder count stands before a page asks for it again (spec 10.4 lets public figures be a minute stale). */
 const HOLDERS_FRESH_MS = 60_000;
@@ -101,9 +102,10 @@ export async function getCoin(c: Context<AppEnv>) {
   const mint = c.req.param("mint")!;
   if (!heat || !Address.safeParse(mint).success) return notFound(c);
   const [row] = await db
-    .select({ pool: pools, coin: coins, handle: creators.xHandle, windowClaim: windowClaims, graduation: graduations })
+    .select({ pool: pools, coin: coins, handle: creators.xHandle, windowClaim: windowClaims, graduation: graduations, looksLike: launches.looksLike })
     .from(pools)
     .leftJoin(coins, eq(coins.mint, pools.mint))
+    .leftJoin(launches, eq(launches.mint, coins.mint))
     .leftJoin(creators, eq(creators.id, coins.creatorId))
     .leftJoin(windowClaims, eq(windowClaims.pool, pools.pool))
     .leftJoin(graduations, eq(graduations.mint, pools.mint))
@@ -156,6 +158,7 @@ export async function getCoin(c: Context<AppEnv>) {
     windowClaim: row.windowClaim ? windowClaimView(cfg, row.windowClaim) : null,
     fairOpen: await fairOpenOf(cfg, db, mint),
     graduation: graduationOf(cfg, pool, row.graduation),
+    looksLike: storedLabels(row.looksLike),
     explorer: { mint: explorerUrl(cfg, "address", mint), pool: explorerUrl(cfg, "address", pool.pool) },
     servedAt: new Date().toISOString(),
   };

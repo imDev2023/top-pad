@@ -16,7 +16,7 @@ import {
   pushSeats,
   pushTaxShare,
   readSchedule,
-  releaseTicker,
+  finishTicker,
   sendOpen,
   taxWindowEnd,
   uploadMetadata,
@@ -163,7 +163,8 @@ export class FairOpenKeeper extends WorkflowEntrypoint<Bindings, FairOpenKeeperP
       );
     }
     await step.do("close the nonce", quick, () => withDb((db) => closeLaunchNonce(db, cfg, key, launch)));
-    await step.do("release the ticker", quick, () => withDb((db) => releaseTicker(db, launch)));
+    // A coin that opened keeps its ticker's key, now as a protected Heat coin's; a launch that failed gives it back.
+    await step.do("protect the coin or release the ticker", quick, () => withDb((db) => finishTicker(db, launch)));
   }
 }
 

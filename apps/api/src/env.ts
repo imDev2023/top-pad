@@ -3,6 +3,7 @@ import { CLUSTERS, type HeatCluster } from "@top-pad/chain";
 import { Cluster } from "@top-pad/contract";
 import type { Indexer } from "./indexer";
 import type { LiveRoom } from "./rooms";
+import type { Vision } from "./visionContainer";
 import type { FairOpenKeeperParams } from "./fairOpenKeeper";
 import type { GraduationParams } from "./graduation";
 import type { KeeperParams } from "./windowClaims";
@@ -57,6 +58,13 @@ export type Bindings = {
   INDEXER?: DurableObjectNamespace<Indexer>;
   /** The live rooms, a Durable Object per coin and one for the board (spec 10.2). */
   LIVE_ROOMS?: DurableObjectNamespace<LiveRoom>;
+  /** The vision service, one Container behind a Durable Object (spec 10.2): Vamp Shield's image signatures. */
+  VISION?: DurableObjectNamespace<Vision>;
+  /**
+   * Jupiter's API key, for the protected set's lists (spec 6.2): a Secrets Store binding when deployed, a plain var
+   * locally; without one the lists are read keyless, at Jupiter's lower rate.
+   */
+  JUPITER_API_KEY?: SecretBinding | string;
   /** The keeper's Workflow for each Instant launch, keyed by its coin (spec 10.2): its window claim at 60 s. */
   INSTANT_LAUNCHES?: Workflow<KeeperParams>;
   /** The keeper's Workflow for each Fair Open, keyed by its launch account (spec 10.2): the upload, the open, the pushes. */

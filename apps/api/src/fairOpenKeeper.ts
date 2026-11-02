@@ -22,7 +22,7 @@ import {
   type Base58EncodedBytes,
   type Instruction,
 } from "@solana/kit";
-import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import {
   allocate,
   claimablePool,
@@ -49,10 +49,11 @@ import {
 import { fetchVirtualPool } from "@top-pad/clients/dbc";
 import { fetchMaybeLaunch, getSeatDecoder, getSeatSize, LaunchStatus, type Launch } from "@top-pad/clients/fair-open";
 import { fetchMaybeCoinRecord, findCoinRecordPda } from "@top-pad/clients/fee";
-import { fairOpenRungs, launches, metadataItems, pools, type Db } from "@top-pad/db";
+import { fairOpenRungs, fairOpens, launches, metadataItems, pools, type Db } from "@top-pad/db";
 import type { BlobStore, Bindings, Config, SecretBinding } from "./env";
 import { loadKeeper, type Keeper } from "./keeper";
 import { servedAt, uploadItem } from "./metadata";
+import { protectHeatCoin } from "./protectedSet";
 import { keeperSignatureOn, wireOf } from "./rungs";
 import { confirmed, preflightRefusal, sendAndConfirm, sendWire, TransactionFailed } from "./send";
 
@@ -576,10 +577,27 @@ export async function closeLaunchNonce(db: Db, cfg: Config, keeperKey: SecretBin
   return { closed: signature };
 }
 
-/** The ticker's strict key goes back once the launch has opened or failed (spec 2.1 step 3). */
-export async function releaseTicker(db: Db, launch: string): Promise<{ released: boolean }> {
-  const rows = await db.update(launches).set({ tickerKey: null }).where(and(eq(launches.fairOpen, launch), isNotNull(launches.tickerKey))).returning({ id: launches.id });
-  return { released: rows.length > 0 };
+/**
+ * The keeper's last step (spec 2.1 step 3, 6.2): a launch that opened completed its Fair Open, so its coin is protected
+ * and keeps its ticker's strict key in the unique index; one that failed gives the key back. Either way the launch's work
+ * is marked done, which the cron's sweep reads.
+ */
+export async function finishTicker(db: Db, launch: string): Promise<{ protected: boolean; released: boolean }> {
+  const [row] = await db.select().from(launches).where(eq(launches.fairOpen, launch));
+  if (!row) throw new Error(`Heat did not schedule ${launch}`);
+  const [indexed] = await db.select({ openedAt: fairOpens.openedAt }).from(fairOpens).where(eq(fairOpens.launch, launch));
+  const opened = row.openLandedAt !== null || indexed?.openedAt != null;
+  if (opened) {
+    await protectHeatCoin(db, { mint: row.mint, ticker: row.ticker, name: row.name, imageUri: row.imageUri, launchId: row.id }, { reason: "fair_open" });
+    await db.update(launches).set({ keeperDoneAt: sql`now()` }).where(and(eq(launches.id, row.id), isNull(launches.keeperDoneAt)));
+    return { protected: true, released: false };
+  }
+  const rows = await db
+    .update(launches)
+    .set({ tickerKey: null, keeperDoneAt: sql`coalesce(${launches.keeperDoneAt}, now())` })
+    .where(and(eq(launches.id, row.id), or(isNotNull(launches.tickerKey), isNull(launches.keeperDoneAt))))
+    .returning({ key: launches.tickerKey });
+  return { protected: false, released: rows.length > 0 };
 }
 
 /**
@@ -600,7 +618,7 @@ export async function startFairOpenKeeper(env: Bindings, launch: string): Promis
 }
 
 /**
- * The cron's sweep: every scheduled Fair Open whose work is not done (its ticker not yet released) and whose open is at
+ * The cron's sweep: every scheduled Fair Open whose work is not done (`keeper_done_at` unset) and whose open is at
  * most 5 minutes away has its keeper started, or started again if it failed, so a launch whose Workflow never started
  * still opens, or fails and is refunded, within minutes.
  */
@@ -608,7 +626,7 @@ export async function sweepFairOpens(db: Db, env: Bindings): Promise<{ due: numb
   const due = await db
     .select({ launch: launches.fairOpen })
     .from(launches)
-    .where(and(eq(launches.mode, "fair_open"), eq(launches.status, "landed"), isNotNull(launches.tickerKey), lt(launches.opensAt, sql`now() + interval '5 minutes'`)));
+    .where(and(eq(launches.mode, "fair_open"), eq(launches.status, "landed"), isNull(launches.keeperDoneAt), lt(launches.opensAt, sql`now() + interval '5 minutes'`)));
   for (const { launch } of due) await startFairOpenKeeper(env, launch!);
   return { due: due.length };
 }

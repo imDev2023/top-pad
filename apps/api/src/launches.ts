@@ -39,7 +39,7 @@ import { startKeeper } from "./windowClaims";
 import { refuse, type AppEnv } from "./http";
 import { loadKeeper } from "./keeper";
 import { MetadataUploadFailed, signItems, sniffImageType, storeItems, uploadItem, waitServed, type ImageType } from "./metadata";
-import { checkText, firstRefusal } from "./vampShield";
+import { firstRefusal, judgeLaunch, judgeLaunchText } from "./vampShield";
 
 /** How many launches a creator may have waiting to be signed at once, against a flood of prepared transactions. */
 const MAX_PENDING = 10;
@@ -83,6 +83,14 @@ export async function readImage(c: Context<AppEnv>, body: Form): Promise<{ bytes
   return { bytes, type };
 }
 
+/** A launch Vamp Shield refused, as the launch flow reads it: the reason, the text's verdict and the image's if it was judged. */
+export const vampShieldRefusal = (verdict: { error: string; text: LaunchRefusal["verdict"]; image: LaunchRefusal["imageVerdict"] | null }): LaunchRefusal => ({
+  error: verdict.error,
+  code: "vamp_shield",
+  verdict: verdict.text,
+  ...(verdict.image ? { imageVerdict: verdict.image } : {}),
+});
+
 /**
  * Why the creator cannot launch from `wallet` now, or null: one Creator wallet at a time (spec 7), the record's, or,
  * before its first launch, any wallet no other record holds; and only so many launches waiting to be signed.
@@ -123,8 +131,10 @@ async function prepareInstant(c: Context<AppEnv>, creator: Creator, body: Form) 
   if (!form.success) return refuse(c, 400, { error: "The launch form is incomplete: it needs a mode, a name, a ticker and a wallet.", code: "invalid" });
   const { wallet } = form.data;
 
-  const verdict = await checkText(db, form.data.ticker, form.data.name);
-  if (!verdict.clear) return refuse(c, 422, { error: firstRefusal(verdict), code: "vamp_shield", verdict });
+  const id = crypto.randomUUID();
+  const preparing = { creatorId: creator.id, launchId: id };
+  const text = await judgeLaunchText(db, cfg, preparing, form.data.ticker, form.data.name);
+  if (!text.verdict.clear) return refuse(c, 422, { error: firstRefusal(text.verdict), code: "vamp_shield", verdict: text.verdict });
 
   const image = await readImage(c, body);
   if ("error" in image) return refuse(c, 422, image);
@@ -133,9 +143,12 @@ async function prepareInstant(c: Context<AppEnv>, creator: Creator, body: Form) 
   const problem = await launchProblem(db, creator.id, wallet);
   if (problem) return refuse(c, problem.status, problem.refusal);
 
+  // The image last, since checking it may wake the vision service: a launch refused for anything else never does.
+  const verdict = await judgeLaunch(db, cfg, c.env, preparing, text, bytes);
+  if (!verdict.ok) return refuse(c, verdict.status as 422, vampShieldRefusal(verdict));
+
   const keeper = await loadKeeper(setup.keeperKey, setup.keeper);
   const mint = await generateKeyPairSigner();
-  const id = crypto.randomUUID();
   const coin = { name: verdict.name, ticker: verdict.ticker, mint: mint.address, xHandle: creator.xHandle };
   const items = await signItems({ keeper: keeper.secret }, id, coin, { bytes, type: imageType }, { gateway: cfg.arweaveGateway, site: webApp(cfg) });
 
@@ -190,6 +203,8 @@ async function prepareInstant(c: Context<AppEnv>, creator: Creator, body: Form) 
       config: setup.config,
       metadataUri: items.metadataUri,
       imageUri: items.imageUri,
+      imageSha256: verdict.imageSha256,
+      looksLike: verdict.looksLike.length > 0 ? verdict.looksLike : null,
       message: getBase64Decoder().decode(transaction.messageBytes),
       mintSignature: getBase58Decoder().decode(mintSignature),
       lastValidBlockHeight: lifetime.lastValidBlockHeight,
