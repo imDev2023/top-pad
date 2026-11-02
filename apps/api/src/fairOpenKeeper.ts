@@ -22,7 +22,7 @@ import {
   type Base58EncodedBytes,
   type Instruction,
 } from "@solana/kit";
-import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import {
   allocate,
   claimablePool,
