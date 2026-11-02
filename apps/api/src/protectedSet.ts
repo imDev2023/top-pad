@@ -127,6 +127,8 @@ type CoinGeckoCoin = { id: string; symbol: string; name: string; image?: string 
  */
 /** How many of the top 1,000 a day's reads must have seen for the day to be done (a few ids repeat across pages). */
 const COINGECKO_DAY_DONE = 950;
+/** How many of a page's 250 must have been seen for the page to count as read today. */
+const COINGECKO_PAGE_DONE = 240;
 /** How often a page CoinGecko answers 429 is asked again, and the wait when it names none (Retry-After). */
 const COINGECKO_TRIES = 3;
 const COINGECKO_RETRY_MS = 30_000;
@@ -136,13 +138,14 @@ export async function coinGeckoTop(
   retryMs = COINGECKO_RETRY_MS,
   apiKey: string | null = null,
   onPage: (page: Listed[]) => Promise<void> = async () => undefined,
+  pages: readonly number[] = [1, 2, 3, 4],
 ): Promise<Listed[]> {
   const listed: Listed[] = [];
   const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
   // A Demo key (free, made by the owner on CoinGecko) has a limit of its own; without one, requests share the address's.
   const headers: Record<string, string> = { accept: "application/json", "user-agent": USER_AGENT, ...(apiKey ? { "x-cg-demo-api-key": apiKey } : {}) };
-  for (let page = 1; page <= 4; page++) {
-    if (page > 1) await wait(pauseMs);
+  for (const [i, page] of pages.entries()) {
+    if (i > 0) await wait(pauseMs);
     let res: Response | undefined;
     // Keyless, CoinGecko limits by address, and a Worker shares its addresses with many others: a 429 is asked again
     // after at least half a minute (longer if it says so), since its limit is by the minute, up to three tries.
@@ -483,11 +486,25 @@ export async function refreshLists(db: Db, cfg: Config, env: Bindings, opts: { c
       .from(protectedCoins)
       .where(and(eq(protectedCoins.source, "coingecko_top"), gt(protectedCoins.seenAt, sql`now() - interval '23 hours'`)));
     if (seen >= COINGECKO_DAY_DONE) return { due: false, seen };
+    // Only the pages not yet seen today: CoinGecko's limit is by the minute, and a read that starts again at page 1
+    // spends it on pages it already has.
+    const ranks = await db
+      .select({ page: sql<number>`ceil(((${protectedCoins.details}->>'rank')::int) / 250.0)::int`, seen: sql<number>`count(*)::int` })
+      .from(protectedCoins)
+      .where(and(eq(protectedCoins.source, "coingecko_top"), gt(protectedCoins.seenAt, sql`now() - interval '23 hours'`), sql`${protectedCoins.details}->>'rank' is not null`))
+      .groupBy(sql`1`);
+    const pages = [1, 2, 3, 4].filter((p) => (ranks.find((r) => r.page === p)?.seen ?? 0) < COINGECKO_PAGE_DONE);
     let written = 0;
-    const listed = await coinGeckoTop(opts.coinGeckoPauseMs, opts.coinGeckoRetryMs, await secret(env.COINGECKO_API_KEY), async (page) => {
-      written += (await upsertListed(db, "coingecko_top", page)).written;
-    });
-    return { listed: listed.length, written };
+    const listed = await coinGeckoTop(
+      opts.coinGeckoPauseMs,
+      opts.coinGeckoRetryMs,
+      await secret(env.COINGECKO_API_KEY),
+      async (page) => {
+        written += (await upsertListed(db, "coingecko_top", page)).written;
+      },
+      pages.length > 0 ? pages : [1, 2, 3, 4],
+    );
+    return { pages, listed: listed.length, written };
   });
   await part("refolded", () => refold(db));
   await part("pruned", () => prune(db));

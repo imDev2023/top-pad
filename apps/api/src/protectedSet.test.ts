@@ -126,6 +126,32 @@ describe("CoinGecko's limit", () => {
     await expect(coinGeckoTop(0, 0)).rejects.toThrow("CoinGecko answered 429 for page 1");
   });
 
+  it("reads only the pages not yet seen today", async () => {
+    await db.delete(protectedCoins).where(eq(protectedCoins.source, "coingecko_top"));
+    const ranked = (from: number) => Array.from({ length: 250 }, (_, i) => ({ id: `rk-${from + i}`, symbol: "rk", name: `Ranked ${from + i}`, image: null, market_cap_rank: from + i }));
+    const asked: number[] = [];
+    let throttled = true;
+    outside({
+      "coins/markets": (req: Request) => {
+        const page = Number(new URL(req.url).searchParams.get("page"));
+        asked.push(page);
+        if (page === 4 && throttled) return new Response("Throttled", { status: 429 });
+        return Response.json(ranked((page - 1) * 250 + 1));
+      },
+    });
+    const env = testBindings(url);
+    const first = await refreshLists(db, config(env), env, { coinGeckoPauseMs: 0, coinGeckoRetryMs: 0 });
+    expect(first.coingecko).toEqual({ error: "CoinGecko answered 429 for page 4" });
+    expect(asked).toEqual([1, 2, 3, 4, 4, 4]);
+    asked.length = 0;
+    throttled = false;
+    const second = await refreshLists(db, config(env), env, { coinGeckoPauseMs: 0, coinGeckoRetryMs: 0 });
+    expect(second.coingecko).toMatchObject({ pages: [4], written: 250 });
+    expect(asked).toEqual([4]);
+    expect(await refreshLists(db, config(env), env, { coinGeckoPauseMs: 0 })).toMatchObject({ coingecko: { due: false, seen: 1000 } });
+    await db.delete(protectedCoins).where(eq(protectedCoins.source, "coingecko_top"));
+  });
+
   it("keeps each page as it comes, so a later refusal loses only its own page", async () => {
     outside({
       "coins/markets": (req: Request) => {
