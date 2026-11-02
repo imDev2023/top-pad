@@ -45,7 +45,7 @@ The owner's standing preferences (2026-10-26), which every later choice follows:
 
 What this build is:
 - A **devnet prototype shaped like the eventual mainnet product**: real launches and trades on devnet, against Meteora's programs deployed there.
-- **SOL only** as the Quote asset, with every program, config and table taking the quote mint as a parameter ([Stock-priced coins](https://github.com/imDev2023/top-pad/issues/14)).
+- **SOL and every xStock DBC accepts** as the Quote asset, in both launch modes: Stock-priced coins, with every program, config and table taking the quote mint as a parameter ([Stock-priced coins](https://github.com/imDev2023/top-pad/issues/14), [ADR 0007](adr/0007-stock-priced-coins-on-meteora-quotes.md), owner, 2026-11-02).
 - A product separate from Stoker, the owner's LaunchLab launchpad, which is read-only reference material ([ADR 0001](adr/0001-separate-product-from-stoker.md)).
 - Done when the acceptance criteria in section 11 pass; mainnet is a separate, later effort (section 15).
 
@@ -280,12 +280,12 @@ On devnet (2026-10-29, [#40](https://github.com/imDev2023/top-pad/issues/40)): F
 | Setting | Fair Open config | Instant config |
 | - | - | - |
 | `enable_first_swap_with_min_fee` | on (the pot's buy pays the ending fee) | off |
-| Quote mint | wrapped SOL (a parameter; devnet tests also run Circle's devnet USDC `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`) | same |
+| Quote mint | wrapped SOL, or one xStock per config pair (a parameter; devnet tests also run Circle's devnet USDC `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU` and a stand-in xStock) | same |
 | Activation type | timestamp (`activation_type` 1) | same |
 | Collect fee mode | quote token | same |
 | Base fee | fee scheduler, linear, timestamp mode: 99% cliff falling to 1.25% over 60 one-second periods | same |
 | Dynamic (volatility) fee | off | same |
-| Migration quote threshold (Graduation Target) | 85 SOL mainnet, 8.5 SOL devnet | same |
+| Migration quote threshold (Graduation Target) | 85 SOL mainnet, 8.5 SOL devnet; for an xStock, that much SOL's worth of it when the config pair is made | same |
 | Curve | curve A (section 3.3) | same |
 | Creator trading fee percentage | 0 (the fee program splits instead, [ADR 0003](adr/0003-our-program-splits-every-curve-fee.md)) | same |
 | Partner and `fee_claimer` | a PDA of the fee program | same |
@@ -298,6 +298,8 @@ On devnet (2026-10-29, [#40](https://github.com/imDev2023/top-pad/issues/40)): F
 | Locked vesting | none | same |
 
 Quotes with a non-zero Token-2022 transfer fee or a live fee authority are never accepted, now or later.
+Every other quote is one DBC accepts (permissionless, or with a live DBC TokenBadge), read from the chain; a quote whose transfer hook names a program, whose default account state is Frozen, or which is paused is refused ([ADR 0007](adr/0007-stock-priced-coins-on-meteora-quotes.md)).
+Each xStock gets its own pair of these configs, identical but for the quote mint and the Graduation Target, and a new pair when its price has moved past the band; the generator in `packages/meteora/src/configs.ts` makes both.
 
 The sniper tax's integers **(owner, 2026-10-27)**: DBC's fee denominator is 1,000,000,000 and a 99% cliff with a whole-number linear step cannot end at exactly 1.25% after 60 steps.
 Use cliff 989,999,960 (98.999996%) and reduction 16,291,666 per one-second period, so the ending fee is exactly 12,500,000 (1.25%), the curve fee every trader is told; the alternative (cliff 990,000,000) ends at 1.250004%.
@@ -467,10 +469,11 @@ Invariants:
 Holds deposits for the minutes of a window and carries everything that will keep changing.
 
 Accounts:
-- `ProgramConfig`: the admission signer's public key and the keeper's public key (both changed by the upgrade authority), the fee program id.
+- `ProgramConfig`: the admission signer's public key and the keeper's public key (both changed by the upgrade authority), the fee program id, and the quote manager's public key ([ADR 0007](adr/0007-stock-priced-coins-on-meteora-quotes.md)).
+- `QuoteSettings` (to build, [ADR 0007](adr/0007-stock-priced-coins-on-meteora-quotes.md)), one per quote, PDA `["quote", quote_mint]`: the quote's current Fair Open config, Instant config and deposit step, written by the quote manager.
 - `Launch` (about 1,100 bytes): the creator and Creator wallet, the scheduled open, the window's end, the minimum raise, the identity hash, the pot's cap, the nonce account, the rung parameters, deposit counts per 0.01 SOL step (200 steps to 2 SOL plus 10 for Unverified, 840 bytes), totals per tier, status, and after the open the coins bought and the SOL spent.
-- `Vault`: a program-owned account holding deposits as plain SOL.
-- The pot's wrapped-SOL and coin accounts.
+- `Vault`: a program-owned account holding deposits as plain SOL; for any other quote, a token account of the quote owned by the program (to build, [ADR 0007](adr/0007-stock-priced-coins-on-meteora-quotes.md)).
+- The pot's quote and coin accounts.
 - `Seat` (115 bytes), one per launch and person pseudonym: the wallet, tier, cap, deposit, fill, coins and refund owed, Tax Share owed, status.
   The pseudonym is a keyed hash of our cluster id salted per launch, so the chain never links one person's wallets across launches.
 
@@ -524,6 +527,11 @@ As built on devnet ([#49](https://github.com/imDev2023/top-pad/issues/49), 2026-
 - The launch account's reserved bytes took the creator's seat (its deposit and tier, set by its deposits and withdrawals), whether the Tax Share is collected, the Tax Share and the fills paid so far, so it keeps its 1,233 bytes; a seat closing after the open takes its count off the launch's seats and deliveries alike.
 - The open's prepaid rent covers the lock's escrow and its coin account too, so what is left of it after the open is the lock's, and it comes back to the creator with the launch's rent if they hold no seat.
 - The unit tests run the lock against `tests/lock-stand-in`, our stand-in for Jupiter Lock's `create_vesting_escrow_v2`, never deployed, as DBC's stand-in stands in for DBC; `tests/devnet` runs it against Jupiter Lock itself.
+
+To build for Stock-priced coins ([ADR 0007](adr/0007-stock-priced-coins-on-meteora-quotes.md)):
+- `create_launch` takes its config and step from the quote's `QuoteSettings` instead of `ProgramConfig`'s one config, drops `QuoteNotSupported` for quotes DBC accepts, and checks every fixed field of the config (fee claimer the fee program's PDA, collect fee mode, the sniper tax integers, creator fee 0, migration option, LP buckets), so a leaked quote manager key can only name a correctly shaped config.
+- In a non-SOL quote, deposits, withdrawals, refunds, the pot's buy, pushes, claims and the Tax Share move by `transfer_checked` with the quote's token program; rent stays in SOL; the vault invariant holds in the quote's raw units.
+- A launch's step is 0.01 SOL's worth of its quote at scheduling, so tier caps in steps, the step counts and the allocation are unchanged.
 
 ## 6. Anti-abuse
 
@@ -901,7 +909,8 @@ All on devnet, against Meteora's deployed programs, with no Meteora binaries any
 - the fee program's PDA claiming partner fees by CPI, the 60 s window claim, and the 50/50 split paying whoever holds the creator role (`tests/devnet/src/fee-claims.test.ts`, passing since [#44](https://github.com/imDev2023/top-pad/issues/44));
 - graduation at 8.5 SOL by our keeper, both LP halves permanently locked, the graduated pool's fee stepping down on schedule;
 - an Instant launch run through to graduation;
-- one Fair Open and one Instant launch priced in Circle's devnet USDC, checking deposits, refunds, the Tax Share and Creator Earnings in a non-SOL quote (tests only, never offered on the site).
+- one Fair Open and one Instant launch priced in Circle's devnet USDC, checking deposits, refunds, the Tax Share and Creator Earnings in a non-SOL quote (tests only, never offered on the site);
+- one Fair Open and one Instant launch priced in a stand-in xStock (a devnet Token-2022 mint with the same extensions and a devnet TokenBadge), run through to Graduation, plus a pause during a Fair Open's window and after its open, checking that refunds and pushes wait and then complete ([ADR 0007](adr/0007-stock-priced-coins-on-meteora-quotes.md)).
 
 ### 11.3 The cohort
 
@@ -941,7 +950,7 @@ As built ([#61](https://github.com/imDev2023/top-pad/issues/61), 2026-11-03), th
 | - | - | - |
 | Coin supply, decimals | 1,000,000,000 fixed, 6 | [#33](https://github.com/imDev2023/top-pad/issues/33) |
 | Curve / graduated pool supply | 80% / 20%, the curve a few coins short so the graduated pool's exact base fits (section 3.1) | [#33](https://github.com/imDev2023/top-pad/issues/33), [#40](https://github.com/imDev2023/top-pad/issues/40) |
-| Graduation Target | 85 SOL mainnet, 8.5 SOL devnet | [#33](https://github.com/imDev2023/top-pad/issues/33) |
+| Graduation Target | 85 SOL mainnet, 8.5 SOL devnet; an xStock's is that much SOL's worth when its config pair is made | [#33](https://github.com/imDev2023/top-pad/issues/33), [ADR 0007](adr/0007-stock-priced-coins-on-meteora-quotes.md) |
 | Market cap at the start / at Graduation | 37.09 SOL / 425 SOL | [#33](https://github.com/imDev2023/top-pad/issues/33) |
 | Curve fee after the tax window | 1.25% (Meteora 0.25%, creator 0.50%, Heat 0.50%) | [#13](https://github.com/imDev2023/top-pad/issues/13) |
 | Sniper tax | 99% cliff, linear, 60 one-second periods, ending at 1.25% | [#23](https://github.com/imDev2023/top-pad/issues/23) |
@@ -954,7 +963,7 @@ As built ([#61](https://github.com/imDev2023/top-pad/issues/61), 2026-11-03), th
 | Public opening vs the pot's price | at most 1.25x | [#19](https://github.com/imDev2023/top-pad/issues/19) |
 | Tier caps | Verified 2 SOL, Scored 0.5 SOL, Unverified 0.1 SOL; unscaled on devnet; fixed in SOL on mainnet (owner, 2026-10-27) | [#19](https://github.com/imDev2023/top-pad/issues/19), [#33](https://github.com/imDev2023/top-pad/issues/33) |
 | Unverified share of the pot | at most 25% of what it spends | [#19](https://github.com/imDev2023/top-pad/issues/19) |
-| Deposit step | 0.01 SOL | [#28](https://github.com/imDev2023/top-pad/issues/28) |
+| Deposit step | 0.01 SOL, or its worth in the quote at scheduling | [#28](https://github.com/imDev2023/top-pad/issues/28), [ADR 0007](adr/0007-stock-priced-coins-on-meteora-quotes.md) |
 | Ladder rungs | 5% steps from the pot's cap, at most 64 | [#28](https://github.com/imDev2023/top-pad/issues/28) |
 | Late-open withdrawal | 15 minutes after the scheduled time | [#19](https://github.com/imDev2023/top-pad/issues/19) |
 | Creator lock | nothing for 7 days after the open, linear to day 30 | [#11](https://github.com/imDev2023/top-pad/issues/11) |
@@ -1017,11 +1026,13 @@ Thin end-to-end slices, in dependency order, each ending in something demonstrab
    Demo: the bundler simulation end to end.
 8. **Creators and discovery**: the Creator record, Creator wallet handover and rotation, the World ID mark, role-transfer tracking; the board, trending with the known-bot list, featured slots, the calendar.
    Demo: the board ranks a test cohort's coins.
-9. **Fairness and enforcement pages**: the Fairness card and its X image, "How this is enforced", the P&L share card, a review of every screen on phones and desktops in both themes.
+9. **Stock-priced coins** ([ADR 0007](adr/0007-stock-priced-coins-on-meteora-quotes.md)): `QuoteSettings` and the quote manager, the token vault, per-quote config pairs, the stand-in xStock and its TokenBadge, prices with the Scaled UI Amount multiplier, Quote Risk Labels on the launch form, coin page and deposit page.
+   Demo: a Fair Open and an Instant launch priced in the stand-in xStock, through to Graduation, and a pause handled.
+10. **Fairness and enforcement pages**: the Fairness card and its X image, "How this is enforced", the P&L share card, a review of every screen on phones and desktops in both themes.
    Demo: the screens in section 9 on real devnet data.
-10. **Proof**: the four simulations and the integration test suite; the Bundle Radar evaluation on mainnet data; the cohort tap.
+11. **Proof**: the four simulations and the integration test suite; the Bundle Radar evaluation on mainnet data; the cohort tap.
     Demo: the acceptance run in section 11.
-11. **Cohort**: two weeks, then the default-mode decision by section 11.3's rule.
+12. **Cohort**: two weeks, then the default-mode decision by section 11.3's rule.
 
 Every screen ships its phone layout and both themes in the slice that builds it **(owner, 2026-10-27)**.
 
@@ -1037,7 +1048,7 @@ Not in this build; each returns only as its own effort, mostly the mainnet effor
 - Giving up the programs' upgrade keys, the members of the Squads multisig, a faster emergency rotation of the admission key than the timelock allows, an external signer or KMS for hot keys, and the mainnet LaserStream plan.
 - Integration requests to trading terminals (a Jupiter launchpad listing and custom tag, GMGN, Codex, Photon, Axiom, DexScreener), including asking GMGN to stop reading vault claims as phishing, to credit Jupiter Lock escrows as locked, and asking terminals to use the co-signed coin list; publishing the Creator record as a Solana Attestation Service attestation.
 - A platform token with buybacks; holder rewards, holder calls, user referrals, and a realized-profit leaderboard; cashback is dropped for good.
-- Stock-priced coins and any non-SOL quote on the site (the code stays quote-agnostic).
+- Quotes other than SOL and the xStocks DBC accepts (USDC stays tests only); Stock-priced coins themselves are in this build ([ADR 0007](adr/0007-stock-priced-coins-on-meteora-quotes.md)).
 - DLMM launch pools and DLMM markets; a Heat transfer hook; the DAMM v2 launch pool with an Alpha Vault as Fair Open's fallback (not needed, since the DBC creation transaction works on devnet).
 - Building Heat as a launch mode inside Stoker ([ADR 0001](adr/0001-separate-product-from-stoker.md), option C).
 - Livestreams, native mobile apps, and chains other than Solana.
@@ -1065,6 +1076,7 @@ Risks that devnet cannot settle:
 - **The guarantee's edge**: anyone can create pools on our configs; they are not listed, but aggregators may still name them after us.
 - **Mainnet's version 1 transactions**: mainnet carries them (2026-11), and a read asking `maxSupportedTransactionVersion: 0` is refused (-32015), a block holding one refused whole; the indexer's block and transaction reads, the funding scans' included, still ask for 0, which devnet allows, so they must ask for 1 and decode it before mainnet ([#61](https://github.com/imDev2023/top-pad/issues/61)).
 - **Admission key**: a stolen admission key could admit fake persons up to the tier caps until it is rotated (on mainnet, through the timelock).
+- **Issuer powers on xStocks** ([ADR 0007](adr/0007-stock-priced-coins-on-meteora-quotes.md)): the issuer can pause a stock, freezing its coins' trading and any Fair Open refunds or pushes until it unpauses, and can move tokens out of any account, Heat's vaults and DBC's pools included; Heat labels both and cannot prevent them.
 - **Prior art**: "fair launch on Meteora" has already been used as a scam wrapper (Cryptstarter and Harmonized), so every promise must be checkable on chain, not just claimed.
 
 ## 17. Sources
