@@ -14,7 +14,8 @@ const percent = (rate: number) => `${(rate * 100).toFixed(2)}%`;
 
 /**
  * The sniper tax as it falls (spec 9): yellow while it runs, with the rate a trade pays this second and how long until it
- * ends, then green. `now` is the API's clock, since a browser's own can be seconds off.
+ * ends, then green, with the fee a trade pays now: the curve's, or once the coin has graduated its DAMM v2 pool's, which
+ * falls as its market cap rises (spec 3.4). `now` is the API's clock, since a browser's own can be seconds off.
  */
 export function TaxBand({ coin, now }: { coin: Coin; now: number }) {
   const windowSeconds = coin.tax.periods * coin.tax.periodSeconds;
@@ -28,12 +29,14 @@ export function TaxBand({ coin, now }: { coin: Coin; now: number }) {
 
   if (!running) {
     const claim = coin.windowClaim;
+    const graduated = coin.graduation?.graduated ?? null;
+    const now = graduated ? graduated.feeBps / 10_000 : ending;
     const late = claim ? Math.round((Date.parse(claim.claimedAt) - Date.parse(claim.windowEndedAt)) / 1000) : 0;
     return (
       <section className={`${styles.taxBand} ${styles.taxDone}`} aria-label="Sniper tax">
         <div>
           <p className="eyebrow">Fee now</p>
-          <p className={`num ${styles.taxRate}`}>{percent(ending)}</p>
+          <p className={`num ${styles.taxRate}`}>{percent(now)}</p>
         </div>
         <p className="note" data-testid="tax-outcome">
           The sniper tax ran for the coin&apos;s first minute and went {destination}, never to the creator.{" "}
@@ -71,7 +74,11 @@ export function TaxBand({ coin, now }: { coin: Coin; now: number }) {
                 ).{" "}
               </>
             ))}
-          Every trade now pays the {percent(ending)} trading fee.
+          {graduated ? (
+            <>Every trade now pays its Meteora pool&apos;s {percent(now)} fee, which falls to 0.25% as the market cap rises.</>
+          ) : (
+            <>Every trade now pays the {percent(ending)} trading fee.</>
+          )}
         </p>
       </section>
     );
