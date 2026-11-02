@@ -102,11 +102,28 @@ describe("the protected set's sources", () => {
         return Response.json([{ id: `coin-${page}`, symbol: "btc", name: `Coin ${page}`, image: `https://cg.test/${page}.png`, market_cap_rank: page }]);
       },
     });
-    const top = await coinGeckoTop(0);
+    const top = await coinGeckoTop(0, 0);
     expect(pages).toEqual([1, 2, 3, 4]);
     // CoinGecko refuses a request without a User-Agent, as a Worker's fetch sends.
     expect(asked.every((a) => a.agent === USER_AGENT)).toBe(true);
     expect(top[0]).toEqual({ mint: "coin-1", ticker: "BTC", name: "Coin 1", imageUrl: "https://cg.test/1.png", details: { rank: 1, mcap: null } });
+  });
+});
+
+describe("CoinGecko's limit", () => {
+  it("asks a page again after a 429, up to three tries", async () => {
+    let tries = 0;
+    outside({
+      "coins/markets": (req: Request) => {
+        const page = Number(new URL(req.url).searchParams.get("page"));
+        if (page === 1 && tries++ < 2) return new Response("Throttled", { status: 429 });
+        return Response.json([{ id: `coin-${page}`, symbol: "eth", name: "Coin", image: null, market_cap_rank: page }]);
+      },
+    });
+    expect(await coinGeckoTop(0, 0)).toHaveLength(4);
+    expect(tries).toBe(3);
+    tries = -10;
+    await expect(coinGeckoTop(0, 0)).rejects.toThrow("CoinGecko answered 429 for page 1");
   });
 });
 

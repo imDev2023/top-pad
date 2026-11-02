@@ -122,16 +122,29 @@ export async function organicNow(env: Bindings): Promise<Listed[]> {
 type CoinGeckoCoin = { id: string; symbol: string; name: string; image?: string | null; market_cap_rank?: number | null; market_cap?: number | null };
 
 /** CoinGecko's top 1,000 by market cap (tier A4), the top coins of every chain, four pages of 250 read 3 s apart. */
-export async function coinGeckoTop(pauseMs = 3_000): Promise<Listed[]> {
+/** How often a page CoinGecko answers 429 is asked again, and the wait when it names none (Retry-After). */
+const COINGECKO_TRIES = 3;
+const COINGECKO_RETRY_MS = 30_000;
+
+export async function coinGeckoTop(pauseMs = 3_000, retryMs = COINGECKO_RETRY_MS): Promise<Listed[]> {
   const listed: Listed[] = [];
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
   for (let page = 1; page <= 4; page++) {
-    if (page > 1) await new Promise((r) => setTimeout(r, pauseMs));
-    const res = await fetch(`${COINGECKO}/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page=${page}`, {
-      headers: { accept: "application/json", "user-agent": USER_AGENT },
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    });
-    if (!res.ok) throw new Error(`CoinGecko answered ${res.status} for page ${page}`);
-    const body = (await res.json()) as CoinGeckoCoin[];
+    if (page > 1) await wait(pauseMs);
+    let res: Response | undefined;
+    // Keyless, CoinGecko limits by address, and a Worker shares its addresses with many others: a 429 is asked again
+    // after the wait it names, or half a minute, up to three tries.
+    for (let attempt = 1; attempt <= COINGECKO_TRIES; attempt++) {
+      res = await fetch(`${COINGECKO}/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page=${page}`, {
+        headers: { accept: "application/json", "user-agent": USER_AGENT },
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      });
+      if (res.status !== 429 || attempt === COINGECKO_TRIES) break;
+      const after = Number(res.headers.get("retry-after"));
+      await wait(Number.isFinite(after) && after > 0 ? Math.min(after * 1000, 90_000) : retryMs);
+    }
+    if (!res!.ok) throw new Error(`CoinGecko answered ${res!.status} for page ${page}`);
+    const body = (await res!.json()) as CoinGeckoCoin[];
     for (const c of body) {
       listed.push({ mint: c.id, ticker: (c.symbol ?? "").toUpperCase(), name: c.name ?? "", imageUrl: c.image || null, details: { rank: c.market_cap_rank ?? null, mcap: c.market_cap ?? null } });
     }
@@ -423,7 +436,7 @@ export async function refreshTrending(db: Db, env: Bindings) {
  * under an older version refolded, and rows long lapsed pruned. Each part fails alone, its error in the summary, so one
  * provider being down never keeps the others from refreshing.
  */
-export async function refreshLists(db: Db, cfg: Config, env: Bindings, opts: { coinGeckoPauseMs?: number } = {}) {
+export async function refreshLists(db: Db, cfg: Config, env: Bindings, opts: { coinGeckoPauseMs?: number; coinGeckoRetryMs?: number } = {}) {
   const summary: Record<string, unknown> = {};
   const part = async (name: string, work: () => Promise<unknown>) => {
     try {
@@ -449,7 +462,7 @@ export async function refreshLists(db: Db, cfg: Config, env: Bindings, opts: { c
       .from(protectedCoins)
       .where(eq(protectedCoins.source, "coingecko_top"));
     if (last && Date.now() - new Date(last).getTime() < 23 * 3_600_000) return { due: false };
-    const listed = await coinGeckoTop(opts.coinGeckoPauseMs);
+    const listed = await coinGeckoTop(opts.coinGeckoPauseMs, opts.coinGeckoRetryMs);
     await upsertListed(db, "coingecko_top", listed);
     return { listed: listed.length };
   });
