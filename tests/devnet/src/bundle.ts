@@ -154,8 +154,8 @@ export async function sellAndClose(wallet: KeyPairSigner, mint: Address, config:
   const [coinAccount] = await findAssociatedTokenPda({ owner: wallet.address, mint, tokenProgram: TOKEN_PROGRAM_ADDRESS });
   const [wsolAccount] = await findAssociatedTokenPda({ owner: wallet.address, mint: WSOL, tokenProgram: TOKEN_PROGRAM_ADDRESS });
   const sell = coins > 0n ? await swapInstructions({ config, pool, mint, quoteMint: WSOL, trader: wallet, side: "sell", amountIn: coins, minimumOut: 1n }) : [];
-  const { value: coinInfo } = await rpc.getAccountInfo(coinAccount, { commitment: "confirmed" }).send();
-  const { value: wsolInfo } = await rpc.getAccountInfo(wsolAccount, { commitment: "confirmed" }).send();
+  const { value: coinInfo } = await rpc.getAccountInfo(coinAccount, { commitment: "confirmed", encoding: "base64" }).send();
+  const { value: wsolInfo } = await rpc.getAccountInfo(wsolAccount, { commitment: "confirmed", encoding: "base64" }).send();
   // A sell unwraps and closes the wrapped-SOL account itself; without one, close what is left open.
   const closes = [
     ...(coinInfo ? [getCloseAccountInstruction({ account: coinAccount, destination: wallet.address, owner: wallet })] : []),

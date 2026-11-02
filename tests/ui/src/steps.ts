@@ -39,13 +39,24 @@ export async function snap(page: Page, step: string) {
   await page.emulateMedia({ colorScheme: "dark" });
 }
 
-/** Links X as a new creator, launches an Instant launch signed by `creator`, and leaves the page on the Done step. */
-export async function launchCoin(page: Page, creator: KeyPairSigner, coin: { name: string; ticker: string }): Promise<{ mint: string; wallet: TestWallet }> {
+/**
+ * Links X as a new creator, launches an Instant launch signed by `creator`, and leaves the page on the Done step; with
+ * `linked`, the browser has linked X already and the creator launches again.
+ */
+export async function launchCoin(
+  page: Page,
+  creator: KeyPairSigner,
+  coin: { name: string; ticker: string },
+  { linked = false }: { linked?: boolean } = {},
+): Promise<{ mint: string; wallet: TestWallet }> {
   const wallet = await installTestWallet(page, creator);
   await page.goto("/launch");
-  await page.getByRole("link", { name: "Link X" }).click();
-  await page.getByLabel("Handle").fill(newHandle());
-  await page.getByRole("button", { name: "Authorize app" }).click();
+  if (!linked) {
+    await page.getByRole("link", { name: "Link X" }).click();
+    await page.getByLabel("Handle").fill(newHandle());
+    await page.getByRole("button", { name: "Authorize app" }).click();
+  }
+  await expect(page.getByRole("heading", { name: "How should your coin start trading?" })).toBeVisible();
   await page.getByRole("radio", { name: /Instant launch/ }).check();
   await page.getByRole("button", { name: "Continue" }).click();
   await page.getByLabel("Ticker").fill(coin.ticker);

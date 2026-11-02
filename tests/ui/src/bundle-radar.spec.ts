@@ -1,9 +1,10 @@
 // Bundle Radar (spec 6.4, 6.5; #53's devnet demo): a creator funds 4 wallets directly, launches an Instant launch from
-// the site, and the Creator wallet and those 4 wallets buy in its creation slot, as a bundler would; a sniper with no
-// link to the creator buys there too. Within seconds the coin's page flags the 4 linked wallets red and the same-slot
-// buys yellow, each with its evidence. Past the sniper tax the 4 wallets buy on until they hold over 1% of supply between
-// them, then everyone sells, 2 minutes after the open. An hour after the open the case job opens a case with its
-// evidence pack, holding the 4 linked wallets and never the sniper. Devnet runs no Jito block engine, and on Heat our
+// the site, and the Creator wallet and those 4 wallets buy in its creation slot, as a bundler would; a sniper the
+// creator never funded buys there too, after them. Within seconds the coin's page flags the 4 funded wallets red and the
+// same-slot buys yellow, each with its evidence. Past the sniper tax the 4 wallets buy on until they hold over 1% of
+// supply between them, then everyone sells, 2 minutes after the open. An hour after the open the case job opens a case
+// with its evidence pack, holding only directly linked wallets: the 4, and the sniper only if its buy landed in the four
+// transactions right after the creation, which spec 6.5 counts as a direct link. Devnet runs no Jito block engine, and on Heat our
 // launch key sends the creation itself, so the bundle's buys are signed in advance and sent again and again, a lamport
 // apart, as the launch goes out (tests/devnet's bundle.ts). Real devnet SOL: about 0.06 a run, most of it the pool's
 // rent and the creation slot's 99% tax. It waits out the hour: about 70 minutes, holding no SOL once the sells are done.
@@ -40,7 +41,7 @@ type Attempt = { mint: Address; copies: BundleCopy[]; sniperCopies: BundleCopy[]
  * submitted: copies of the two bundle transactions (the Creator wallet with two funded wallets, then the other two), the
  * sniper's buys among them from the second round on, 100 ms apart.
  */
-async function launchWithBundle(page: Page, creator: KeyPairSigner, funded: KeyPairSigner[], sniper: KeyPairSigner): Promise<Attempt> {
+async function launchWithBundle(page: Page, creator: KeyPairSigner, funded: KeyPairSigner[], sniper: KeyPairSigner, linked: boolean): Promise<Attempt> {
   let signing: Promise<[BundleCopy[], BundleCopy[]]> | null = null;
   let sent: Promise<void> | null = null;
   let mint: Address | null = null;
@@ -60,16 +61,18 @@ async function launchWithBundle(page: Page, creator: KeyPairSigner, funded: KeyP
     submittedAt = Date.now();
     sent = (async () => {
       const [bundle, snipes] = await signing!;
-      // Two rounds of the bundle first, then the sniper's buys woven in.
-      const order = [...bundle.slice(0, 4)];
-      for (let i = 4; i < bundle.length; i += 2) order.push(...bundle.slice(i, i + 2), ...(snipes.length ? [snipes.shift()!] : []));
+      // Four rounds of the bundle first, then the sniper's buys woven in: a buy in the four transactions right after the
+      // creation is a direct link by spec 6.5, so the sniper, to be only labelled, must land further down the slot.
+      const order = [...bundle.slice(0, 8)];
+      for (let i = 8; i < bundle.length; i += 2) order.push(...bundle.slice(i, i + 2), ...(snipes.length ? [snipes.shift()!] : []));
+      order.push(...snipes);
       await spray(order, 100);
     })();
   };
   page.on("response", onResponse);
   page.on("request", onRequest);
   try {
-    await launchCoin(page, creator, { name: "Radar Bundle", ticker: newTicker() });
+    await launchCoin(page, creator, { name: "Radar Bundle", ticker: newTicker() }, { linked });
   } finally {
     page.off("response", onResponse);
     page.off("request", onRequest);
@@ -110,7 +113,8 @@ test("Bundle Radar flags a creator's bundle within seconds, and a case opens an 
         page = await first.context().newPage();
         errors = pageErrors(page);
       }
-      attempt = await launchWithBundle(page, creator, funded, sniper);
+      // The creator links X once; a launch again keeps its record and Creator wallet.
+      attempt = await launchWithBundle(page, creator, funded, sniper, tries > 0);
       mint = attempt.mint;
       mints.push(mint);
       const radar = await waitFor(() => api(`/coins/${mint}/radar`, BundleRadar), (r) => r.creation.blockIndex !== null, 60_000);
@@ -137,21 +141,24 @@ test("Bundle Radar flags a creator's bundle within seconds, and a case opens an 
 
     // Within seconds of the open, the coin's labels: the 4 funded wallets red, the same-slot buys yellow.
     await page.getByRole("link", { name: "Watch it trade" }).click();
-    const radar = await waitFor(() => api(`/coins/${coin}/radar`, BundleRadar), (r) => r.linked.wallets === 4, 60_000);
+    const fundedLinked = (r: BundleRadar) => funded.every((f) => r.wallets.some((w) => w.wallet === f.address && w.linked && w.labels.includes("creator_funded")));
+    const radar = await waitFor(() => api(`/coins/${coin}/radar`, BundleRadar), fundedLinked, 60_000);
     const labelledAfter = (Date.now() - Date.parse(radar.openedAt)) / 1000;
-    console.log(`Bundle Radar linked the 4 wallets ${labelledAfter.toFixed(1)} s after the open (block time)`);
+    console.log(`Bundle Radar linked the 4 funded wallets ${labelledAfter.toFixed(1)} s after the open (block time)`);
     expect(labelledAfter).toBeLessThan(30);
-    expect(radar.wallets.filter((w) => w.linked).map((w) => w.wallet).sort()).toEqual(funded.map((f) => f.address).sort());
-    for (const w of radar.wallets.filter((x) => x.linked)) expect(w.labels).toEqual(expect.arrayContaining(["same_slot", "creator_funded"]));
+    for (const f of funded) expect(radar.wallets.find((w) => w.wallet === f.address)!.labels).toEqual(expect.arrayContaining(["same_slot", "creator_funded"]));
     expect(radar.wallets.find((w) => w.wallet === creator.address)).toMatchObject({ creator: true, linked: false, labels: expect.arrayContaining(["same_slot"]) });
     const sniperRow = radar.wallets.find((w) => w.wallet === sniper.address);
-    console.log(`the sniper: ${JSON.stringify(sniperRow?.labels ?? "no buy in the creation slot")}`);
+    // Only a direct link makes a wallet linked: the sniper is, only if it landed in the four transactions right after the creation.
+    const sniperLinked = !!sniperRow?.linked;
+    expect(sniperLinked).toBe(!!sniperRow?.labels.includes("after_creation"));
+    console.log(`the sniper: ${JSON.stringify(sniperRow?.labels ?? "no buy in the creation slot")}, ${sniperLinked ? "linked by its position" : "not linked"}`);
 
-    await expect(page.getByTestId("radar-linked")).toContainText("4 wallets linked to the creator", { timeout: 30_000 });
+    await expect(page.getByTestId("radar-linked")).toContainText(`${radar.linked.wallets} wallets linked to the creator`, { timeout: 30_000 });
     await expect(page.getByTestId("radar-same-slot")).toBeVisible();
     await snap(page, "radar-1-flags");
     await page.getByTestId("radar-linked").click();
-    await expect(page.getByTestId("radar-linked-detail").getByTestId("radar-wallet")).toHaveCount(4);
+    await expect(page.getByTestId("radar-linked-detail").getByTestId("radar-wallet")).toHaveCount(radar.linked.wallets);
     await snap(page, "radar-2-linked");
     await page.getByTestId("radar-same-slot").click();
     await expect(page.getByTestId("radar-same-slot-detail")).toBeVisible();
@@ -186,11 +193,13 @@ test("Bundle Radar flags a creator's bundle within seconds, and a case opens an 
     const openedAfter = (found!.openedAt.getTime() - opened) / 60_000;
     console.log(`case ${found!.id} opened ${openedAfter.toFixed(1)} min after the open, its pack at ${found!.evidenceKey}`);
     expect(openedAfter).toBeGreaterThanOrEqual(60);
-    expect(found).toMatchObject({ creatorWallet: creator.address, status: "open", linkedWallets: 4 });
-    const pack = found!.evidence as { wallets: { wallet: string }[]; creator: { xHandle: string | null }; floor: { share: string } };
-    expect(pack.wallets.map((w) => w.wallet).sort()).toEqual(funded.map((f) => f.address).sort());
+    expect(found).toMatchObject({ creatorWallet: creator.address, status: "open", linkedWallets: sniperLinked ? 5 : 4 });
+    const pack = found!.evidence as { wallets: { wallet: string; linked: boolean }[]; creator: { xHandle: string | null }; floor: { share: string } };
+    // Every wallet in the case is directly linked; the sniper is there only if its position linked it.
+    expect(pack.wallets.every((w) => w.linked)).toBe(true);
+    expect(pack.wallets.map((w) => w.wallet).sort()).toEqual([...funded.map((f) => f.address), ...(sniperLinked ? [sniper.address] : [])].sort());
     expect(pack.creator.xHandle).toMatch(/^e2e_creator_/);
-    expect(JSON.stringify(pack)).not.toContain(sniper.address);
+    if (!sniperLinked) expect(JSON.stringify(pack)).not.toContain(sniper.address);
     console.log(`the case's floor: ${JSON.stringify(pack.floor)}`);
 
     await page.reload();
