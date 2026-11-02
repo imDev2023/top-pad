@@ -8,9 +8,6 @@ import { readFileSync } from "node:fs";
 import {
   appendTransactionMessageInstructions,
   createKeyPairSignerFromPrivateKeyBytes,
-  getBase64Encoder,
-  getCompiledTransactionMessageDecoder,
-  getTransactionDecoder,
   createTransactionMessage,
   getBase64EncodedWireTransaction,
   getSignatureFromTransaction,
@@ -33,7 +30,6 @@ import {
   TOKEN_PROGRAM_ADDRESS,
 } from "@solana-program/token";
 import { dbcPoolAddress, DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS, swapInstructions } from "@top-pad/chain";
-import { getInitializeVirtualPoolWithSplTokenInstructionDataDecoder } from "@top-pad/clients/dbc";
 import { bankFile, coinBalance, devnet, rpc, rpcUrl, send, sweep } from "./devnet";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -84,35 +80,6 @@ async function bareBuy(trader: KeyPairSigner, mint: Address, config: Address, am
   const kept = ixs.filter((ix, i) => ix.programAddress === DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS || (i > 0 && ix.accounts?.some((a) => a.address === mint)));
   if (kept.length !== 2 || kept[1]!.programAddress !== DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS) throw new Error("a buy is the coin account's creation and the swap");
   return kept;
-}
-
-/** The metadata URI an Instant launch's creation transaction (base64, as the launch service prepares it) gives its coin. */
-export function metadataUriOf(transaction: string): string {
-  const { messageBytes } = getTransactionDecoder().decode(getBase64Encoder().encode(transaction));
-  // Kit types the compiled message by version; a v0 launch's carries its instructions as below.
-  const message = getCompiledTransactionMessageDecoder().decode(messageBytes) as unknown as {
-    staticAccounts: Address[];
-    instructions: { programAddressIndex: number; data?: Uint8Array }[];
-  };
-  const creation = message.instructions.find((ix) => message.staticAccounts[ix.programAddressIndex] === DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS);
-  if (!creation?.data) throw new Error("the transaction creates no DBC pool");
-  return getInitializeVirtualPoolWithSplTokenInstructionDataDecoder().decode(creation.data).params.uri;
-}
-
-/**
- * Resolves once `url` is served, asked every `everyMs` for at most `timeoutMs`; whether it was. Heat's launch service
- * sends an Instant launch's creation as soon as its metadata is served (it asks every 500 ms), so this is the moment a
- * bundle racing the launch starts sending.
- */
-export async function whenServed(url: string, timeoutMs = 30_000, everyMs = 50): Promise<boolean> {
-  const until = Date.now() + timeoutMs;
-  while (Date.now() < until) {
-    // A query of its own each time: the gateway's cache would otherwise keep answering 404 for seconds after the upload.
-    const res = await fetch(`${url}${url.includes("?") ? "&" : "?"}t=${Date.now()}`, { method: "HEAD", cache: "no-store", signal: AbortSignal.timeout(2_000) }).catch(() => null);
-    if (res?.ok) return true;
-    await sleep(everyMs);
-  }
-  return false;
 }
 
 export type BundleCopy = { wire: Base64EncodedWireTransaction; signature: Signature; buyers: Address[] };

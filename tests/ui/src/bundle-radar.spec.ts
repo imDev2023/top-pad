@@ -18,13 +18,11 @@ import { bundleCases, createDb } from "@top-pad/db";
 import {
   fundDirectly,
   landings,
-  metadataUriOf,
   runWallets,
   sellAndClose,
   signedBundle,
   spray,
   sweepRun,
-  whenServed,
   wrapSol,
   type BundleCopy,
 } from "@top-pad/tests-devnet/bundle";
@@ -38,7 +36,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const INSTANT = devnet.configs!.instant;
 /** Each creation-slot buy, and how many copies of each bundle transaction go out as the launch is sent. */
 const BUY = 300_000n;
-const COPIES = 12;
+const COPIES = 16;
 /** What each wallet the creator funds gets, and what it buys past the sniper tax. */
 const FUNDED = (35n * SOL) / 1_000n;
 const PAST_TAX = (2n * SOL) / 100n;
@@ -46,29 +44,27 @@ const PAST_TAX = (2n * SOL) / 100n;
 const api = async <T>(path: string, schema: { parse(v: unknown): T }) => schema.parse(await (await fetch(`${TARGET.api}${path}`)).json());
 const database = () => createDb(TARGET.name === "devnet" ? process.env.DATABASE_URL! : "postgres://toppad:toppad@127.0.0.1:5452/toppad");
 
-type Attempt = { mint: Address; copies: BundleCopy[]; sniperCopies: BundleCopy[]; submittedAt: number; servedAt: number };
+type Attempt = { mint: Address; copies: BundleCopy[]; sniperCopies: BundleCopy[]; submittedAt: number };
 
 /**
- * Launches a coin from the site with the bundle's buys signed the moment the launch is prepared and sent as the launch
- * service sends the creation, once the coin's metadata is served: copies of the two bundle transactions (the Creator
- * wallet with two funded wallets, then the other two) together each round, 100 ms apart, the sniper's from the fifth.
+ * Launches a coin from the site with the bundle's buys signed the moment the launch is prepared and sent from the moment
+ * it is submitted: copies of the two bundle transactions (the Creator wallet with two funded wallets, then the other two)
+ * together each round, 100 ms apart for 1.6 s, the sniper's from the ninth round. On devnet the launch service's creation
+ * landed 0.4 to 1.4 s after the submit (2026-11-02), and the copies sent before it fail for their fee alone.
  */
 async function launchWithBundle(page: Page, creator: KeyPairSigner, funded: KeyPairSigner[], sniper: KeyPairSigner, linked: boolean): Promise<Attempt> {
   let signing: Promise<[BundleCopy[], BundleCopy[]]> | null = null;
   let sent: Promise<void> | null = null;
   let mint: Address | null = null;
-  let uri = "";
   let submittedAt = 0;
-  let servedAt = 0;
   const onResponse = async (res: import("@playwright/test").Response) => {
     if (res.request().method() !== "POST" || new URL(res.url()).pathname !== "/launches" || !res.ok()) return;
     const prepared = PreparedLaunch.parse(await res.json());
     if (prepared.mode !== "instant") return;
     const coin = (mint = address(prepared.mint));
-    uri = metadataUriOf(prepared.transaction);
     signing = Promise.all([
       signedBundle([[creator, funded[0]!, funded[1]!], [funded[2]!, funded[3]!]], coin, INSTANT, BUY, COPIES),
-      signedBundle([[sniper]], coin, INSTANT, BUY, COPIES - 2),
+      signedBundle([[sniper]], coin, INSTANT, BUY, COPIES - 8),
     ]);
   };
   const onRequest = (req: import("@playwright/test").Request) => {
@@ -76,13 +72,10 @@ async function launchWithBundle(page: Page, creator: KeyPairSigner, funded: KeyP
     submittedAt = Date.now();
     sent = (async () => {
       const [bundle, snipes] = await signing!;
-      // The launch service sends the creation once the coin's metadata is served: the bundle starts then.
-      await whenServed(uri);
-      servedAt = Date.now();
-      // Both bundle transactions at once each round; the sniper joins from the fifth: a buy in the four transactions
-      // right after the creation is a direct link by spec 6.5, so the sniper, to be only labelled, must land further down.
+      // Both bundle transactions at once each round; the sniper joins from the ninth: a buy in the four transactions right
+      // after the creation is a direct link by spec 6.5, so the sniper, to be only labelled, must land further down.
       const rounds: BundleCopy[][] = [];
-      for (let i = 0; i < bundle.length; i += 2) rounds.push([...bundle.slice(i, i + 2), ...(i >= 8 && snipes.length ? [snipes.shift()!] : [])]);
+      for (let i = 0; i < bundle.length; i += 2) rounds.push([...bundle.slice(i, i + 2), ...(i >= 16 && snipes.length ? [snipes.shift()!] : [])]);
       await spray(rounds, 100);
     })();
   };
@@ -96,7 +89,7 @@ async function launchWithBundle(page: Page, creator: KeyPairSigner, funded: KeyP
   }
   await sent;
   const [copies, sniperCopies] = await signing!;
-  return { mint: mint!, copies, sniperCopies, submittedAt, servedAt };
+  return { mint: mint!, copies, sniperCopies, submittedAt };
 }
 
 test("Bundle Radar flags a creator's bundle within seconds, and a case opens an hour after the open", async ({ page: first }) => {
@@ -155,8 +148,7 @@ test("Bundle Radar flags a creator's bundle within seconds, and a case opens an 
       const firstLanded = attempt.copies.findIndex((c) => landed.get(c.signature) && !landed.get(c.signature)!.err);
       console.log(
         `try ${tries + 1}: ${mint}, created in slot ${creationSlot} at ${radar.openedAt}; ${inSlot.length} buys landed in it, from ${wallets.size} wallets; ` +
-          `${landedLater} later; the first bundle copy to land was #${firstLanded} (2 a round, 100 ms apart); submitted ${new Date(attempt.submittedAt).toISOString()}, ` +
-          `metadata served ${new Date(attempt.servedAt).toISOString()}`,
+          `${landedLater} later; the first bundle copy to land was #${firstLanded} (2 a round, 100 ms apart); submitted ${new Date(attempt.submittedAt).toISOString()}`,
       );
       if (bundleWallets.every((w) => wallets.has(w.address))) break;
       // The coin of a try that missed is sold back before the next.
