@@ -14,6 +14,7 @@ export const feeRate = (t: Pick<Trade, "fee" | "quoteAmount">) => Number(t.fee) 
 export function TradeList({
   trades,
   fresh,
+  pending,
   now,
   taxEnds,
   decimals,
@@ -22,6 +23,8 @@ export function TradeList({
   trades: Trade[];
   /** Keys of the trades that arrived live. */
   fresh: ReadonlySet<string>;
+  /** Keys of the trades this page sent, shown as they confirmed, that the indexer has not reported yet. */
+  pending: ReadonlySet<string>;
   now: number;
   /** When the sniper tax's minute ended, in milliseconds: a trade before it paid the tax. */
   taxEnds: number;
@@ -56,7 +59,7 @@ export function TradeList({
             const rate = feeRate(t);
             const tone = rate > 0.5 ? styles.heavy : Date.parse(t.at) < taxEnds ? styles.taxed : "";
             return (
-              <tr key={key} className={fresh.has(key) ? styles.fresh : undefined} data-trade={key}>
+              <tr key={key} className={fresh.has(key) ? styles.fresh : undefined} data-trade={key} data-pending={pending.has(key) || undefined}>
                 <td>
                   <a href={explorerTx(t.signature)} target="_blank" rel="noreferrer" className="num" title={new Date(t.at).toLocaleString()}>
                     {ago(now - Date.parse(t.at))}

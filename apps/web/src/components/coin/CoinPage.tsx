@@ -6,6 +6,7 @@ import { coinLiveUrl, getCoin, getCoinTrades } from "@/lib/api";
 import { ago, coinAmount, compactNumber, shortAddress, sol, solAmount } from "@/lib/format";
 import { CandleChart, type ChartFeed } from "./CandleChart";
 import styles from "./Coin.module.css";
+import { QuickTrade } from "./QuickTrade";
 import { TaxBand } from "./TaxBand";
 import { TradeList } from "./TradeList";
 import { useLiveRoom } from "./useLiveRoom";
@@ -25,40 +26,74 @@ export function CoinPage({ initial }: { initial: Coin }) {
   const [offsetMs, setOffsetMs] = useState(0);
   const [trades, setTrades] = useState<Trade[] | null>(null);
   const [fresh, setFresh] = useState<ReadonlySet<string>>(new Set());
+  // Trades this page sent, shown the moment they confirmed, until the indexer reports them (spec 10.2).
+  const [pending, setPending] = useState<ReadonlySet<string>>(new Set());
   // The API's clock as the page was served: the server's render and the browser's first one must say the same.
   const [now, setNow] = useState(() => Date.parse(initial.servedAt));
+  // The newest trade the indexer has reported: where a reconnecting page catches up from.
   const newest = useRef<string | null>(initial.market.lastTradeKey);
   const chart = useRef<ChartFeed>(null);
 
   const decimals = coin.decimals;
   const supply = Number(BigInt(coin.supply)) / 10 ** decimals;
 
-  /** Trades from any source, once each, newest first; the newest moves the market. */
-  const merge = useCallback(
-    (incoming: Trade[], live: boolean) => {
-      if (!incoming.length) return;
-      setTrades((shown) => {
-        const byKey = new Map((shown ?? []).map((t) => [key(t), t]));
-        for (const t of incoming) byKey.set(key(t), t);
-        return [...byKey.values()].sort((a, b) => (BigInt(b.orderKey) > BigInt(a.orderKey) ? 1 : -1)).slice(0, SHOWN_TRADES);
-      });
-      if (live) setFresh((keys) => new Set([...keys, ...incoming.map(key)]));
-      const latest = incoming.reduce((a, b) => (BigInt(b.orderKey) > BigInt(a.orderKey) ? b : a));
-      if (newer(latest.orderKey, newest.current)) {
-        newest.current = latest.orderKey;
-        setCoin((c) => ({
-          ...c,
-          market: {
-            ...c.market,
-            price: latest.price,
-            marketCap: String(Number(latest.price) * supply),
-            quoteReserve: latest.quoteReserve,
-            lastTradeKey: latest.orderKey,
-          },
-        }));
+  /**
+   * Trades from any source, once each, newest first. A trade the page sent shows the moment it confirms, with an order
+   * key at the end of its slot, and the indexer's report of it replaces it in place: one row, never two, whichever of
+   * the two arrives first.
+   */
+  const indexed = useRef(new Set<string>());
+  const merge = useCallback((all: Trade[], o: { live: boolean; provisional?: boolean }) => {
+    // The indexer can report a trade before the fast path's answer reaches the page: its row stands.
+    const incoming = o.provisional ? all.filter((t) => !indexed.current.has(key(t))) : all;
+    if (!o.provisional) for (const t of incoming) indexed.current.add(key(t));
+    if (!incoming.length) return;
+    setTrades((shown) => {
+      const byKey = new Map((shown ?? []).map((t) => [key(t), t]));
+      for (const t of incoming) byKey.set(key(t), t);
+      return [...byKey.values()].sort((a, b) => (BigInt(b.orderKey) > BigInt(a.orderKey) ? 1 : -1)).slice(0, SHOWN_TRADES);
+    });
+    setPending((keys) => {
+      const next = new Set(keys);
+      for (const t of incoming) {
+        if (o.provisional) next.add(key(t));
+        else next.delete(key(t));
       }
+      return next.size === keys.size && [...next].every((k) => keys.has(k)) ? keys : next;
+    });
+    if (o.live) setFresh((keys) => new Set([...keys, ...incoming.map(key)]));
+    if (!o.provisional) {
+      const latest = incoming.reduce((a, b) => (BigInt(b.orderKey) > BigInt(a.orderKey) ? b : a));
+      if (newer(latest.orderKey, newest.current)) newest.current = latest.orderKey;
+    }
+  }, []);
+
+  // The market follows the newest trade shown, a trade the page sent included; once the indexer places that one in its
+  // block, the newest is read again, so a trade later in the same slot is never shown older than it.
+  const provisionalKeys = useRef(new Set<string>());
+  useEffect(() => {
+    const top = trades?.[0];
+    if (!top) return;
+    if (pending.has(key(top))) provisionalKeys.current.add(top.orderKey);
+    setCoin((c) => {
+      const current = c.market.lastTradeKey;
+      if (current === top.orderKey) return c;
+      const replaced = current !== null && provisionalKeys.current.has(current) && !trades!.some((t) => t.orderKey === current);
+      if (!newer(top.orderKey, current) && !replaced) return c;
+      return {
+        ...c,
+        market: { ...c.market, price: top.price, marketCap: String(Number(top.price) * supply), quoteReserve: top.quoteReserve, lastTradeKey: top.orderKey },
+      };
+    });
+  }, [trades, pending, supply]);
+
+  /** A trade this page sent, read back the moment it confirmed. */
+  const onTraded = useCallback(
+    (sent: Trade[]) => {
+      merge(sent, { live: true, provisional: true });
+      chart.current?.add(sent);
     },
-    [supply],
+    [merge],
   );
 
   // The coin again now and every 30 s: holders, and this browser's clock against the API's.
@@ -84,7 +119,7 @@ export function CoinPage({ initial }: { initial: Coin }) {
     getCoinTrades(mint, { limit: 50 })
       .then(({ trades: latest }) => {
         setTrades((shown) => shown ?? []);
-        merge(latest, false);
+        merge(latest, { live: false });
       })
       .catch(() => setTrades((shown) => shown ?? []));
   }, [mint, merge]);
@@ -92,7 +127,7 @@ export function CoinPage({ initial }: { initial: Coin }) {
   const onBatch = useCallback(
     (batch: LiveBatch) => {
       const landed = batch.events.flatMap((e) => (e.type === "trade" && e.mint === mint ? [e.trade] : []));
-      merge(landed, true);
+      merge(landed, { live: true });
       chart.current?.add(landed);
       for (const e of batch.events) {
         if (e.type !== "window_claim" || e.mint !== mint) continue;
@@ -111,7 +146,7 @@ export function CoinPage({ initial }: { initial: Coin }) {
     if (since === null) return;
     getCoinTrades(mint, { after: since })
       .then(({ trades: missed }) => {
-        merge(missed, true);
+        merge(missed, { live: true });
         chart.current?.add(missed);
       })
       .catch(() => undefined);
@@ -216,6 +251,12 @@ export function CoinPage({ initial }: { initial: Coin }) {
           </section>
         </div>
 
+        <div className={styles.side}>
+          {coin.heat && (
+            <div className={styles.trade}>
+              <QuickTrade coin={coin} onTraded={onTraded} />
+            </div>
+          )}
         <aside className={`panel ${styles.facts}`} aria-label="About this coin">
           <div className={styles.fact}>
             <span className="eyebrow">Launch</span>
@@ -269,6 +310,7 @@ export function CoinPage({ initial }: { initial: Coin }) {
             </span>
           </div>
         </aside>
+        </div>
       </div>
 
       <section className={`panel ${styles.tradesPanel}`} aria-label="Trades">
@@ -281,7 +323,7 @@ export function CoinPage({ initial }: { initial: Coin }) {
         {trades === null ? (
           <p className={`note ${styles.empty}`}>Loading trades…</p>
         ) : (
-          <TradeList trades={trades} fresh={fresh} now={now + offsetMs} taxEnds={taxEnds} decimals={decimals} explorerTx={explorerTx} />
+          <TradeList trades={trades} fresh={fresh} pending={pending} now={now + offsetMs} taxEnds={taxEnds} decimals={decimals} explorerTx={explorerTx} />
         )}
       </section>
     </div>

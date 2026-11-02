@@ -1,6 +1,6 @@
 /*
- * A coin's page (spec 9, screen 3): its head, the sniper tax, the chart and the way to Graduation beside the coin's facts,
- * then its trades. One column on a phone, the facts after the chart.
+ * A coin's page (spec 9, screen 3): its head, the sniper tax, the chart and the way to Graduation beside quick trade and
+ * the coin's facts, then its trades. One column on a phone: quick trade, the chart, then the facts.
  */
 .page {
   display: grid;
@@ -144,7 +144,7 @@
 /* The chart and the way to Graduation, beside the coin's facts */
 .layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 300px;
+  grid-template-columns: minmax(0, 1fr) 340px;
   gap: 16px;
   align-items: start;
 }
@@ -245,6 +245,17 @@
   position: absolute;
   inset: 0 auto 0 0;
   background: var(--go);
+}
+
+/* Quick trade above the coin's facts, beside the chart */
+.side {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.trade {
+  min-width: 0;
 }
 
 .facts {
@@ -354,6 +365,15 @@
 @media (max-width: 900px) {
   .layout {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* One column: quick trade first, where a thumb reaches it, then the chart, then the coin's facts. */
+  .side {
+    display: contents;
+  }
+
+  .trade {
+    order: -1;
   }
 }
 

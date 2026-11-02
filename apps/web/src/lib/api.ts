@@ -8,6 +8,7 @@ import {
   FairOpen,
   FairOpenOutcome,
   Health,
+  Holdings,
   LaunchRefusal,
   LaunchStatus,
   Me,
@@ -15,10 +16,14 @@ import {
   PreparedClaim,
   PreparedFairOpenTransaction,
   PreparedLaunch,
+  PreparedSwap,
+  SwapOutcome,
+  SwapQuote,
   VampShieldVerdict,
   type CandleSeconds,
   type ClaimRequest,
   type LaunchForm,
+  type SwapRequest,
 } from "@top-pad/contract";
 import type { z } from "zod";
 
@@ -70,6 +75,9 @@ async function call<T extends z.ZodType>(schema: T, path: string, init: RequestI
   }
   return schema.parse(body);
 }
+
+/** A JSON body to POST. */
+const postJson = (body: unknown): RequestInit => ({ method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 
 export const getPlatform = () => call(Platform, "/platform");
 
@@ -147,6 +155,19 @@ export function getCoinTrades(mint: string, query: { after?: string; before?: st
 
 export const getCoinCandles = (mint: string, seconds: CandleSeconds) => call(CoinCandles, `/coins/${encodeURIComponent(mint)}/candles?seconds=${seconds}`);
 
+/** A quick buy's or sell's quote: what it does in each second from now, by DBC's own maths on the pool as it stands. */
+export const getSwapQuote = (mint: string, request: SwapRequest, signal?: AbortSignal) =>
+  call(SwapQuote, `/coins/${encodeURIComponent(mint)}/quote`, { ...postJson(request), signal });
+
+/** A quick buy or sell for the wallet to sign and send, with the quote it was built on. */
+export const prepareSwap = (mint: string, request: SwapRequest & { wallet: string }) => call(PreparedSwap, `/coins/${encodeURIComponent(mint)}/swap`, postJson(request));
+
+/** A sent trade, read back from the chain the moment it confirms, so the page shows it at once (spec 10.2). */
+export const reportTrade = (mint: string, signature: string) => call(SwapOutcome, `/coins/${encodeURIComponent(mint)}/trades`, postJson({ signature }));
+
+/** What a wallet holds to trade a coin with. */
+export const getHoldings = (mint: string, wallet: string) => call(Holdings, `/coins/${encodeURIComponent(mint)}/holdings/${encodeURIComponent(wallet)}`);
+
 /** A coin's live room: its trades as they land (spec 10.2). */
 export const coinLiveUrl = (mint: string) => `${API_URL.replace(/^http/, "ws")}/live/coins/${encodeURIComponent(mint)}`;
 
@@ -185,7 +206,6 @@ export async function loadFairOpen(launch: string): Promise<FairOpen | "missing"
 export const getFairOpen = (launch: string, wallet?: string) =>
   call(FairOpen, `/fair-opens/${encodeURIComponent(launch)}${wallet ? `?wallet=${encodeURIComponent(wallet)}` : ""}`);
 
-const postJson = (body: unknown): RequestInit => ({ method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 
 /** A Fair Open transaction for the wallet to sign and send: a deposit, a withdrawal, the failure or a refund. */
 export const prepareFairOpen = (launch: string, action: "deposit" | "withdraw" | "mark-failed" | "refund" | "claim", body: { wallet: string; amount?: string }) =>

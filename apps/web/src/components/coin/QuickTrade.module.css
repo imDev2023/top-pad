@@ -1,0 +1,308 @@
+/*
+ * Quick buy and sell (spec 9, screen 3): beside the chart on a desktop, above it on a phone. Green for a buy, red for a
+ * sell, the sniper tax yellow while it runs, as the tax band and the trades say it.
+ */
+.panel {
+  display: grid;
+  gap: 14px;
+  padding: 14px 16px 16px;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.title {
+  font-size: 1.15rem;
+}
+
+.sides {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  width: 148px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+}
+
+.side {
+  min-height: 30px;
+  padding: 2px 10px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.side:hover {
+  color: var(--fg);
+}
+
+.buyOn {
+  background: var(--go);
+  color: var(--go-ink);
+}
+
+.sellOn {
+  background: var(--stop);
+  color: #fff;
+}
+
+.buyOn:hover {
+  color: var(--go-ink);
+}
+
+.sellOn:hover {
+  color: #fff;
+}
+
+.form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+}
+
+.labels {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.labels label {
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+/* The amount, with its unit inside the field */
+.amount {
+  display: flex;
+  align-items: center;
+  min-height: 46px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+}
+
+.amount:focus-within {
+  border-color: var(--info);
+}
+
+.amountInvalid,
+.amountInvalid:focus-within {
+  border-color: var(--stop);
+}
+
+.amount input {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  height: 44px;
+  padding: 0 12px;
+  border: 0;
+  background: transparent;
+  font-size: 1.15rem;
+  outline: none;
+}
+
+.amount input::placeholder {
+  color: var(--faint);
+}
+
+.unit {
+  flex: none;
+  max-width: 45%;
+  overflow: hidden;
+  padding: 0 12px;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Equal widths, one row: four amounts to buy, three shares to sell */
+.presets {
+  display: grid;
+  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-flow: column;
+  gap: 6px;
+}
+
+.slippages {
+  display: flex;
+  gap: 6px;
+}
+
+.preset {
+  min-height: 30px;
+  padding: 2px 6px;
+  white-space: nowrap;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  cursor: pointer;
+}
+
+.preset:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  color: var(--fg);
+}
+
+.preset[aria-pressed="true"],
+.preset[aria-checked="true"] {
+  border-color: var(--line-strong);
+  background: var(--panel-2);
+  color: var(--fg);
+}
+
+.preset:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.problem {
+  color: var(--stop);
+}
+
+.problem:empty {
+  display: none;
+}
+
+/* What the trade pays and gets */
+.summary {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+}
+
+.summary div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.summary dt {
+  flex: none;
+  font-size: 0.82rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.summary dd {
+  margin: 0;
+  font-size: 0.9rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.taxed {
+  color: var(--caution);
+}
+
+.feeSol {
+  color: var(--muted);
+}
+
+.taxNote {
+  margin-top: -6px;
+}
+
+.slippage {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.connect {
+  display: grid;
+}
+
+.connect > * {
+  justify-items: stretch;
+}
+
+.connect :global(.btn) {
+  width: 100%;
+}
+
+.sellButton {
+  background: var(--stop);
+  border-color: var(--stop);
+  color: #fff;
+}
+
+.sellButton:hover {
+  border-color: var(--stop);
+  filter: brightness(1.08);
+}
+
+.progress {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.85rem;
+}
+
+.progress li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.mark {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--line-strong);
+  border-radius: 50%;
+}
+
+.done {
+  color: var(--muted);
+}
+
+.done .mark {
+  border-color: var(--go);
+  background: var(--go);
+}
+
+.active .mark {
+  border-color: var(--info);
+  border-top-color: transparent;
+  animation: spin 0.8s linear infinite;
+}
+
+.pending {
+  color: var(--faint);
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.outcome b {
+  text-wrap: balance;
+}

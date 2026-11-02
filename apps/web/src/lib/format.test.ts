@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ago, coinAmount, compactNumber, solAmount, span, tickLabels } from "./format";
+import { ago, coinAmount, compactNumber, rawAmountOf, solAmount, span, tickLabels, typedAmount } from "./format";
 
 const sub = (n: number) => String.fromCodePoint(0x2080 + n);
 
@@ -67,5 +67,23 @@ describe("a span of time", () => {
     expect([1, 3, 119, 120, 3_599, 61_104, 172_800].map(span)).toEqual(
       ["1\u{a0}s", "3\u{a0}s", "119\u{a0}s", "2\u{a0}min", "60\u{a0}min", "17\u{a0}h", "2\u{a0}days"],
     );
+  });
+});
+
+describe("an amount as typed", () => {
+  it("is its raw units in the unit's places, or null when it is not a positive amount the unit holds", () => {
+    expect(rawAmountOf("0.1", 9)).toBe(100_000_000n);
+    expect(rawAmountOf(" 1,250.5 ", 6)).toBe(1_250_500_000n);
+    expect(rawAmountOf(".5", 9)).toBe(500_000_000n);
+    expect(rawAmountOf("2.", 9)).toBe(2_000_000_000n);
+    expect(rawAmountOf("0.000000001", 9)).toBe(1n);
+    expect(["", ".", "0", "0.0", "-1", "1e3", "0.0000001", "abc"].map((t) => rawAmountOf(t, 6))).toEqual(new Array(8).fill(null));
+  });
+
+  it("types back every place it needs", () => {
+    expect(typedAmount(100_000_000n, 9)).toBe("0.1");
+    expect(typedAmount(1_250_500_000n, 6)).toBe("1250.5");
+    expect(typedAmount(3_000_000n, 6)).toBe("3");
+    expect(rawAmountOf(typedAmount(123_456_789n, 6), 6)).toBe(123_456_789n);
   });
 });

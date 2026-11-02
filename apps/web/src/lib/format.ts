@@ -75,3 +75,21 @@ export function tickLabels(values: number[]): string[] {
   const decimals = Number.isFinite(step) && step > 0 ? Math.min(Math.max(Math.ceil(-Math.log10(step) - 1e-6), 0), 12) : 4;
   return values.map((v) => v.toLocaleString("en-US", { minimumFractionDigits: decimals, maximumFractionDigits: decimals }));
 }
+
+/**
+ * An amount as typed, in a unit of `decimals` places (9 for SOL, 6 for a coin): its raw units, or null when it is not
+ * a positive amount the unit can hold. Commas group thousands and are ignored.
+ */
+export function rawAmountOf(text: string, decimals: number): bigint | null {
+  const match = /^(\d*)(?:\.(\d*))?$/.exec(text.trim().replaceAll(",", ""));
+  if (!match || (match[1] === "" && !match[2]) || (match[2] ?? "").length > decimals) return null;
+  const raw = BigInt(match[1] || "0") * 10n ** BigInt(decimals) + BigInt((match[2] ?? "").padEnd(decimals, "0") || "0");
+  return raw > 0n ? raw : null;
+}
+
+/** Raw units as an amount to type back into a field: every place it needs, no grouping. */
+export function typedAmount(raw: bigint, decimals: number): string {
+  const unit = 10n ** BigInt(decimals);
+  const fraction = (raw % unit).toString().padStart(decimals, "0").replace(/0+$/, "");
+  return `${raw / unit}${fraction ? `.${fraction}` : ""}`;
+}
