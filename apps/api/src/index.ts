@@ -179,8 +179,9 @@ async function housekeeping(db: Db, env: Bindings) {
 
 /** The minute of each hour the protected set's hourly lists and image batch run, apart from the five-minute jobs. */
 const PROTECTED_LISTS_MINUTE = 2;
-/** How long an image batch may keep the vision service busy, inside the cron's 15 minutes. */
+/** How long an image batch may keep the vision service busy, and when it must stop, inside the cron's 15 minutes. */
 const IMAGE_BATCH_MS = 10 * 60_000;
+const CRON_DONE_BY_MS = 13 * 60_000;
 
 /**
  * The minute's Cron Trigger: Vamp Shield's protected set (spec 6.2, 10.2), Jupiter's trending coins every minute, and
@@ -193,7 +194,9 @@ async function everyMinute(controller: ScheduledController, env: Bindings, ctx: 
     await runJob(db, "protected-trending", () => refreshTrending(db, env), { exclusive: true }).catch(() => undefined);
     if (new Date(controller.scheduledTime).getUTCMinutes() === PROTECTED_LISTS_MINUTE) {
       await runJob(db, "protected-lists", () => refreshLists(db, cfg, env), { exclusive: true }).catch(() => undefined);
-      await runJob(db, "protected-images", () => signImages(db, env, IMAGE_BATCH_MS), { exclusive: true }).catch(() => undefined);
+      // The lists may have spent minutes waiting on CoinGecko's limit: the batch takes what is left.
+      const left = Math.min(IMAGE_BATCH_MS, controller.scheduledTime + CRON_DONE_BY_MS - Date.now());
+      if (left > 30_000) await runJob(db, "protected-images", () => signImages(db, env, left), { exclusive: true }).catch(() => undefined);
     }
   } finally {
     ctx.waitUntil(close());

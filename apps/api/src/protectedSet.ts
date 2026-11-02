@@ -4,7 +4,7 @@
 // holders, lapsing after 7 days below the activity bar (organic score under 30 and under 300 holders). Each coin's image
 // waits in `protected_images` until an image batch has the vision service sign it, so the Container wakes once an hour
 // for the new ones rather than for every coin. Starting values, all of them (research/copycat-detection section 4).
-import { and, eq, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm";
+import { and, eq, gt, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { holderCount } from "@top-pad/indexer";
 import { coins, imageChecks, launches, pools, protectedCoins, protectedImages, trades, type Db } from "@top-pad/db";
 import { candidateKeys, deletions, FOLD_VERSION, PDQ_MIN_QUALITY, tickerKey } from "@top-pad/vamp-shield";
@@ -121,12 +121,22 @@ export async function organicNow(env: Bindings): Promise<Listed[]> {
 
 type CoinGeckoCoin = { id: string; symbol: string; name: string; image?: string | null; market_cap_rank?: number | null; market_cap?: number | null };
 
-/** CoinGecko's top 1,000 by market cap (tier A4), the top coins of every chain, four pages of 250 read 3 s apart. */
+/**
+ * CoinGecko's top 1,000 by market cap (tier A4), the top coins of every chain: four pages of 250 read 10 s apart, each
+ * handed to `onPage` as it comes.
+ */
+/** How many of the top 1,000 a day's reads must have seen for the day to be done (a few ids repeat across pages). */
+const COINGECKO_DAY_DONE = 950;
 /** How often a page CoinGecko answers 429 is asked again, and the wait when it names none (Retry-After). */
 const COINGECKO_TRIES = 3;
 const COINGECKO_RETRY_MS = 30_000;
 
-export async function coinGeckoTop(pauseMs = 3_000, retryMs = COINGECKO_RETRY_MS, apiKey: string | null = null): Promise<Listed[]> {
+export async function coinGeckoTop(
+  pauseMs = 10_000,
+  retryMs = COINGECKO_RETRY_MS,
+  apiKey: string | null = null,
+  onPage: (page: Listed[]) => Promise<void> = async () => undefined,
+): Promise<Listed[]> {
   const listed: Listed[] = [];
   const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
   // A Demo key (free, made by the owner on CoinGecko) has a limit of its own; without one, requests share the address's.
@@ -147,9 +157,16 @@ export async function coinGeckoTop(pauseMs = 3_000, retryMs = COINGECKO_RETRY_MS
     }
     if (!res!.ok) throw new Error(`CoinGecko answered ${res!.status} for page ${page}`);
     const body = (await res!.json()) as CoinGeckoCoin[];
-    for (const c of body) {
-      listed.push({ mint: c.id, ticker: (c.symbol ?? "").toUpperCase(), name: c.name ?? "", imageUrl: c.image || null, details: { rank: c.market_cap_rank ?? null, mcap: c.market_cap ?? null } });
-    }
+    const page_: Listed[] = body.map((c) => ({
+      mint: c.id,
+      ticker: (c.symbol ?? "").toUpperCase(),
+      name: c.name ?? "",
+      imageUrl: c.image || null,
+      details: { rank: c.market_cap_rank ?? null, mcap: c.market_cap ?? null },
+    }));
+    // Each page is kept as it comes, so a page refused later loses only itself.
+    await onPage(unique(page_));
+    listed.push(...page_);
   }
   return unique(listed);
 }
@@ -459,14 +476,18 @@ export async function refreshLists(db: Db, cfg: Config, env: Bindings, opts: { c
   });
   await part("heat", () => refreshHeat(db, cfg, env));
   await part("coingecko", async () => {
-    const [{ last } = { last: null }] = await db
-      .select({ last: sql<Date | null>`max(${protectedCoins.seenAt})` })
+    // Done for the day once nearly the whole 1,000 has been seen in the last 23 hours: a day whose read stopped
+    // partway, as CoinGecko's limit makes it, is read again the next hour.
+    const [{ seen } = { seen: 0 }] = await db
+      .select({ seen: sql<number>`count(*)::int` })
       .from(protectedCoins)
-      .where(eq(protectedCoins.source, "coingecko_top"));
-    if (last && Date.now() - new Date(last).getTime() < 23 * 3_600_000) return { due: false };
-    const listed = await coinGeckoTop(opts.coinGeckoPauseMs, opts.coinGeckoRetryMs, await secret(env.COINGECKO_API_KEY));
-    await upsertListed(db, "coingecko_top", listed);
-    return { listed: listed.length };
+      .where(and(eq(protectedCoins.source, "coingecko_top"), gt(protectedCoins.seenAt, sql`now() - interval '23 hours'`)));
+    if (seen >= COINGECKO_DAY_DONE) return { due: false, seen };
+    let written = 0;
+    const listed = await coinGeckoTop(opts.coinGeckoPauseMs, opts.coinGeckoRetryMs, await secret(env.COINGECKO_API_KEY), async (page) => {
+      written += (await upsertListed(db, "coingecko_top", page)).written;
+    });
+    return { listed: listed.length, written };
   });
   await part("refolded", () => refold(db));
   await part("pruned", () => prune(db));

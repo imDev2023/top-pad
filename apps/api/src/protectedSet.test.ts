@@ -126,6 +126,19 @@ describe("CoinGecko's limit", () => {
     await expect(coinGeckoTop(0, 0)).rejects.toThrow("CoinGecko answered 429 for page 1");
   });
 
+  it("keeps each page as it comes, so a later refusal loses only its own page", async () => {
+    outside({
+      "coins/markets": (req: Request) => {
+        const page = Number(new URL(req.url).searchParams.get("page"));
+        if (page === 3) return new Response("Throttled", { status: 429 });
+        return Response.json([{ id: `kept-${page}`, symbol: "kp", name: "Kept", image: null, market_cap_rank: page }]);
+      },
+    });
+    const kept: string[] = [];
+    await expect(coinGeckoTop(0, 0, null, async (page) => void kept.push(...page.map((l) => l.mint)))).rejects.toThrow("page 3");
+    expect(kept).toEqual(["kept-1", "kept-2"]);
+  });
+
   it("sends a Demo key when there is one", async () => {
     const keys: (string | null)[] = [];
     vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -152,7 +165,7 @@ describe("the hourly refresh", () => {
     const cfg = config(env);
     {
       const first = await refreshLists(db, cfg, env, { coinGeckoPauseMs: 0 });
-      expect(first).toMatchObject({ verified: { listed: 10, lapsed: 0 }, organic: { listed: 1 }, coingecko: { listed: 1 } });
+      expect(first).toMatchObject({ verified: { listed: 10, lapsed: 0 }, organic: { listed: 1 }, coingecko: { listed: 1, written: 4 } });
       // Off a bonding curve and with enough holders only: OrgX graduated; CRVE is on its curve and SMOL has 10 holders.
       expect((await rowsOf("organic")).map((r) => r.mint)).toContain("OrgX");
       expect((await rowsOf("organic")).map((r) => r.mint)).not.toContain("Curve");
@@ -160,10 +173,13 @@ describe("the hourly refresh", () => {
       await db.update(protectedCoins).set({ seenAt: sql`now() - interval '1 hour'` }).where(eq(protectedCoins.source, "jupiter_verified"));
       verified = all.slice(0, 9);
       const second = await refreshLists(db, cfg, env, { coinGeckoPauseMs: 0 });
-      expect(second).toMatchObject({ verified: { listed: 9, lapsed: 1 }, coingecko: { due: false } });
+      // A day that saw only one coin of the 1,000 is read again; one that saw the whole top is done.
+      expect(second).toMatchObject({ verified: { listed: 9, lapsed: 1 }, coingecko: { listed: 1 } });
       expect(await protecting("Ver9")).toBe(false);
       expect(await protecting("Ver0")).toBe(true);
-      expect(asked.filter((a) => a.url.includes("coins/markets"))).toHaveLength(4);
+      expect(asked.filter((a) => a.url.includes("coins/markets"))).toHaveLength(8);
+      await upsertListed(db, "coingecko_top", Array.from({ length: 950 }, (_, i) => listed(`cg-many-${i}`, `CG${i}`)));
+      expect(await refreshLists(db, cfg, env, { coinGeckoPauseMs: 0 })).toMatchObject({ coingecko: { due: false } });
 
       await db.update(protectedCoins).set({ seenAt: sql`now() - interval '1 hour'` }).where(eq(protectedCoins.source, "jupiter_verified"));
       verified = all.slice(0, 2);
