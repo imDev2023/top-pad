@@ -1,0 +1,28 @@
+# The vision service's runtime dependencies, every one pinned with its hash, transitive ones included.
+# The Dockerfile's wheels stage downloads them with --require-hashes --no-deps and the runtime runs pip check, so a
+# missing or swapped package fails the build instead of reaching a Container.
+# Every version was released at least two weeks before it was pinned (2026-11-02). The hashes are of the manylinux
+# x86_64 wheels for CPython 3.14, which the service runs on, and 3.13, which the model stage exports SSCD on (torch does
+# not support TorchScript on 3.14), so both stages run the same versions.
+# pdqhash ships no Linux wheel and is compiled from its sdist; it stays on one line because the model stage, which has
+# no compiler and no use for it, filters it out by that line.
+
+numpy==2.5.4 \
+    --hash=sha256:d549420b8858885cea8838a727842249218b9c1da24dd517e25c9c7a948310a3 \
+    --hash=sha256:6ffa07666f8da0eef81d149934a626d0d95fbd6838432a33e66245423a9062c0
+pillow==13.0.0 \
+    --hash=sha256:e91c2b1cbeae768c98752e67e717e283d68dae45717b41f2d91eaee648e37b7d \
+    --hash=sha256:5f56499c1a74d2b862beb0c33b8016f99d095858455df9d21583bbbc1c15b582
+onnxruntime==1.31.0 \
+    --hash=sha256:e4efa4a1a0bb0b5173c6a3292c181d518b8323f9d56e978635d0c09d38c94d1a \
+    --hash=sha256:37fd78cee5160c7a43a1730ccb3682ffd880af9c9e80385d625c0c2f8b125809
+pdqhash==0.2.8 --hash=sha256:eb9a9de36745937ce3e481a02ce933fe907c84e0b1748c9dfea52c12ca5c1e35
+
+# onnxruntime's own dependencies.
+flatbuffers==25.12.19 \
+    --hash=sha256:7634f50c427838bb021c2d66a3d1168e9d199b0607e6329399f04846d42e20b4
+packaging==26.3 \
+    --hash=sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c
+protobuf==7.36.2 \
+    --hash=sha256:89f23aa53c24553a2416fd4fd1ec06f74fa42b14b546d8883128813f775bbfd2 \
+    --hash=sha256:bdb3a345d48db958e6ce1f18e508beb0cc981d64f24088427549c866cd039f1e

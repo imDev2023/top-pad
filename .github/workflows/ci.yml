@@ -78,3 +78,12 @@ jobs:
       # After the build, since the tests embed the built programs.
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test
+
+  # The vision service's image (apps/vision, spec 10.2): its build exports SSCD to ONNX and checks it against Meta's
+  # TorchScript model, and its `test` stage runs the service's tests on the image it ships.
+  vision:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - run: docker build --platform linux/amd64 --target test apps/vision

@@ -1,0 +1,10 @@
+# Sends the Docker build only what the Dockerfile copies, so a stray model file, cache or virtualenv in the
+# folder neither bloats the build context nor invalidates its cached layers.
+*
+!requirements.txt
+!build/
+!vision/
+!tests/
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
