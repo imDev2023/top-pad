@@ -360,19 +360,31 @@ const scoresOf = (nearest: ImageNeighbour[]) =>
     .sort((a, b) => (b.sscd ?? 0) - (a.sscd ?? 0))
     .map((n) => ({ mint: n.coin.mint, ticker: n.coin.ticker, source: n.coin.source, pdqDistance: n.pdqDistance, orientation: n.orientation, sscd: n.sscd }));
 
-/** `POST /vamp-shield/image`: the launch flow's live image verdict, logged with its scores. */
+/** How many images one creator may have checked in 10 minutes: each new one can wake the vision service. */
+const IMAGE_CHECKS_PER_10_MINUTES = 30;
+
+/**
+ * `POST /vamp-shield/image`: the launch flow's live image verdict, logged with its scores. Only for a creator signed in
+ * with X, as the launch flow is by its coin step, and only so many a time, since a new image can wake the Container.
+ */
 export async function checkImageRoute(c: Context<AppEnv>) {
   const { cfg, db } = c.var;
+  const creator = await sessionCreator(c);
+  if (!creator) return refuse(c, 401, { error: "Link your X account first: images are checked for a launch.", code: "not_linked" });
+  const [{ recent } = { recent: 0 }] = await db
+    .select({ recent: sql<number>`count(*)::int` })
+    .from(vampChecks)
+    .where(and(eq(vampChecks.creatorId, creator.id), eq(vampChecks.stage, "image"), gte(vampChecks.at, sql`now() - interval '10 minutes'`)));
+  if (recent >= IMAGE_CHECKS_PER_10_MINUTES) return c.json({ error: "You have checked many images just now. Wait a few minutes, then try again." }, 429);
   const body = await c.req.parseBody();
   const file = body.image;
   if (!(file instanceof File) || file.size === 0) return c.json({ error: "Send the coin's image." }, 400);
   if (file.size > cfg.maxImageBytes) return c.json({ error: `The image is too large: a coin's image can be at most ${Math.round(cfg.maxImageBytes / 1024)} KB.` }, 413);
   const check = await checkImage(db, cfg, c.env, new Uint8Array(await file.arrayBuffer()));
   if (!check.ok) return c.json({ error: check.verdict.reason }, check.status as 422 | 503);
-  const creator = await sessionCreator(c);
   await db.insert(vampChecks).values({
     stage: "image",
-    creatorId: creator?.id ?? null,
+    creatorId: creator.id,
     imageSha256: check.sha256,
     outcome: check.verdict.status,
     matches: check.verdict.match ? [{ field: "image", rule: check.judgement.verdict === "refused" ? check.judgement.by : "sscd", coin: check.verdict.match }] : [],

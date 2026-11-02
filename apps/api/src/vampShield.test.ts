@@ -85,7 +85,10 @@ async function looksAs(bytes: Uint8Array, signatures: Omit<Signatures, "sha256">
   vision.byImage.set(await sha256(bytes), { ...signatures, sha256: await sha256(bytes) });
 }
 
-async function checkImage(bytes: Uint8Array, cookie = "") {
+/** One signed-in creator checks the images of the tests that are not about who may check. */
+let checker: string | null = null;
+async function checkImage(bytes: Uint8Array, cookie?: string) {
+  cookie ??= checker ??= await linkX();
   const form = new FormData();
   form.set("image", new File([bytes as BufferSource], "coin.png", { type: "image/png" }));
   return request("/vamp-shield/image", { method: "POST", body: form, headers: { origin: ORIGINS.web, cookie } });
@@ -174,6 +177,15 @@ describe("Vamp Shield's image verdicts", () => {
     const signatures = fakeSignatures("flat");
     await looksAs(flat, { pdq: { ...signatures.pdq, quality: 30, dihedral: [BONK_IMAGE.pdq.bits, ...signatures.pdq.dihedral.slice(1)] }, sscd: signatures.sscd });
     expect(ImageVerdict.parse(await (await checkImage(flat)).json()).verdict.status).toBe("clear");
+  });
+
+  it("is only for a creator signed in with X, and only so many a time", async () => {
+    expect((await checkImage(image("anonymous"), "")).status).toBe(401);
+    const cookie = await linkX();
+    for (let i = 0; i < 30; i++) expect((await checkImage(image(`many-${i % 3}`), cookie)).status).toBe(200);
+    const res = await checkImage(image("one-too-many"), cookie);
+    expect(res.status).toBe(429);
+    expect(vision.calls).toBe(3);
   });
 
   it("says so when the vision service cannot answer", async () => {
