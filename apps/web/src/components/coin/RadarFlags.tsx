@@ -70,8 +70,10 @@ export function RadarFlags({ mint, ticker, decimals, version }: { mint: string; 
             onClick={() => toggle("linked")}
             data-testid="radar-linked"
           >
-            {plural(linked.length, "wallet", "wallets")} linked to the creator
-            <span className={styles.flagFigure}>· {shareOf(radar!.linked.coins, radar!.supply)} of supply</span>
+            <span>
+              {plural(linked.length, "wallet", "wallets")} linked to the creator{" "}
+              <span className={styles.flagFigure}>· {shareOf(radar!.linked.coins, radar!.supply)} of supply</span>
+            </span>
             <i className={styles.caret} aria-hidden="true" />
           </button>
         )}
@@ -84,7 +86,7 @@ export function RadarFlags({ mint, ticker, decimals, version }: { mint: string; 
             onClick={() => toggle("early")}
             data-testid="radar-same-slot"
           >
-            {plural(earlyBuys, "same-slot buy", "same-slot buys")}
+            <span>{plural(earlyBuys, "same-slot buy", "same-slot buys")}</span>
             <i className={styles.caret} aria-hidden="true" />
           </button>
         )}
@@ -142,7 +144,9 @@ function WalletRow({ wallet: w, radar, ticker, decimals }: { wallet: RadarWallet
   const opened = Date.parse(radar.openedAt);
   const when = (iso: string) => {
     const seconds = (Date.parse(iso) - opened) / 1000;
-    return seconds < 0 ? `${span(-seconds)} before the open` : `${span(seconds)} after the open`;
+    if (seconds < 0) return `${span(-seconds)} before the open`;
+    // The chain's clock counts whole seconds: a buy in the open's own second says so rather than "0 s after".
+    return seconds < 1 ? "in the open's first second" : `${span(seconds)} after the open`;
   };
   const asset = (t: RadarTransfer) =>
     t.asset === "SOL" || t.asset === WRAPPED_SOL ? `${sol(t.amount)} SOL` : t.asset === radar.mint ? `${coinAmount(t.amount, decimals)} ${ticker}` : `${t.amount} units of ${shortAddress(t.asset)}`;

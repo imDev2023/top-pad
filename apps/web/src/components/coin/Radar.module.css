@@ -155,8 +155,11 @@
     padding: 12px 14px 14px;
   }
 
+  .evidence {
+    gap: 6px;
+  }
+
   .evidence li {
-    flex-direction: column;
-    gap: 0;
+    gap: 4px 12px;
   }
 }
