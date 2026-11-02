@@ -304,10 +304,20 @@ describe("the image batch", () => {
     const [dead] = await db.select().from(protectedImages).where(eq(protectedImages.url, "https://img.test/dead-1.png"));
     expect(dead).toMatchObject({ status: "failed", attempts: 3, error: "404 Not Found" });
 
+    // A picture that failed for a passing reason is tried once more a day later; an unreadable one never is.
+    await upsertListed(db, "trending", [listed("svg-1", "SVGC")]);
+    vision.byUrl.set("https://img.test/svg-1.png", { error: "SVG images are not supported" });
+    for (let i = 0; i < 3; i++) await signImages(db, env, 60_000);
+    await db.update(protectedImages).set({ triedAt: sql`now() - interval '25 hours'` });
+    vision.byUrl.set("https://img.test/dead-1.png", fakeSignatures("dead-back"));
+    vision.fetched.length = 0;
+    expect(await signImages(db, env, 60_000)).toMatchObject({ signed: 1, failed: 0 });
+    expect(vision.fetched).toEqual(["https://img.test/dead-1.png"]);
+
     // Nothing pending: the Container is not woken.
     const calls = vision.fetched.length;
     expect(await signImages(db, env, 60_000)).toMatchObject({ requests: 0 });
     expect(vision.fetched.length).toBe(calls);
-    expect(vision.slept).toBe(3);
+    expect(vision.slept).toBe(7);
   });
 });

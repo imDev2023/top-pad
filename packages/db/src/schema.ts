@@ -185,6 +185,8 @@ export const protectedImages = pgTable(
     sscd: vector("sscd", { dimensions: 512 }),
     attempts: integer("attempts").notNull().default(0),
     error: text("error"),
+    /** When the vision service last tried it: a picture that failed for a passing reason is tried again a day later. */
+    triedAt: timestamp("tried_at", { withTimezone: true }),
     computedAt: timestamp("computed_at", { withTimezone: true }),
     createdAt: createdAt(),
   },

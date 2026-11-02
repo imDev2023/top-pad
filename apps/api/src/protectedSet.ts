@@ -557,8 +557,13 @@ async function prune(db: Db): Promise<Record<string, number>> {
 
 /** How many images go to the vision service in one request: it fetches about 8 at a time and signs one by one. */
 const IMAGES_PER_REQUEST = 25;
-/** An image that failed this many times is left failed: a dead link, an SVG, a file that is not an image. */
+/**
+ * An image that failed this many times in a row is left failed; one that failed for a passing reason (a refusal, a
+ * limit, a timeout, a server's error) is tried once more each day after, while one the vision service cannot read (an
+ * SVG, a file that is not an image, one too large) never is.
+ */
 const MAX_ATTEMPTS = 3;
+const UNREADABLE = "(SVG|not a PNG|larger than|malformed|not supported|control characters)";
 
 /**
  * The image batch: every protected coin's image not yet signed, most important first (Heat's, trending, organic,
@@ -579,7 +584,8 @@ export async function signImages(db: Db, env: Bindings, budgetMs: number) {
       const untried = tried.length === 0 ? sql`` : sql`and i.url not in (${sql.join(tried.map((t) => sql`${t}`), sql`, `)})`;
       const pending = (await db.execute(sql`
         select i.url from ${protectedImages} i join ${protectedCoins} c on c.image_url = i.url
-        where i.status = 'pending' and c.protected_from <= now() and (c.protected_until is null or c.protected_until > now()) ${untried}
+        where (i.status = 'pending' or (i.status = 'failed' and i.tried_at < now() - interval '1 day' and i.error !~ ${UNREADABLE}))
+          and c.protected_from <= now() and (c.protected_until is null or c.protected_until > now()) ${untried}
         group by i.url
         order by min(case c.source when 'heat' then 0 when 'trending' then 1 when 'organic' then 2 when 'jupiter_verified' then 3 else 4 end),
           max(coalesce((c.details->>'mcap')::float8, 0)) desc
@@ -601,6 +607,7 @@ export async function signImages(db: Db, env: Bindings, budgetMs: number) {
               sscd: r.sscd,
               error: null,
               attempts: sql`${protectedImages.attempts} + 1`,
+              triedAt: sql`now()`,
               computedAt: sql`now()`,
             })
             .where(eq(protectedImages.url, url));
@@ -610,6 +617,7 @@ export async function signImages(db: Db, env: Bindings, budgetMs: number) {
             .update(protectedImages)
             .set({
               attempts: sql`${protectedImages.attempts} + 1`,
+              triedAt: sql`now()`,
               error: r.error.slice(0, 500),
               status: sql`case when ${protectedImages.attempts} + 1 >= ${MAX_ATTEMPTS} then 'failed' else 'pending' end`,
             })

@@ -22,9 +22,10 @@ MAX_BYTES = 5 * 1024 * 1024
 TIMEOUT_SECONDS = 15.0
 MAX_REDIRECTS = 3
 IPFS_GATEWAY = "https://ipfs.io/ipfs/"
-# Asked for an IPFS image when its own gateway refuses or fails it. ipfs.io and dweb.link answer 403 for CIDs on their
-# denylist, and so for about one verified logo in seven on 2026-11-02, which Pinata's public gateway served.
-IPFS_FALLBACK_GATEWAYS = ("https://gateway.pinata.cloud/ipfs/",)
+# Asked in turn for an IPFS image when its own gateway refuses or fails it. ipfs.io, dweb.link, w3s.link and
+# nftstorage.link share a denylist that refused about one verified logo in seven on 2026-11-02; Pinata's public gateway
+# served them, and 4everland's most, when Pinata's own limit answers 429 to a batch.
+IPFS_FALLBACK_GATEWAYS = ("https://gateway.pinata.cloud/ipfs/", "https://4everland.io/ipfs/")
 
 # Some image hosts and CDNs refuse or degrade requests that do not look like a browser's. AVIF is left out of Accept
 # on purpose: the decoder takes PNG, JPEG, GIF and WebP only, and a CDN that negotiates formats would otherwise send AVIF.
