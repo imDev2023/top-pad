@@ -75,6 +75,7 @@ Fair Open is preselected.
 - Vamp Shield checks all three before anything is scheduled (section 6.2): an exact match to a Protected coin is refused, a near match launches with a "looks like X" label.
 - The ticker's strict key is reserved in the database for the life of the deposit window.
   As built ([#47](https://github.com/imDev2023/top-pad/issues/47)): `launches.ticker_key` under a partial unique index, set when a Fair Open is prepared and cleared when its schedule fails or expires unsent, or once the launch has opened or failed and the keeper's Workflow is done; the strict key folds UTS #39 lookalikes, so GL0W holds GLOW's; a creator's own unsigned draft of the same ticker gives way to their next.
+  As built ([#52](https://github.com/imDev2023/top-pad/issues/52)): a Fair Open that opens keeps its key, as a protected Heat coin's (6.2); one that fails gives it back.
 
 **4. Schedule.**
 - The window's start, up to 7 days ahead; the window is a fixed 10 minutes ([Fair Open rules](https://github.com/imDev2023/top-pad/issues/19)).
@@ -549,6 +550,24 @@ Every refusal is our launch key declining to co-sign; nothing on chain refuses a
   108 strict keys are shared among verified tokens, so a dictionary word alone is never protected.
 - **Ticker uniqueness** lives in the database, not on chain: a partial unique index on the strict key covers coins in an open deposit window and protected Heat coins, and a failed launch releases its key; our launch key refuses to co-sign a duplicate.
 - **Appeals** go to the operator queue before launch; relaunches and community takeovers pass by linking the original mint and proving control.
+
+As built ([#52](https://github.com/imDev2023/top-pad/issues/52), 2026-11-02):
+- **The text's near rules** (`nearMatches` in `@top-pad/vamp-shield`): a derivative is a field's core key with BABY, MINI, LIL, INU, KING, CAT or DOG taken off either end, one or more of them, equal to a Protected coin's core key, ticker or name ("Baby Official Pepe" is PEPE's); an edit is a loose key one edit (a change, an addition, a removal, or two neighbours swapped) from the same field's loose key of a Protected coin, looked for only when the launch's key has 5 or more characters, since the research measured the length of the new ticker, not the protected one (BONKK is one edit from BONK).
+  The database finds them by indexed equality on the core keys and by array overlap on each loose key's deletions (`ticker_loose_dels`, `name_loose_dels`, GIN indexes), and `nearMatches` decides.
+- **The image** goes to the vision service (10.2) when the creator picks it, and its signatures are kept by the SHA-256 of its bytes (`image_checks`), so preparing the launch never asks again.
+  PDQ compares each of the image's 8 orientations with every Protected image's unrotated hash and SSCD its embedding, each through its HNSW index searched 100 wide (`hnsw.ef_search`); a hash of PDQ quality under 50, on either side, is not compared, as Meta advises (`judgeImage`).
+  A refusal names the protected coin and how the copy was made ("mirrored", "rotated a quarter turn"); an image the vision service cannot check refuses the launch, since our launch key never co-signs an unchecked image.
+- **Labels**: a near ticker, name or image launches with "Looks like $X", kept with the launch (`launches.looks_like`) and shown on the coin page, where the flag opens the reason and links the protected coin, and on the creator's coin rows; the board's rows ([#57](https://github.com/imDev2023/top-pad/issues/57)) take the same field.
+- **The log** (`vamp_checks`): every refusal and label as a launch is prepared, and every image the launch flow checks with its five nearest Protected images' PDQ distances and SSCD similarities, whatever the outcome, which is what re-measuring the thresholds needs.
+- **Appeals**: a refusal links to `/appeal`, where the creator, signed in with X, names the original and says why; it lands in `vamp_appeals` for the operator queue ([#54](https://github.com/imDev2023/top-pad/issues/54)), at most 5 a day per creator.
+- **The protected set** (`apps/api/src/protectedSet.ts`), refreshed by the minute's Cron Trigger:
+  - every minute, Jupiter's `toporganicscore/5m` and `toptrending/1h` (100 each), a coin with an organic score of 50 or more protected for 72 hours from its last sighting;
+  - at minute 2 of each hour, Jupiter's verified list whole (a coin it drops lapses, unless the answer is under 80% of the set, which lapses nothing), its organic lists (`toporganicscore/24h` and `/1h`, `toptraded/24h`: organic score 50 or more, 1,000 holders, $250,000 of market cap, off any bonding curve), protected only once a coin has qualified for 12 hours and until 7 days after it last did; CoinGecko's top 1,000 once a day, keyless, each kept 48 hours after it was last listed; Heat's coins; and rows folded under an older `FOLD_VERSION` folded again;
+  - then the images not yet signed, Heat's first, then trending, organic, verified and CoinGecko's by market cap, sent to the vision service 25 at a time for up to 10 minutes, after which the Container is stopped at once;
+  - Jupiter is read with the owner's key (`top-pad-devnet-jupiter-key` in Secrets Store), and keyless once more when the organisation's shared bucket answers 429.
+- **Heat's own coins**: a Fair Open's coin is protected as the keeper's Workflow finishes, and an Instant coin once it has 100 holders, counted only for coins traded in the last two hours; a protected coin's activity is read once a day, and 7 days below the bar lapse it (on devnet Jupiter gives no organic score, so holders alone decide).
+  A protected Heat coin holds its ticker's strict key in the unique index (`launches.ticker_key`): a Fair Open keeps the key it reserved from its open, an Instant coin takes it when it is protected unless a Fair Open in its window holds it, and a lapse gives it back; the cron's sweep now reads `launches.keeper_done_at` to know a Fair Open's Workflow is done.
+  Every devnet test that schedules a Fair Open therefore protects its coin's ticker, name and picture for a week: the UI specs draw a picture and a name of their own per run.
 
 ### 6.3 Fair Open admission
 

@@ -68,6 +68,7 @@ export function VampVerdict({
       {!settled && !refusal && (
         <span className="note">Your ticker, name and image are checked against every protected coin before anything is signed.</span>
       )}
+      {settled && !near && !refused && !refusal && <span className="note">No protected coin matches this ticker, name or image.</span>}
       {near && !refused && !refusal && (
         <span className="note">Close to a protected coin, not a copy of one: it can launch, and its page and rows say what it looks like.</span>
       )}
