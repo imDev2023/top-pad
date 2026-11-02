@@ -5,3 +5,4 @@ export * from "./fairOpen";
 export * from "./health";
 export * from "./jobs";
 export * from "./launch";
+export * from "./trade";

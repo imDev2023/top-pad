@@ -32,6 +32,7 @@ import { sameOriginWrites, withConfig, withDb, type AppEnv } from "./http";
 import { checkKeeperFloat } from "./keeper";
 import { getLaunch, prepareLaunch, submitLaunch } from "./launches";
 import { IMAGE_TYPES } from "./metadata";
+import { getHoldings, prepareSwap, quote, reportTrade } from "./trading";
 import { checkRoute } from "./vampShield";
 import { sweepWindowClaims } from "./windowClaims";
 
@@ -121,6 +122,10 @@ app.post("/launches/:id/renew", renewFairOpen);
 app.get("/coins/:mint", getCoin);
 app.get("/coins/:mint/trades", getCoinTrades);
 app.get("/coins/:mint/candles", getCoinCandles);
+app.get("/coins/:mint/holdings/:wallet", getHoldings);
+app.post("/coins/:mint/quote", quote);
+app.post("/coins/:mint/swap", prepareSwap);
+app.post("/coins/:mint/trades", reportTrade);
 app.get("/earnings/:wallet", getEarnings);
 app.post("/earnings/claims", reportClaim);
 app.post("/earnings/:wallet/claim", prepareClaim);

@@ -83,3 +83,25 @@ export async function sendAndConfirm(rpc: Rpc, wire: Base64EncodedWireTransactio
   await sendWire(rpc, wire, o);
   return confirmed(rpc, signature, o.timeoutMs);
 }
+
+export type Settled = { status: "landed" | "failed" | "pending"; error: string | null };
+
+/**
+ * Where sent transactions stand, asked every `pollMs` until each has confirmed or failed or `waitMs` has passed: a
+ * transaction still `pending` then may yet land, and its signature tells.
+ */
+export async function settleSignatures(rpc: Rpc, signatures: string[], waitMs: number, pollMs = 1_000): Promise<Map<string, Settled>> {
+  const until = Date.now() + waitMs;
+  const outcome = new Map<string, Settled>();
+  for (;;) {
+    const { value } = await rpc.getSignatureStatuses(signatures as Signature[], { searchTransactionHistory: true }).send(limited());
+    value.forEach((status, i) => {
+      if (status?.err) outcome.set(signatures[i]!, { status: "failed", error: json(status.err) });
+      else if (status?.confirmationStatus === "confirmed" || status?.confirmationStatus === "finalized") outcome.set(signatures[i]!, { status: "landed", error: null });
+    });
+    if (outcome.size === signatures.length || Date.now() > until) break;
+    await sleep(pollMs);
+  }
+  for (const signature of signatures) if (!outcome.has(signature)) outcome.set(signature, { status: "pending", error: null });
+  return outcome;
+}

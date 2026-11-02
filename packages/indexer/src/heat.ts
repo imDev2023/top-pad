@@ -72,6 +72,12 @@ export function orderKey(slot: number, blockIndex: number, eventIndex: number): 
   return (BigInt(slot) * 10n ** 10n + BigInt(blockIndex) * 10n ** 4n + BigInt(eventIndex)).toString();
 }
 
+/**
+ * A trade's order key before its place in the block is known: the end of its slot. What the browser's fast path shows a
+ * trade with the moment it confirms (spec 10.2), until the indexer reports it with its real key.
+ */
+export const provisionalOrderKey = (slot: number, eventIndex: number) => orderKey(slot, BLOCK_INDEX_LIMIT - 1, eventIndex);
+
 /** The handler the ingestion entry point runs on Heat's transactions. */
 export function heatHandler({ heat, blockIndexOf, onIndexed }: HeatHandlerOptions): TransactionHandler {
   if (!heat.configs) throw new Error("the indexer needs Heat's configs on its cluster");

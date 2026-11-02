@@ -9,7 +9,6 @@ import {
   getBase64Encoder,
   type Address as KitAddress,
   type Base58EncodedBytes,
-  type Signature,
 } from "@solana/kit";
 import { eq, inArray, sql } from "drizzle-orm";
 import type { Context } from "hono";
@@ -30,6 +29,7 @@ import { decodeTransaction, fetchRawTransaction } from "@top-pad/indexer";
 import { explorerUrl } from "./env";
 import type { AppEnv } from "./http";
 import { indexNow } from "./indexing";
+import { settleSignatures } from "./send";
 
 const RPC_TIMEOUT_MS = 15_000;
 const limited = () => ({ abortSignal: AbortSignal.timeout(RPC_TIMEOUT_MS) });
@@ -190,16 +190,7 @@ export async function reportClaim(c: Context<AppEnv>) {
   const rpc = createSolanaRpc(cfg.rpcUrl);
 
   const until = Date.now() + SETTLE_WAIT_MS;
-  const outcome = new Map<string, { status: "landed" | "failed" | "pending"; error: string | null }>();
-  for (;;) {
-    const { value } = await rpc.getSignatureStatuses(signatures as Signature[], { searchTransactionHistory: true }).send(limited());
-    value.forEach((status, i) => {
-      if (status?.err) outcome.set(signatures[i]!, { status: "failed", error: JSON.stringify(status.err, (_, v) => (typeof v === "bigint" ? `${v}` : v)) });
-      else if (status?.confirmationStatus === "confirmed" || status?.confirmationStatus === "finalized") outcome.set(signatures[i]!, { status: "landed", error: null });
-    });
-    if (outcome.size === signatures.length || Date.now() > until) break;
-    await sleep(1_000);
-  }
+  const outcome = await settleSignatures(rpc, signatures, SETTLE_WAIT_MS);
   const landed = signatures.filter((s) => outcome.get(s)?.status === "landed");
   c.executionCtx.waitUntil(indexNow(c.env, landed));
 
