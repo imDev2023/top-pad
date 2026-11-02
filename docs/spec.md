@@ -373,6 +373,11 @@ As built ([#44](https://github.com/imDev2023/top-pad/issues/44), 2026-10-29):
 - A claim takes the most it may claim, so a creator's page pays exactly the figure it showed while fees keep accruing, and a claim sent twice pays nothing twice.
 - On devnet the keeper's window claims landed 1 s after the minute ended by the chain's clock; one sent 3 s late in `tests/devnet` moved exactly one late trade's normal fee, 500,000 lamports.
 
+As built ([#43](https://github.com/imDev2023/top-pad/issues/43), 2026-11-02):
+- Heat's referral account is the treasury's associated quote account, where its Platform Fee lands too, so one treasury still receives everything Heat earns.
+- Every swap Heat's site builds names it, and DBC pays it a fifth of Meteora's fifth of the fee: 0.05% of a trade at 1.25%, and 4% of the sniper tax inside the Tax window, out of Meteora's share, never the creator's, the depositors' or the trader's.
+- On devnet every quick trade paid it to the lamport its event recorded (`tests/devnet/src/quick-trade.test.ts`).
+
 ## 5. On-chain programs
 
 Sources: [Our Fair Open program](https://github.com/imDev2023/top-pad/issues/28), [ADR 0006](adr/0006-a-fee-program-and-a-fair-open-program.md), [Fair Open creation transaction on devnet](https://github.com/imDev2023/top-pad/issues/31), [Launch liquidity](https://github.com/imDev2023/top-pad/issues/30), [Stack](https://github.com/imDev2023/top-pad/issues/17).
@@ -620,6 +625,11 @@ The screens:
    Until the open is built ([#46](https://github.com/imDev2023/top-pad/issues/46)) the page says every devnet Fair Open fails 15 minutes after its open.
 3. **Coin page**: name, ticker, mint, price, market cap, holders; the flags strip and Fairness card; the tax band during the first minute; the chart (TradingView Lightweight Charts v5, 1 s, 15 s and coarser candles); the graduation bar to 85 SOL; quick buy showing the fee before signing; trades with the fee each paid, the labelled keeper's pot buy pinned; banners for a confirmed bundle, a Meteora-paused pool, or "Not launched through Heat".
    As built ([#42](https://github.com/imDev2023/top-pad/issues/42)): the chart plots the market cap in SOL, the price times the fixed supply, so its axis reads like the header; a trade's fee shows yellow inside the tax's minute and red above half the trade.
+   As built ([#43](https://github.com/imDev2023/top-pad/issues/43)): quick trade sits beside the chart above the coin's facts, and above the chart on a phone; a buy spends SOL and a sell spends the coin, with preset amounts and shares, and before signing it shows the fee, yellow as "Sniper tax" inside the minute, what the trade gets and the least it may get at the slippage chosen (0.5%, 1% or 3%).
+   The API's quote gives the fee for every second left in the tax, so the panel's figure falls with the chain's clock without asking again; it shows the second the trade would land in, learning from the page's own trades how long that takes (2 s until it has seen one).
+   On the deployed site the fee shown before signing was within one 1-second step of what the chain charged on every trade, and exact on most.
+   A trade's minimum is set by the fee of two seconds before the quote's clock, since a wallet's own node may simulate it that far behind, where the tax is higher: without that, the public devnet endpoint's preflight refused a buy.
+   Quick trade is built only for Heat coins; a pool made around Heat's flow gets none.
 4. **Launch flow**: link X; Fair Open (preselected) or Instant launch; the coin with live Vamp Shield verdicts (clear, "looks like X", refused with an appeal link); schedule (time up to 7 days ahead, minimum raise, teaser, about 0.03 SOL refundable rent); sign; done.
    As built ([#47](https://github.com/imDev2023/top-pad/issues/47)): `/launch` walks a Fair Open through Link X, Launch mode, Coin, Schedule, Sign and Done; the schedule starts now or later (a local date and time, up to 7 days ahead), with the coin's open time beside it, the calendar entry previewed live, and refusals said as typed; signing is one button, "Sign your open in advance", with the 64 rungs behind a details link and the fallback beside them; Done says when the coin opens and, after the fallback, when to come back. The Fair Open's page shows the creator who signs at the open a panel that asks for that one signature once the window closes.
 5. **Creator record**: the facts in section 7, Creator wallet history, the verified-human and verified-creator marks, Creator Earnings from both sources with one claim, and for a barred Creator the banner, evidence pack and appeal history; the accused creator's private 72-hour view with a reply box.
@@ -669,7 +679,7 @@ Sources: [Stack](https://github.com/imDev2023/top-pad/issues/17), [Backend desig
 | Programs | Anchor 1.2.1 |
 | Metadata | Arweave through Turbo |
 | Charts | TradingView Lightweight Charts v5 |
-| Trading | direct swaps on our pools built by our server, earning Meteora's referral share; Jupiter Swap v2 for routing beyond them; Titan later as a second quote |
+| Trading | direct swaps on our pools built by our server, earning Meteora's referral share; Jupiter Swap v2 for routing beyond them; Titan later as a second quote. As built (#43): the quote is DBC's own maths from its SDK's `math` entry, in `@top-pad/meteora/quote`, matching 45 recorded devnet swaps to the raw unit; it brings web3.js into the API Worker for the SDK's constants, about 130 KiB gzipped |
 | Copied from Stoker | `packages/arweave` (308 lines), the job runner (87), the indexer (337) and the test wallet (126), each copied file headed with Stoker commit `43e196b` |
 
 ### 10.2 Components and data flow
@@ -680,6 +690,9 @@ Sources: [Stack](https://github.com/imDev2023/top-pad/issues/17), [Backend desig
 
   Switching sources changes only the entry point, never the decoding or the tables.
   The browser's fast path reports a confirmed trade so it shows at once.
+  As built ([#43](https://github.com/imDev2023/top-pad/issues/43)): the page sends the trade's signature to `POST /coins/<mint>/trades`, which waits for it to confirm, asking every 300 ms, reads it back as soon as it is served, answers with the trade, its order key provisional at the end of its slot, and hands it to the indexer.
+  The page shows that trade at once and lets the indexer's report replace it in place, one row whichever arrives first.
+  Locally the indexer's socket often wins; on the deployed site the fast path showed every one of four trades first, since the indexer also waits on the block's order and the database.
   No webhooks: they carry no in-block position, can lose an event after 3 failed retries, and take minutes to watch a new address.
 
   As built on devnet ([#42](https://github.com/imDev2023/top-pad/issues/42), 2026-10-29): the indexer is one Durable Object in the API Worker.
