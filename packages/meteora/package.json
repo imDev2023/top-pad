@@ -2,12 +2,16 @@
   "name": "@top-pad/meteora",
   "private": true,
   "type": "module",
-  "exports": { ".": "./src/index.ts" },
+  "exports": {
+    ".": "./src/index.ts",
+    "./quote": "./src/quote.ts"
+  },
   "scripts": {
     "typecheck": "tsc -p .",
     "test": "vitest run",
     "idls": "tsx scripts/export-idls.ts",
-    "configs": "tsx scripts/create-configs.ts"
+    "configs": "tsx scripts/create-configs.ts",
+    "swap-fixtures": "tsx scripts/swap-fixtures.ts"
   },
   "dependencies": {
     "@meteora-ag/cp-amm-sdk": "1.5.1",
@@ -16,11 +20,12 @@
     "@solana/kit": "^8.5.0",
     "@solana/web3.js": "^1.99.0",
     "@top-pad/chain": "workspace:*",
-    "@top-pad/clients": "workspace:*"
+    "@top-pad/clients": "workspace:*",
+    "bn.js": "^5.2.2"
   },
   "devDependencies": {
+    "@types/bn.js": "5.2.0",
     "@types/node": "^24.19.2",
-    "bn.js": "^5.2.2",
     "vitest": "^5.0.5"
   }
 }
