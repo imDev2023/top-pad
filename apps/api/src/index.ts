@@ -11,6 +11,7 @@ import { createDb, launches, probe, sessions, xAuthorizations, type Db } from "@
 import { pruneCandles } from "@top-pad/indexer";
 import { notifyPending, runJob } from "@top-pad/jobs";
 import { finishXLink, logout, me, startXLink } from "./auth";
+import { getCoinRadar, reviewBundles } from "./bundleRadar";
 import { getCoin, getCoinCandles, getCoinTrades } from "./coins";
 import { getEarnings, prepareClaim, reportClaim } from "./earnings";
 import { reclaimUnscheduled, sweepFairOpens } from "./fairOpenKeeper";
@@ -123,6 +124,7 @@ app.post("/launches/:id/renew", renewFairOpen);
 app.get("/coins/:mint", getCoin);
 app.get("/coins/:mint/trades", getCoinTrades);
 app.get("/coins/:mint/candles", getCoinCandles);
+app.get("/coins/:mint/radar", getCoinRadar);
 app.get("/coins/:mint/holdings/:wallet", getHoldings);
 app.post("/coins/:mint/quote", quote);
 app.post("/coins/:mint/swap", prepareSwap);
@@ -172,7 +174,8 @@ async function housekeeping(db: Db, env: Bindings) {
 
 /**
  * The Cron Trigger: the indexer kept running, the keeper's float, any window claim, Fair Open or Graduation the keeper's
- * Workflows missed, Heat's LP fees once an hour, housekeeping, then every open alert to the operator.
+ * Workflows missed, Bundle Radar's case job, Heat's LP fees once an hour, housekeeping, then every open alert to the
+ * operator.
  */
 async function scheduled(_controller: ScheduledController, env: Bindings, ctx: ExecutionContext) {
   const cfg = config(env);
@@ -188,6 +191,8 @@ async function scheduled(_controller: ScheduledController, env: Bindings, ctx: E
     await runJob(db, "window-claims", () => sweepWindowClaims(db, env), { exclusive: true }).catch(() => undefined);
     await runJob(db, "fair-opens", () => sweepFairOpens(db, env), { exclusive: true }).catch(() => undefined);
     await runJob(db, "graduations", () => sweepGraduations(db, env), { exclusive: true }).catch(() => undefined);
+    // Bundle Radar's case job: each coin an hour after its open, then hourly through its 7 days (spec 6.5, 10.2).
+    await runJob(db, "bundle-radar", () => reviewBundles(db, env), { exclusive: true }).catch(() => undefined);
     // Heat's LP fees, once an hour: the first run of each hour.
     if (new Date(_controller.scheduledTime).getUTCMinutes() < 5) {
       await runJob(db, "lp-fees", () => claimHeatLpFees(db, env), { exclusive: true }).catch(() => undefined);

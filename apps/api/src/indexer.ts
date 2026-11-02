@@ -14,11 +14,15 @@ import {
   fetchRawTransaction,
   heatHandler,
   indexTransactions,
+  jitoApi,
   logsSubscribeRequest,
   parseLogsMessage,
   reconcileAccount,
+  refreshRadar,
+  rpcFundingSource,
   rpcSource,
   type Indexed,
+  type RadarSources,
   type RawTransaction,
   type TransactionHandler,
 } from "@top-pad/indexer";
@@ -38,6 +42,13 @@ const FETCH_WAIT_MS = 8_000;
  * 2026-10-29), so a steady short wait finds it as soon as it is there, where a doubling one found it up to a second late.
  */
 const FETCH_EVERY_MS = 300;
+/**
+ * The most transactions one live Bundle Radar refresh reads of a Creator wallet's history: a fresh wallet's whole window
+ * fits, and a busy one is read on by the case job, so the indexer never floods the RPC it shares with launches.
+ */
+const LIVE_RADAR_READS = 40;
+/** How recent a launch or buy must be for the indexer to refresh Bundle Radar live; older ones are the case job's. */
+const LIVE_RADAR_RECENT_MS = 10 * 60_000;
 
 /** `GET /indexer`. */
 export type IndexerStatus = {
@@ -62,6 +73,14 @@ export class Indexer extends DurableObject<Bindings> {
   private reconciledAt = 0;
   private lastError: string | null = null;
   private handle: TransactionHandler | null = null;
+  /** A transaction's place in its block, its blocks cached: the handler's and Bundle Radar's. */
+  private blockIndexOf: ((slot: number, signature: string) => Promise<number>) | null = null;
+  /**
+   * Coins whose Bundle Radar is to be brought up to date (spec 6.4), each with its earliest buy that asked, or none for a
+   * launch; and the run doing it.
+   */
+  private radarDue = new Map<string, Date | undefined>();
+  private radarRunning: Promise<void> | null = null;
   /** Where reconciliation stands on each account, read from Postgres once per instance, then kept here. */
   private cursors = new Map<string, string | null>();
   /**
@@ -97,14 +116,69 @@ export class Indexer extends DurableObject<Bindings> {
     this.socket?.send(logsSubscribeRequest(this.watching().length, pool));
   }
 
+  private positions() {
+    this.blockIndexOf ??= blockPositions(config(this.env).rpcUrl);
+    return this.blockIndexOf;
+  }
+
   private handler(): TransactionHandler {
     const cfg = config(this.env);
     this.handle ??= heatHandler({
       heat: cfg.heat!,
-      blockIndexOf: blockPositions(cfg.rpcUrl),
+      blockIndexOf: this.positions(),
       onIndexed: (indexed) => this.publish(indexed),
     });
     return this.handle;
+  }
+
+  /**
+   * Bundle Radar's labels within seconds (spec 6.4, 10.2): when a coin launches or is bought, its Creator wallet's
+   * funding window is read on from where it stood, so a wallet the creator funded is linked the moment it buys, and the
+   * coin's room is told to read its labels again. Runs beside indexing, never in its way; a failure is left to the next
+   * buy and to the case job, which reads the window itself.
+   */
+  private refreshRadarOf(asks: [mint: string, boughtAt: Date | undefined][]) {
+    for (const [mint, at] of asks) {
+      const due = this.radarDue.get(mint);
+      this.radarDue.set(mint, !this.radarDue.has(mint) || !at || (due && at < due) ? at : due);
+    }
+    this.radarRunning ??= this.radarRun().finally(() => (this.radarRunning = null));
+  }
+
+  private async radarRun() {
+    const cfg = config(this.env);
+    const sources: RadarSources = { funding: rpcFundingSource(cfg.rpcUrl), blockIndexOf: this.positions(), jito: cfg.cluster === "mainnet" ? jitoApi() : null };
+    while (this.radarDue.size) {
+      const batch = [...this.radarDue];
+      this.radarDue.clear();
+      const { db, close } = createDb(this.env.HYPERDRIVE.connectionString);
+      try {
+        for (const [mint, boughtAt] of batch) {
+          try {
+            const refreshed = await refreshRadar(db, sources, mint, { boughtAt, maxReads: LIVE_RADAR_READS, recentMs: LIVE_RADAR_RECENT_MS });
+            if (refreshed) await this.send(new Map([[`coin:${mint}`, [{ type: "radar", mint }]]]));
+          } catch (e) {
+            this.failed(`bringing Bundle Radar up to date on ${mint}`, e);
+          }
+        }
+      } finally {
+        await close();
+      }
+    }
+  }
+
+  /** Sends each room its events. */
+  private async send(events: Map<string, LiveEvent[]>) {
+    const rooms = this.env.LIVE_ROOMS;
+    if (!rooms) return;
+    await Promise.all(
+      [...events].map(([room, batch]) =>
+        rooms
+          .get(rooms.idFromName(room))
+          .publish(batch)
+          .catch((e) => console.error(`publishing to ${room} failed`, e)),
+      ),
+    );
   }
 
   /**
@@ -269,8 +343,10 @@ export class Indexer extends DurableObject<Bindings> {
     // A curve that completed graduates through the keeper's Workflow, which leaves alone a coin that is not Heat's.
     for (const c of curveCompletes) await startGraduation(this.env, c.mint).catch((e) => console.error(`starting the Graduation of ${c.mint} failed`, e));
     for (const g of graduated) this.watchGraduated(g.pool);
-    const rooms = this.env.LIVE_ROOMS;
-    if (!rooms) return;
+    // A coin launched or bought: Bundle Radar reads on (its coin's room hears once it has).
+    const radar: [string, Date | undefined][] = [...coins.map((c): [string, undefined] => [c.mint, undefined]), ...trades.filter((t) => t.side === "buy").map((t): [string, Date] => [t.mint, t.at])];
+    if (radar.length) this.refreshRadarOf(radar);
+    if (!this.env.LIVE_ROOMS) return;
     const events = new Map<string, LiveEvent[]>();
     const add = (room: string, event: LiveEvent) => events.set(room, [...(events.get(room) ?? []), event]);
     for (const pool of pools) {
@@ -311,13 +387,6 @@ export class Indexer extends DurableObject<Bindings> {
     for (const e of seatEvents) fairOpen(e.launch, e.kind);
     for (const end of fairOpenEnds) fairOpen(end.launch, end.kind);
     for (const x of taxShares) fairOpen(x.launch, "tax_share_collected");
-    await Promise.all(
-      [...events].map(([room, batch]) =>
-        rooms
-          .get(rooms.idFromName(room))
-          .publish(batch)
-          .catch((e) => console.error(`publishing to ${room} failed`, e)),
-      ),
-    );
+    await this.send(events);
   }
 }
