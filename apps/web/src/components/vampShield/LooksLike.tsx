@@ -3,6 +3,7 @@
 // Vamp Shield's "looks like X" label (spec 6.2, 9): a coin launched close to a protected coin, a derivative or a near
 // copy, carries a yellow flag on its rows and its page, so traders can tell the two apart. The page's flag opens why.
 import type { LooksLike } from "@top-pad/contract";
+import { CoinThumb } from "./CoinThumb";
 import styles from "./LooksLike.module.css";
 
 /**
@@ -61,13 +62,7 @@ export function LooksLikePanel({ labels, open, id }: { labels: LooksLike[]; open
         {coins.map(({ label, reasons }) => (
           <li key={label.label} className={styles.item}>
             <a className={styles.coin} href={label.coin.url} target="_blank" rel="noreferrer">
-              {label.coin.imageUrl ? (
-                <img src={label.coin.imageUrl} alt="" width={32} height={32} referrerPolicy="no-referrer" loading="lazy" />
-              ) : (
-                <span className={styles.initials} aria-hidden="true">
-                  {(label.coin.ticker || label.coin.name).replace(/^\$/, "").slice(0, 2).toUpperCase()}
-                </span>
-              )}
+              <CoinThumb coin={label.coin} size={32} initialsClassName={styles.initials} />
               <span className={styles.coinText}>
                 <span>{label.coin.name}</span>
                 <span className="note">{label.label}</span>

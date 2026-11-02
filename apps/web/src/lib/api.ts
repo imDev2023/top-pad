@@ -117,6 +117,9 @@ export function checkImage(image: Blob, imageName: string, signal?: AbortSignal)
   return call(ImageVerdict, "/vamp-shield/image", { method: "POST", body, signal });
 }
 
+/** The signed-in creator's own latest verdict on an image, by its hash. */
+export const getImageVerdict = (sha256: string) => call(ImageVerdict, `/vamp-shield/image/${sha256}`);
+
 /** A creator's appeal against Vamp Shield's refusal, to the operator queue (spec 6.6). */
 export const submitAppeal = (form: VampAppealForm) =>
   call(VampAppeal, "/vamp-shield/appeals", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(form) });

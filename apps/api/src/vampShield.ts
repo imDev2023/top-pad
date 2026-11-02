@@ -4,10 +4,11 @@
 // coins' with its HNSW indexes before `judgeImage` decides. An exact match refuses, which is our launch key declining to
 // co-sign; a near one launches with a "looks like X" label. Every refusal and label at preparing, and every image the
 // launch flow checks, goes into the log (`vamp_checks`) so the thresholds can be measured again.
-import { and, arrayOverlaps, desc, eq, gt, gte, inArray, isNull, lte, or, sql, type SQL } from "drizzle-orm";
+import { and, arrayOverlaps, desc, eq, gt, gte, inArray, isNull, lte, ne, or, sql, type SQL } from "drizzle-orm";
 import type { Context } from "hono";
 import {
   LooksLike as LooksLikeShape,
+  ProtectedMatch as ProtectedMatchShape,
   VampAppealForm,
   VampShieldCheck,
   type FieldVerdict,
@@ -399,10 +400,38 @@ export async function checkImageRoute(c: Context<AppEnv>) {
     creatorId: creator.id,
     imageSha256: check.sha256,
     outcome: check.verdict.status,
-    matches: check.verdict.match ? [{ field: "image", rule: check.judgement.verdict === "refused" ? check.judgement.by : "sscd", coin: check.verdict.match }] : [],
+    matches: check.verdict.match
+      ? [{ field: "image", rule: check.judgement.verdict === "refused" ? check.judgement.by : "sscd", status: check.verdict.status, coin: check.verdict.match, reason: check.verdict.reason }]
+      : [],
     nearest: scoresOf(check.nearest),
   });
   const answer: ImageVerdict = { sha256: check.sha256, verdict: check.verdict, answerMs: check.answerMs, woke: check.woke };
+  return c.json(answer);
+}
+
+/**
+ * `GET /vamp-shield/image/:sha256`: the signed-in creator's own latest verdict on an image, by its hash, as its check
+ * or its launch logged it; the appeal page shows what was refused without the image itself.
+ */
+export async function imageVerdictRoute(c: Context<AppEnv>) {
+  const creator = await sessionCreator(c);
+  if (!creator) return refuse(c, 401, { error: "Link your X account first.", code: "not_linked" });
+  const sha256 = c.req.param("sha256")!;
+  if (!/^[0-9a-f]{64}$/.test(sha256)) return c.json({ error: "That is not an image's SHA-256." }, 400);
+  const [row] = await c.var.db
+    .select({ outcome: vampChecks.outcome, matches: vampChecks.matches })
+    .from(vampChecks)
+    .where(and(eq(vampChecks.creatorId, creator.id), eq(vampChecks.imageSha256, sha256), ne(vampChecks.outcome, "unchecked")))
+    .orderBy(desc(vampChecks.at))
+    .limit(1);
+  if (!row) return c.json({ error: "You have not checked that image." }, 404);
+  const entry = (row.matches as { field?: string; status?: FieldVerdict["status"]; coin?: unknown; reason?: string | null }[]).find((m) => m.field === "image");
+  const parsed = entry ? ProtectedMatchShape.safeParse(entry.coin) : null;
+  const verdict: FieldVerdict =
+    entry && parsed?.success
+      ? { status: entry.status ?? (row.outcome === "clear" ? "clear" : row.outcome === "looks_like" ? "looks_like" : "refused"), reason: entry.reason ?? null, match: parsed.data }
+      : clear;
+  const answer: ImageVerdict = { sha256, verdict, answerMs: null, woke: null };
   return c.json(answer);
 }
 

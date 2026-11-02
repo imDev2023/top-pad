@@ -7,6 +7,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { FieldVerdict, ImageVerdict, LaunchRefusal, ProtectedMatch, VampShieldVerdict } from "@top-pad/contract";
+import { CoinThumb } from "../vampShield/CoinThumb";
 import styles from "./Launch.module.css";
 
 /** Where the image's check stands. */
@@ -133,17 +134,11 @@ function CheckRow({
 }
 
 /** The protected coin a verdict names: its picture, where it is protected from, and a link to it. */
-function Matched({ match }: { match: ProtectedMatch }) {
+export function Matched({ match }: { match: ProtectedMatch }) {
   const source = { jupiter_verified: "Verified on Jupiter", organic: "Real trading on Solana", trending: "Trending on Jupiter", coingecko_top: "CoinGecko top 1,000", heat: "A Heat coin" }[match.source];
   return (
     <a className={styles.matched} href={match.url} target="_blank" rel="noreferrer">
-      {match.imageUrl ? (
-        <img src={match.imageUrl} alt="" width={28} height={28} referrerPolicy="no-referrer" loading="lazy" />
-      ) : (
-        <span className={styles.matchedInitials} aria-hidden="true">
-          {(match.ticker || match.name).replace(/^\$/, "").slice(0, 2).toUpperCase()}
-        </span>
-      )}
+      <CoinThumb coin={match} size={28} initialsClassName={styles.matchedInitials} />
       <span className={styles.matchedText}>
         <span>
           {match.name} <span className="mono">{coinLabel(match)}</span>

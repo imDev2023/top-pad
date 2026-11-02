@@ -150,6 +150,11 @@ describe("Vamp Shield's image verdicts", () => {
     expect(logged).toMatchObject({ stage: "image", outcome: "refused" });
     expect(logged!.nearest).toContainEqual(expect.objectContaining({ mint: BONK.mint, pdqDistance: 10, orientation: 5 }));
 
+    // The creator's own verdict on it, by its hash, for the appeal page; nobody else's.
+    const own = await request(`/vamp-shield/image/${verdict.sha256}`, { headers: { cookie: checker! } });
+    expect(ImageVerdict.parse(await own.json()).verdict).toEqual(verdict.verdict);
+    expect((await request(`/vamp-shield/image/${verdict.sha256}`, { headers: { cookie: await linkX() } })).status).toBe(404);
+
     // Checked again, its signatures come from the first check: the vision service is not asked twice.
     const again = ImageVerdict.parse(await (await checkImage(mirrored)).json());
     expect(again).toMatchObject({ answerMs: null, woke: null, verdict: { status: "refused" } });

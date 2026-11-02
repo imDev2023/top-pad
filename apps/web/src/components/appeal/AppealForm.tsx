@@ -5,9 +5,9 @@
 // passes by linking the original. Until an appeal is upheld, the coin as refused cannot launch.
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import type { Me, VampAppeal, VampShieldVerdict } from "@top-pad/contract";
-import { checkVampShield, getAppeals, getMe, linkXUrl, submitAppeal } from "@/lib/api";
-import { coinLabel } from "../launch/VampVerdict";
+import type { FieldVerdict, ImageVerdict, Me, VampAppeal, VampShieldVerdict } from "@top-pad/contract";
+import { checkVampShield, getAppeals, getImageVerdict, getMe, linkXUrl, submitAppeal } from "@/lib/api";
+import { coinLabel, Matched } from "../launch/VampVerdict";
 import styles from "./Appeal.module.css";
 
 const STATUS = { open: { tone: "info", text: "Open" }, upheld: { tone: "go", text: "Upheld" }, denied: { tone: "stop", text: "Denied" } } as const;
@@ -15,6 +15,7 @@ const STATUS = { open: { tone: "info", text: "Open" }, upheld: { tone: "go", tex
 export function AppealForm({ ticker, name, imageSha256 }: { ticker: string; name: string; imageSha256: string | null }) {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
   const [verdict, setVerdict] = useState<VampShieldVerdict | null>(null);
+  const [image, setImage] = useState<ImageVerdict | null>(null);
   const [appeals, setAppeals] = useState<VampAppeal[] | null>(null);
   const [original, setOriginal] = useState("");
   const [message, setMessage] = useState("");
@@ -28,12 +29,20 @@ export function AppealForm({ ticker, name, imageSha256 }: { ticker: string; name
       .then((m) => {
         setMe(m);
         if (m) getAppeals().then((a) => setAppeals(a.appeals), () => setAppeals([]));
+        if (m && imageSha256) getImageVerdict(imageSha256).then(setImage, () => undefined);
       })
       .catch(() => setMe(null));
     if (ticker || name) checkVampShield(ticker, name).then(setVerdict, () => undefined);
-  }, [ticker, name]);
+  }, [ticker, name, imageSha256]);
 
-  const refusedOn = verdict ? [verdict.verdicts.ticker, verdict.verdicts.name].find((v) => v.status === "refused" && v.match) : undefined;
+  // Every part Vamp Shield refused, with the coin it matched: the ticker and the name as they read now, the image as it
+  // was judged when it was checked.
+  const parts: [string, FieldVerdict | undefined][] = [
+    ["Ticker", verdict?.verdicts.ticker],
+    ["Name", verdict?.verdicts.name],
+    ["Image", image?.verdict],
+  ];
+  const refusals = parts.filter((r): r is [string, FieldVerdict] => r[1]?.status === "refused");
 
   async function send() {
     setSending(true);
@@ -71,15 +80,18 @@ export function AppealForm({ ticker, name, imageSha256 }: { ticker: string; name
           </div>
           <div>
             <dt>Image</dt>
-            <dd>{imageSha256 ? <span className="mono">{imageSha256.slice(0, 12)}…</span> : "Not refused"}</dd>
+            <dd>{imageSha256 ? (image ? (image.verdict.status === "refused" ? "Refused" : "Not refused") : "Reading its check…") : "Not refused"}</dd>
           </div>
         </dl>
-        {refusedOn?.match && (
-          <div className="verdict verdict-stop">
-            <b>Refused: copies {coinLabel(refusedOn.match)}</b>
-            <span className="note">{refusedOn.reason}</span>
+        {refusals.map(([field, v]) => (
+          <div key={field} className={`verdict verdict-stop ${styles.refusal}`} data-testid={`appeal-refused-${field.toLowerCase()}`}>
+            <b>
+              {field}: {v.match ? `copies ${coinLabel(v.match)}` : "refused"}
+            </b>
+            {v.reason && <span className="note">{v.reason}</span>}
+            {v.match && <Matched match={v.match} />}
           </div>
-        )}
+        ))}
       </section>
 
       <section className="panel pad stack" aria-labelledby="appeal-heading">

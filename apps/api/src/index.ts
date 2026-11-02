@@ -36,7 +36,7 @@ import { refreshLists, refreshTrending, signImages } from "./protectedSet";
 import { getLaunch, prepareLaunch, submitLaunch } from "./launches";
 import { IMAGE_TYPES } from "./metadata";
 import { getHoldings, prepareSwap, quote, reportTrade } from "./trading";
-import { appealRoute, checkImageRoute, checkRoute, listAppealsRoute } from "./vampShield";
+import { appealRoute, checkImageRoute, checkRoute, imageVerdictRoute, listAppealsRoute } from "./vampShield";
 import { sweepWindowClaims } from "./windowClaims";
 
 export const app = new Hono<AppEnv>();
@@ -119,6 +119,7 @@ app.post("/auth/logout", logout);
 app.get("/me", me);
 app.post("/vamp-shield/check", checkRoute);
 app.post("/vamp-shield/image", checkImageRoute);
+app.get("/vamp-shield/image/:sha256", imageVerdictRoute);
 app.post("/vamp-shield/appeals", appealRoute);
 app.get("/vamp-shield/appeals", listAppealsRoute);
 app.post("/launches", prepareLaunch);

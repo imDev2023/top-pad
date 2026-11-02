@@ -36,6 +36,10 @@
   overflow-wrap: anywhere;
 }
 
+.refusal {
+  gap: 8px;
+}
+
 .message {
   min-height: 120px;
   resize: vertical;

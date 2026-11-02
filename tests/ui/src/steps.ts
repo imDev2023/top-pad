@@ -85,6 +85,8 @@ export async function snap(page: Page, step: string) {
   mkdirSync(shots, { recursive: true });
   // Off the page, so no hover state or chart crosshair shows.
   await page.mouse.move(0, 0);
+  // Every picture that will load, loaded: a coin's picture comes from its gateway a moment after the page.
+  await page.waitForFunction(() => Array.from(document.images).every((i) => i.complete), undefined, { timeout: 5_000 }).catch(() => undefined);
   for (const view of VIEWS) {
     await page.setViewportSize({ width: view.width, height: view.height });
     await page.emulateMedia({ colorScheme: view.colorScheme });

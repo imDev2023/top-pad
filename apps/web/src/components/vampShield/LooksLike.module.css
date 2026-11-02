@@ -34,9 +34,10 @@
   list-style: none;
 }
 
+/* The coins in one column of their own, so every reason starts at the same place. */
 .item {
   display: grid;
-  grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
+  grid-template-columns: 240px minmax(0, 1fr);
   align-items: center;
   gap: 8px 14px;
 }
@@ -44,8 +45,10 @@
 .coin {
   display: inline-flex;
   align-items: center;
+  justify-self: start;
   gap: 10px;
   min-width: 0;
+  max-width: 100%;
   padding: 6px 10px 6px 6px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);

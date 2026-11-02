@@ -156,6 +156,8 @@ test("Vamp Shield refuses copies of a Protected coin and labels a near one", asy
   const appeal = await browser.newPage({ storageState: await page.context().storageState() });
   await appeal.goto(new URL((await page.getByTestId("vamp-appeal").getAttribute("href"))!, TARGET.web).toString());
   await expect(appeal.getByRole("heading", { name: "Appeal a refusal" })).toBeVisible();
+  // The image's refusal as it was judged, the protected coin beside it.
+  await expect(appeal.getByTestId("appeal-refused-image")).toContainText(/copies/);
   await appeal.getByLabel("Why the refusal is wrong").fill("E2E: an appeal sent by the Vamp Shield demo, to be denied.");
   await snap(appeal, "vamp-4-appeal");
   await appeal.getByRole("button", { name: "Send the appeal" }).click();
@@ -193,7 +195,8 @@ test("Vamp Shield refuses copies of a Protected coin and labels a near one", asy
 
   // The label on the coin's page, opening why.
   const flag = page.getByTestId("looks-like-flag");
-  await expect(flag).toHaveText(labelled("Looks like "), { timeout: 60_000 });
+  // Another protected coin may be near too (BABYBONK is near Bonk SOL's core key, BONK), which the flag counts.
+  await expect(flag).toHaveText(labelled("Looks like ", "( \\+\\d+)?"), { timeout: 60_000 });
   await flag.click();
   await expect(page.getByTestId("looks-like-panel")).toContainText(new RegExp(`Its ticker builds on ${label.source}`, "i"));
   await snap(page, "vamp-7-coin-page-label");
