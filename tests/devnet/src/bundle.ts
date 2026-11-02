@@ -8,6 +8,9 @@ import { readFileSync } from "node:fs";
 import {
   appendTransactionMessageInstructions,
   createKeyPairSignerFromPrivateKeyBytes,
+  getBase64Encoder,
+  getCompiledTransactionMessageDecoder,
+  getTransactionDecoder,
   createTransactionMessage,
   getBase64EncodedWireTransaction,
   getSignatureFromTransaction,
@@ -30,6 +33,7 @@ import {
   TOKEN_PROGRAM_ADDRESS,
 } from "@solana-program/token";
 import { dbcPoolAddress, DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS, swapInstructions } from "@top-pad/chain";
+import { getInitializeVirtualPoolWithSplTokenInstructionDataDecoder } from "@top-pad/clients/dbc";
 import { bankFile, coinBalance, devnet, rpc, rpcUrl, send, sweep } from "./devnet";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -82,12 +86,41 @@ async function bareBuy(trader: KeyPairSigner, mint: Address, config: Address, am
   return kept;
 }
 
+/** The metadata URI an Instant launch's creation transaction (base64, as the launch service prepares it) gives its coin. */
+export function metadataUriOf(transaction: string): string {
+  const { messageBytes } = getTransactionDecoder().decode(getBase64Encoder().encode(transaction));
+  // Kit types the compiled message by version; a v0 launch's carries its instructions as below.
+  const message = getCompiledTransactionMessageDecoder().decode(messageBytes) as unknown as {
+    staticAccounts: Address[];
+    instructions: { programAddressIndex: number; data?: Uint8Array }[];
+  };
+  const creation = message.instructions.find((ix) => message.staticAccounts[ix.programAddressIndex] === DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS);
+  if (!creation?.data) throw new Error("the transaction creates no DBC pool");
+  return getInitializeVirtualPoolWithSplTokenInstructionDataDecoder().decode(creation.data).params.uri;
+}
+
+/**
+ * Resolves once `url` is served, asked every `everyMs` for at most `timeoutMs`; whether it was. Heat's launch service
+ * sends an Instant launch's creation as soon as its metadata is served (it asks every 500 ms), so this is the moment a
+ * bundle racing the launch starts sending.
+ */
+export async function whenServed(url: string, timeoutMs = 30_000, everyMs = 50): Promise<boolean> {
+  const until = Date.now() + timeoutMs;
+  while (Date.now() < until) {
+    // A query of its own each time: the gateway's cache would otherwise keep answering 404 for seconds after the upload.
+    const res = await fetch(`${url}${url.includes("?") ? "&" : "?"}t=${Date.now()}`, { method: "HEAD", cache: "no-store", signal: AbortSignal.timeout(2_000) }).catch(() => null);
+    if (res?.ok) return true;
+    await sleep(everyMs);
+  }
+  return false;
+}
+
 export type BundleCopy = { wire: Base64EncodedWireTransaction; signature: Signature; buyers: Address[] };
 
 /**
  * The bundle's buys, signed in advance: `copies` copies of each group's transaction, each copy's buys a lamport larger
- * than the last so each is its own transaction, interleaved group by group in the order to send them. Each group's
- * first wallet pays the fee.
+ * than the last so each is its own transaction, copy by copy, each copy's groups together. Each group's first wallet
+ * pays the fee.
  */
 export async function signedBundle(groups: KeyPairSigner[][], mint: Address, config: Address, amountIn: bigint, copies: number): Promise<BundleCopy[]> {
   const { value: lifetime } = await rpc.getLatestBlockhash({ commitment: "confirmed" }).send();
@@ -110,20 +143,22 @@ export async function signedBundle(groups: KeyPairSigner[][], mint: Address, con
 }
 
 /**
- * Sends each copy once, `everyMs` apart, without preflight: a copy sent before the coin exists would fail its
- * simulation, and must reach the leader all the same. A send the endpoint refuses (429) is passed over.
+ * Sends each round's copies at once, rounds `everyMs` apart, without preflight: a copy sent before the coin exists would
+ * fail its simulation, and must reach the leader all the same. A send the endpoint refuses (429) is passed over.
  */
-export async function spray(copies: BundleCopy[], everyMs: number) {
+export async function spray(rounds: BundleCopy[][], everyMs: number) {
   const sent: Promise<unknown>[] = [];
-  for (const copy of copies) {
+  for (const round of rounds) {
     // Straight to the endpoint, never waiting out a 429 as the shared RPC client does: a late copy is a wasted one.
-    sent.push(
-      fetch(rpcUrl, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "sendTransaction", params: [copy.wire, { encoding: "base64", skipPreflight: true, maxRetries: 0 }] }),
-      }).catch(() => undefined),
-    );
+    for (const copy of round) {
+      sent.push(
+        fetch(rpcUrl, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "sendTransaction", params: [copy.wire, { encoding: "base64", skipPreflight: true, maxRetries: 0 }] }),
+        }).catch(() => undefined),
+      );
+    }
     await sleep(everyMs);
   }
   await Promise.all(sent);

@@ -64,7 +64,8 @@ export async function launchCoin(
   await page.locator('input[type="file"]').setInputFiles(coinImage);
   await expect(page.getByText("No protected coin matches this ticker or name.")).toBeVisible();
   await page.getByRole("button", { name: "Continue" }).click();
-  await connectTestWallet(page, page.getByRole("main").getByRole("button", { name: "Connect wallet" }));
+  // A creator launching again finds the wallet it connected before connected again on its own.
+  if (!linked) await connectTestWallet(page, page.getByRole("main").getByRole("button", { name: "Connect wallet" }));
   await page.getByRole("button", { name: "Launch", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Launched" })).toBeVisible({ timeout: 150_000 });
   return { mint: (await page.locator("dd").first().textContent())!.trim(), wallet };
