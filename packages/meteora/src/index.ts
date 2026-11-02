@@ -1,8 +1,8 @@
 // The Meteora adapter (spec 10.1): the only place `@solana/web3.js` v1 and Meteora's TypeScript SDKs live, behind a
 // narrow interface, because no Meteora SDK has a Kit version. Everything else uses Kit and the clients Codama generates
 // from the SDKs' IDLs (`@top-pad/clients`). What crosses the interface is plain data (addresses as strings, amounts as
-// bigints), never a web3.js type. The DBC and DAMM v2 curve and quote maths come with "Quick buy and sell through
-// server-built swaps", with parity tests against real devnet swaps.
+// bigints), never a web3.js type. DBC's swap maths are the `./quote` entry, kept apart so the API Worker loads only
+// the SDK's maths; DAMM v2's join with Graduation (#51).
 
 export * from "./configs";
 
