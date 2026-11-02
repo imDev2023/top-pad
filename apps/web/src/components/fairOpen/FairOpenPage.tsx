@@ -122,8 +122,8 @@ export function FairOpenPage({ initial }: { initial: FairOpen }) {
     <div className={styles.page}>
       <header className={`panel ${styles.head}`}>
         <div className={styles.identity}>
-          <span className={open ? styles.revealed : styles.sealed} aria-hidden="true">
-            {open ? (coin?.ticker.slice(0, 1) ?? "") : "?"}
+          <span className={open ? styles.revealed : styles.sealed} aria-hidden="true" data-testid="fair-open-tile">
+            {open ? coin?.imageUri ? <img src={coin.imageUri} alt="" width={56} height={56} /> : (coin?.ticker.slice(0, 1) ?? "") : "?"}
           </span>
           <div className={styles.title}>
             <p className="eyebrow">{open ? "Fair Open · opened" : "Fair Open"}</p>
@@ -144,8 +144,15 @@ export function FairOpenPage({ initial }: { initial: FairOpen }) {
         {view.teaser && <p className={styles.teaser}>&ldquo;{view.teaser}&rdquo;</p>}
         {open ? (
           <p className="note">
-            Revealed at the open, and the coin the creator committed to in advance: its name, ticker and metadata URI match {hash}, or the open could not
-            have run.
+            Revealed at the open, and the coin the creator committed to in advance: its name, ticker and{" "}
+            {coin ? (
+              <a href={coin.uri} target="_blank" rel="noreferrer">
+                metadata URI
+              </a>
+            ) : (
+              "metadata URI"
+            )}{" "}
+            match {hash}, or the open could not have run.
           </p>
         ) : (
           <p className="note">
@@ -271,6 +278,12 @@ function OpenSteps({ view, at }: { view: FairOpen; at: number }) {
           <b>Coins and refunds arrive in your wallet within seconds.</b> <span className="muted">Sent by Heat&apos;s labelled keeper. Nothing to claim, no vesting.</span>
         </li>
         <li>
+          <b>The creator&apos;s coins are locked.</b>{" "}
+          <span className="muted">
+            Whatever the creator&apos;s own deposit buys goes into a Jupiter Lock escrow nobody can cancel, Heat included, released from day 7 to day 30.
+          </span>
+        </li>
+        <li>
           <b>A minute later, you get your Tax Share.</b>{" "}
           <span className="muted">Fees snipers pay in the first minute go to the pot&apos;s depositors, in proportion to what each deposit bought.</span>
         </li>
@@ -279,10 +292,6 @@ function OpenSteps({ view, at }: { view: FairOpen; at: number }) {
         If the coin has not been created by <span className="mono">{clock(view.lateAt, at)}</span>, anyone can mark this launch failed, and you take your
         deposit and both rents back on chain yourself, with no Heat server needed.
       </p>
-      <div className="verdict verdict-info">
-        <b>Devnet build</b>
-        <span className="note">The Tax Share and the creator&apos;s locked coins arrive in a coming release of this devnet build.</span>
-      </div>
     </section>
   );
 }

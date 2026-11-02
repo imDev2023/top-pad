@@ -6,7 +6,7 @@ import { useSignTransaction } from "@solana/react";
 import type { UiWalletAccount } from "@wallet-standard/react";
 import { useState } from "react";
 import type { FairOpen } from "@top-pad/contract";
-import { ApiProblem, prepareOpenSignature, submitOpenSignature } from "@/lib/api";
+import { ApiProblem, linkXUrl, prepareOpenSignature, submitOpenSignature } from "@/lib/api";
 import type { SolanaChain } from "../WalletProvider";
 import { clock } from "./FairOpenPage";
 import styles from "./FairOpen.module.css";
@@ -18,11 +18,14 @@ export function SignOpenPanel({ view, account, chain, at, onSigned }: { view: Fa
   const signTransaction = useSignTransaction(account, chain);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  // The rung shows the sealed coin, so the API hands it only to the X account that scheduled the launch.
+  const [needsX, setNeedsX] = useState(false);
   const due = view.phase === "due";
 
   async function sign() {
     setBusy(true);
     setProblem(null);
+    setNeedsX(false);
     try {
       const rung = await prepareOpenSignature(view.launch, account.address);
       const { signedTransaction } = await signTransaction({ transaction: toBytes(rung.transaction) });
@@ -31,6 +34,7 @@ export function SignOpenPanel({ view, account, chain, at, onSigned }: { view: Fa
       onSigned();
     } catch (e) {
       const error = e as { code?: number; message?: string };
+      setNeedsX(e instanceof ApiProblem && e.status === 403);
       setProblem(
         e instanceof ApiProblem
           ? e.message
@@ -72,7 +76,15 @@ export function SignOpenPanel({ view, account, chain, at, onSigned }: { view: Fa
       {problem && (
         <div className="verdict verdict-stop" role="alert">
           <b>The open is not signed</b>
-          <span className="note">{problem}</span>
+          <span className="note">
+            {problem}
+            {needsX && (
+              <>
+                {" "}
+                <a href={linkXUrl(`/fair-open/${view.launch}`)}>Link X</a>
+              </>
+            )}
+          </span>
         </div>
       )}
     </section>

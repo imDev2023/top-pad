@@ -7,9 +7,13 @@
 // measures how late the open landed by the chain's clock and checks every seat was delivered within 2 minutes of the
 // open. Every step of the launch flow is photographed in every view. About 15 minutes and 0.05 devnet SOL a run: the
 // deposits' coins are sold back after the tax window.
+// The sealed identity (#50): until the open the depositor's page shows a "?" tile, and nothing it receives (its source,
+// its API answers, its live room's messages) names the coin's name, ticker, mint, metadata or image; at the open it
+// reveals the coin, whose name, ticker and metadata URI hash to what the launch account committed at scheduling, and
+// whose metadata, served through Turbo, names the same coin and the image the page shows.
 import { expect, test } from "@playwright/test";
-import type { Address } from "@solana/kit";
-import { Tier } from "@top-pad/chain";
+import type { Address, ReadonlyUint8Array } from "@solana/kit";
+import { identityHash, Tier } from "@top-pad/chain";
 import { fetchLaunch, LaunchStatus } from "@top-pad/clients/fair-open";
 import { FairOpen } from "@top-pad/contract";
 import { chainTime, coinBalance, fundedWallets, rpc, sweep } from "@top-pad/tests-devnet/devnet";
@@ -21,6 +25,17 @@ import { connectTestWallet, installTestWallet } from "./wallet";
 const SOL = 1_000_000_000n;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const view = async (launch: string) => FairOpen.parse(await (await fetch(`${TARGET.api}/fair-opens/${launch}`)).json());
+const hex = (bytes: Uint8Array | ReadonlyUint8Array) => Buffer.from(bytes).toString("hex");
+
+/** The coin a launch revealed at its open, once the indexer has seen it. */
+async function revealedCoin(launch: string) {
+  for (let i = 0; i < 60; i++) {
+    const coin = (await view(launch)).open?.coin;
+    if (coin) return coin;
+    await sleep(1_000);
+  }
+  throw new Error(`${launch} never revealed its coin`);
+}
 
 /** Waits until the chain's clock reaches `at` (Unix seconds). */
 async function untilChainTime(at: bigint) {
@@ -90,10 +105,19 @@ test("a creator schedules a Fair Open from the site and signs once; the keeper o
     expect(account.creator).toBe(creator.address);
     expect(account.minRaise).toBe(200_000_000n);
 
-    // The depositors: one on the page, Unverified, and one straight to the program, Scored.
+    // The depositors: one on the page, Unverified, and one straight to the program, Scored. Everything the depositor's
+    // page receives before the open is kept, to be searched for the coin once it is revealed.
     const depositorPage = await browser.newPage();
+    const seen: string[] = [];
+    let sealed = true;
+    depositorPage.on("response", (r) => {
+      if (sealed && r.url().startsWith(TARGET.api)) void r.text().then((t) => seen.push(t), () => {});
+    });
+    depositorPage.on("websocket", (ws) => ws.on("framereceived", (f) => void (sealed && seen.push(String(f.payload)))));
     await installTestWallet(depositorPage, depositor);
     await depositorPage.goto(`/fair-open/${launch}`);
+    await expect(depositorPage.getByTestId("fair-open-tile")).toHaveText("?");
+    await expect(depositorPage.getByRole("heading", { name: "Sealed coin" })).toBeVisible();
     await connectTestWallet(depositorPage, depositorPage.getByRole("main").getByRole("button", { name: "Connect wallet" }));
     await depositorPage.getByLabel("Amount (SOL, in steps of 0.01)").fill("0.1");
     await depositorPage.getByRole("button", { name: "Deposit 0.1 SOL" }).click();
@@ -102,12 +126,32 @@ test("a creator schedules a Fair Open from the site and signs once; the keeper o
     await expect(depositorPage.getByTestId("fair-open-phase")).toContainText("Window closes in");
     await snap(depositorPage, "fair-open-scheduled-6-window");
 
-    // Then nobody does anything: the keeper opens it at its time and pushes every seat.
+    // Then nobody does anything: the keeper uploads the coin's metadata 15 s before the open, opens it at its time and
+    // pushes every seat. Until the open, the page's source and the API still show nothing of the coin.
+    await untilChainTime(account.opensAt - 3n);
+    seen.push(await (await fetch(`${TARGET.web}/fair-open/${launch}`)).text(), await (await fetch(`${TARGET.api}/fair-opens/${launch}`)).text());
+    seen.push(await depositorPage.content());
+    await expect(depositorPage.getByTestId("fair-open-tile")).toHaveText("?");
+    sealed = false;
     await untilChainTime(account.opensAt);
     await expect(depositorPage.getByTestId("fair-open-phase")).toContainText("The coin is live", { timeout: 120_000 });
     await expect(depositorPage.getByTestId("fair-open-coin")).toContainText(ticker, { timeout: 60_000 });
     const opened = (await fetchLaunch(rpc, launch)).data;
     expect(opened.status).toBe(LaunchStatus.Opened);
+
+    // The coin revealed is the one sealed: its name, ticker and metadata URI hash to the launch's identity hash, and its
+    // metadata names the same coin and the image the page shows.
+    const revealed = await revealedCoin(launch);
+    expect(revealed).toMatchObject({ name: "E2E Heartbeat", ticker });
+    expect(hex(await identityHash(revealed))).toBe(hex(opened.identityHash));
+    const metadata = (await (await fetch(revealed.uri)).json()) as { name: string; symbol: string; image: string };
+    expect(metadata).toMatchObject({ name: revealed.name, symbol: revealed.ticker, image: revealed.imageUri });
+    expect((await fetch(revealed.imageUri!)).ok).toBe(true);
+    await expect(depositorPage.getByTestId("fair-open-tile").locator("img")).toHaveAttribute("src", revealed.imageUri!);
+    const secrets = [revealed.name, revealed.ticker, opened.mint, revealed.uri, revealed.imageUri!, revealed.uri.split("/").at(-1)!, revealed.imageUri!.split("/").at(-1)!];
+    expect(seen.length).toBeGreaterThan(3);
+    for (const text of seen) for (const secret of secrets) expect(text.includes(secret), `${secret} showed before the open`).toBe(false);
+    console.log(`sealed until the open: ${seen.length} answers, page sources and live messages named none of the coin`);
 
     // How late the open landed, by the chain's clock: the creation transaction's block time against the scheduled open.
     const history = await rpc.getSignaturesForAddress(launch, { limit: 50 }).send();
