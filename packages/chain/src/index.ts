@@ -18,6 +18,12 @@ export const FEE_CLAIMER_ADDRESS = address("4Garg7N38ShAr8z38ZKkHrgP9Lj5nRKiy3HG
 
 export const WSOL_MINT = address("So11111111111111111111111111111111111111112");
 
+/**
+ * The rehearsal config's Graduation Target, 0.25 SOL: its curve A, solved like the real one's, leaves one raw coin over,
+ * so every rehearsal also burns a leftover.
+ */
+export const REHEARSAL_GRADUATION_TARGET = 250_000_000n;
+
 export type HeatCluster = {
   /** What every coin trades against: SOL in the prototype (spec 3.2), with its symbol and decimals for display. */
   quote: { mint: Address; symbol: string; decimals: number };
@@ -37,6 +43,12 @@ export type HeatCluster = {
    * `fair-open-config`: the admission signer, which signs each deposit's admission and holds no funds.
    */
   keys: { treasury: Address; keeper: Address; admission: Address } | null;
+  /**
+   * Devnet's rehearsal config, made by `pnpm --filter @top-pad/meteora configs devnet --rehearsal --send`: the Instant
+   * config's every value but its Graduation Target, `REHEARSAL_GRADUATION_TARGET`, so `tests/devnet` graduates a coin
+   * for a few hundredths of a SOL (spec 11.4). Its coins are never Heat's: the indexer watches only `configs`.
+   */
+  rehearsal: Address | null;
   /**
    * Heat's shared address lookup table, which every open's creation transaction and every push compresses its common
    * accounts through (spec 2.1 step 10), made and frozen by `pnpm --filter @top-pad/chain lookup-table <cluster>`.
@@ -68,6 +80,8 @@ export const CLUSTERS: Record<Cluster, HeatCluster | null> = {
     },
     // Made and frozen on 2026-10-31 (#46).
     lookupTable: address("B2XYd5qp7wyT5Dnvg3CJh6aZxoiiAAX4QRvLLMsgxMHT"),
+    // Created on 2026-11-02 (#51).
+    rehearsal: address("FpBAjo24FLrxj69qfu92NodVvWJE8zSPPxPxmearft27"),
   },
   mainnet: {
     quote: { mint: WSOL_MINT, symbol: "SOL", decimals: 9 },
@@ -76,6 +90,7 @@ export const CLUSTERS: Record<Cluster, HeatCluster | null> = {
     configs: null,
     keys: null,
     lookupTable: null,
+    rehearsal: null,
   },
 };
 
@@ -84,6 +99,7 @@ export * from "./claims";
 export * from "./coin";
 export * from "./dbc";
 export * from "./fairOpen";
+export * from "./graduation";
 export * from "./launch";
 export * from "./open";
 export * from "./swap";

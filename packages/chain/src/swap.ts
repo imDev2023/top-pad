@@ -1,6 +1,7 @@
-// A swap on a Heat coin's pool (DBC's `swap2`), with the wrapping SOL needs around it: what the devnet scripts trade
-// with, and what quick buy and sell build on the server (spec 10.1, "Trading"), naming Heat's referral account so Heat
-// earns Meteora's referral share on every swap its site builds (spec 4).
+// A swap on a Heat coin's pool (DBC's `swap2`, or DAMM v2's `swap2` once the coin has graduated), with the wrapping SOL
+// needs around it: what the devnet scripts trade with, and what quick buy and sell build on the server (spec 10.1,
+// "Trading"), naming Heat's referral account so Heat earns Meteora's referral share on every swap its site builds
+// (spec 4).
 import {
   AccountRole,
   appendTransactionMessageInstructions,
@@ -23,6 +24,7 @@ import {
 } from "@solana-program/token";
 import { findBaseVaultPda, findQuoteVaultPda, getSwap2Instruction } from "@top-pad/clients/dbc";
 import { DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS, TOKEN_PROGRAM_ADDRESS, eventAuthorityAddress } from "./dbc";
+import { dammSwapInstruction } from "./graduation";
 import { WSOL_MINT } from "./index";
 
 const SYSVAR_INSTRUCTIONS = "Sysvar1nstructions1111111111111111111111111" as Address;
@@ -56,6 +58,11 @@ export type Swap = {
   mode?: keyof typeof SWAP_MODES;
   /** A quote account that takes Meteora's referral share of the fee: Heat's on every swap Heat's site builds. */
   referralAccount?: Address | null;
+  /**
+   * The coin's DAMM v2 pool once it has graduated (spec 2.3), where the swap then runs, exact in, instead of on its
+   * curve; `config` and `pool` still name the curve.
+   */
+  graduatedPool?: Address | null;
 };
 
 /** A wallet's associated account of a mint: where a swap takes its coins from and pays them to. */
@@ -72,11 +79,40 @@ export const referralAccountOf = (treasury: Address, quoteMint: Address) => toke
  * the swap, and the wrapped SOL account closed again so what is left (a sell's proceeds) returns as SOL.
  */
 export async function swapInstructions(swap: Swap): Promise<Instruction[]> {
-  const { trader, mint, quoteMint, pool } = swap;
+  const { trader, mint, quoteMint } = swap;
   const tokens = { tokenProgram: TOKEN_PROGRAM_ADDRESS };
   const [quoteAccount] = await findAssociatedTokenPda({ owner: trader.address, mint: quoteMint, ...tokens });
   const [coinAccount] = await findAssociatedTokenPda({ owner: trader.address, mint, ...tokens });
   const wrapped = quoteMint === WSOL_MINT;
+  const buy = swap.side === "buy";
+  const swapInstruction = swap.graduatedPool
+    ? await dammSwapInstruction({
+        pool: swap.graduatedPool,
+        mint,
+        quoteMint,
+        trader,
+        quoteAccount,
+        coinAccount,
+        side: swap.side,
+        amountIn: swap.amountIn,
+        minimumOut: swap.minimumOut,
+        referralAccount: swap.referralAccount,
+      })
+    : await curveSwapInstruction(swap, quoteAccount, coinAccount);
+  return [
+    await getCreateAssociatedTokenIdempotentInstructionAsync({ payer: trader, owner: trader.address, mint: quoteMint }),
+    ...(buy && wrapped
+      ? [getTransferSolInstruction({ source: trader, destination: quoteAccount, amount: swap.amountIn }), getSyncNativeInstruction({ account: quoteAccount })]
+      : []),
+    await getCreateAssociatedTokenIdempotentInstructionAsync({ payer: trader, owner: trader.address, mint }),
+    swapInstruction,
+    ...(wrapped ? [getCloseAccountInstruction({ account: quoteAccount, destination: trader.address, owner: trader })] : []),
+  ];
+}
+
+/** DBC's `swap2` on the coin's curve, between the trader's accounts. */
+async function curveSwapInstruction(swap: Swap, quoteAccount: Address, coinAccount: Address): Promise<Instruction> {
+  const { mint, quoteMint, pool } = swap;
   const buy = swap.side === "buy";
   const dbcSwap = getSwap2Instruction({
     config: swap.config,
@@ -87,7 +123,7 @@ export async function swapInstructions(swap: Swap): Promise<Instruction[]> {
     outputTokenAccount: buy ? coinAccount : quoteAccount,
     baseMint: mint,
     quoteMint,
-    payer: trader,
+    payer: swap.trader,
     tokenBaseProgram: TOKEN_PROGRAM_ADDRESS,
     tokenQuoteProgram: TOKEN_PROGRAM_ADDRESS,
     eventAuthority: await eventAuthorityAddress(DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS),
@@ -95,16 +131,8 @@ export async function swapInstructions(swap: Swap): Promise<Instruction[]> {
     referralTokenAccount: swap.referralAccount ?? undefined,
     params: { amount0: swap.amountIn, amount1: swap.minimumOut, swapMode: SWAP_MODES[swap.mode ?? "exact_in"] },
   });
-  return [
-    await getCreateAssociatedTokenIdempotentInstructionAsync({ payer: trader, owner: trader.address, mint: quoteMint }),
-    ...(buy && wrapped
-      ? [getTransferSolInstruction({ source: trader, destination: quoteAccount, amount: swap.amountIn }), getSyncNativeInstruction({ account: quoteAccount })]
-      : []),
-    await getCreateAssociatedTokenIdempotentInstructionAsync({ payer: trader, owner: trader.address, mint }),
-    // DBC reads the instructions sysvar on a swap, as Meteora's SDK passes it.
-    { ...dbcSwap, accounts: [...dbcSwap.accounts, { address: SYSVAR_INSTRUCTIONS, role: AccountRole.READONLY }] },
-    ...(wrapped ? [getCloseAccountInstruction({ account: quoteAccount, destination: trader.address, owner: trader })] : []),
-  ];
+  // DBC reads the instructions sysvar on a swap, as Meteora's SDK passes it.
+  return { ...dbcSwap, accounts: [...dbcSwap.accounts, { address: SYSVAR_INSTRUCTIONS, role: AccountRole.READONLY }] };
 }
 
 /**

@@ -25,6 +25,7 @@ import {
   TAX_WINDOW_SECONDS,
 } from "@top-pad/clients/fee";
 import { eventAuthorityAddress, TOKEN_PROGRAM_ADDRESS } from "./dbc";
+import { creatorLpFeeClaimInstructions, type GraduatedPosition } from "./graduation";
 import { FEE_CLAIMER_ADDRESS, FEE_PROGRAM_ADDRESS, WSOL_MINT } from "./index";
 
 /** A pool on one of Heat's configs, as its claims need it. */
@@ -68,6 +69,11 @@ export const creatorShare = (partnerQuoteFee: bigint) => partnerQuoteFee / 2n;
  */
 export const WINDOW_CLAIM_COMPUTE_UNITS = 60_000;
 export const FEE_CLAIM_COMPUTE_UNITS = 90_000;
+/**
+ * What the creator's LP fee claim may use: DAMM v2's `claim_position_fee` with its event, and the creator's coin account
+ * opened if missing; measured on devnet in `tests/devnet/src/graduation.test.ts`.
+ */
+export const LP_FEE_CLAIM_COMPUTE_UNITS = 70_000;
 /** What a transaction's other instructions take: up to two quote accounts opened, about 20,000 each, and one closed. */
 const ACCOUNT_COMPUTE_UNITS = 50_000;
 
@@ -123,8 +129,12 @@ export async function windowClaimInstructions(w: WindowClaim): Promise<Instructi
   ];
 }
 
-/** One pool's claim of Creator Earnings: up to `maxAmount` of its partner fees, of which half is the creator's. */
-export type FeeClaim = { pool: ClaimablePool; heat: boolean; maxAmount: bigint };
+/**
+ * One pool's claim of Creator Earnings: up to `maxAmount` of its partner fees, of which half is the creator's; and once
+ * the coin has graduated, the fees of the creator's own position in its DAMM v2 pool, claimed from Meteora in the same
+ * transaction (spec 4).
+ */
+export type FeeClaim = { pool: ClaimablePool; heat: boolean; maxAmount: bigint; lpPosition?: GraduatedPosition | null };
 
 export type CreatorClaim = {
   /** The creator role holder of every pool claimed, who signs and pays the network fee. */
@@ -152,10 +162,15 @@ export async function creatorClaimInstructions(c: CreatorClaim): Promise<Instruc
     instructions.push(
       await getClaimFeesInstructionAsync({ ...(await dbcAccounts(claim.pool)), window, creatorTokenAccount, treasuryTokenAccount, maxAmount: claim.maxAmount }),
     );
+    if (claim.lpPosition) {
+      if (claim.lpPosition.mint !== claim.pool.mint || claim.lpPosition.quoteMint !== quoteMint) throw new Error("an LP position of another coin");
+      instructions.push(...(await creatorLpFeeClaimInstructions({ position: claim.lpPosition, creator })));
+    }
   }
   const unwrap = quoteMint === WSOL_MINT;
+  const lpClaims = claims.filter((c) => c.lpPosition).length;
   return [
-    getSetComputeUnitLimitInstruction({ units: claims.length * FEE_CLAIM_COMPUTE_UNITS + ACCOUNT_COMPUTE_UNITS }),
+    getSetComputeUnitLimitInstruction({ units: claims.length * FEE_CLAIM_COMPUTE_UNITS + lpClaims * LP_FEE_CLAIM_COMPUTE_UNITS + ACCOUNT_COMPUTE_UNITS }),
     ...priced(c.computeUnitPrice),
     await getCreateAssociatedTokenIdempotentInstructionAsync({ payer: creator, owner: creator.address, mint: quoteMint }),
     ...instructions,

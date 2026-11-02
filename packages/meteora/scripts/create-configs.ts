@@ -1,7 +1,9 @@
-// `pnpm --filter @top-pad/meteora configs devnet [--send]`: Heat's two DBC configs on a cluster (spec 3.2). It builds
-// both `create_config2` transactions and simulates them against the cluster's deployed DBC program; with --send, and
-// only once both simulations pass, it creates them. A config cannot be changed once created, so a cluster whose configs
-// are already recorded in `@top-pad/chain` is refused. The payer is Heat's bank (`BANK_KEYPAIR`, or
+// `pnpm --filter @top-pad/meteora configs devnet [--rehearsal] [--send]`: Heat's two DBC configs on a cluster (spec
+// 3.2). It builds both `create_config2` transactions and simulates them against the cluster's deployed DBC program; with
+// --send, and only once both simulations pass, it creates them. A config cannot be changed once created, so a cluster
+// whose configs are already recorded in `@top-pad/chain` is refused. With --rehearsal it builds devnet's rehearsal
+// config instead: the Instant config's every value but its Graduation Target, `REHEARSAL_GRADUATION_TARGET`, so
+// `tests/devnet` graduates coins for a few hundredths of a SOL rather than 8.5 (spec 11.4). The payer is Heat's bank (`BANK_KEYPAIR`, or
 // ~/.config/top-pad/<cluster>/bank.json); the RPC is `DEVNET_RPC_URL`, or the public endpoint (spec 10.5).
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -24,19 +26,20 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
   signTransactionMessageWithSigners,
 } from "@solana/kit";
-import { CLUSTERS, FEE_CLAIMER_ADDRESS } from "@top-pad/chain";
+import { CLUSTERS, FEE_CLAIMER_ADDRESS, REHEARSAL_GRADUATION_TARGET } from "@top-pad/chain";
 import { DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS, getCreateConfig2Instruction } from "@top-pad/clients/dbc";
 import { heatConfigParameters, type LaunchMode } from "../src/configs";
 
 const [cluster, ...flags] = process.argv.slice(2);
 const send = flags.includes("--send");
+const rehearsal = flags.includes("--rehearsal");
 if (cluster !== "devnet") {
-  console.error("Usage: pnpm --filter @top-pad/meteora configs devnet [--send] (mainnet's configs belong to the mainnet effort).");
+  console.error("Usage: pnpm --filter @top-pad/meteora configs devnet [--rehearsal] [--send] (mainnet's configs belong to the mainnet effort).");
   process.exit(1);
 }
 const heat = CLUSTERS[cluster]!;
-if (heat.configs) {
-  console.error(`${cluster} already has its configs (${heat.configs.fairOpen}, ${heat.configs.instant}); a config cannot be changed.`);
+if (rehearsal ? heat.rehearsal : heat.configs) {
+  console.error(`${cluster} already has ${rehearsal ? "its rehearsal config" : "its configs"}; a config cannot be changed.`);
   process.exit(1);
 }
 
@@ -49,7 +52,8 @@ const [eventAuthority] = await getProgramDerivedAddress({
   seeds: [getUtf8Encoder().encode("__event_authority")],
 });
 
-const modes: LaunchMode[] = ["fairOpen", "instant"];
+const modes: LaunchMode[] = rehearsal ? ["instant"] : ["fairOpen", "instant"];
+const target = rehearsal ? REHEARSAL_GRADUATION_TARGET : heat.graduationTarget;
 const built = [];
 for (const mode of modes) {
   const config = await generateKeyPairSigner();
@@ -61,7 +65,7 @@ for (const mode of modes) {
     payer,
     eventAuthority,
     program: DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS,
-    configParameters: heatConfigParameters(mode, heat.graduationTarget),
+    configParameters: heatConfigParameters(mode, target),
     transferFeeParameters: null,
   });
   const { value: blockhash } = await rpc.getLatestBlockhash({ commitment: "confirmed" }).send();
@@ -86,7 +90,7 @@ for (const mode of modes) {
 }
 
 if (!send) {
-  console.log("Both simulations passed; nothing was sent. Run again with --send to create the configs.");
+  console.log("The simulations passed; nothing was sent. Run again with --send to create the configs.");
   process.exit(0);
 }
 
@@ -101,4 +105,4 @@ for (const { mode, config, transaction } of built) {
   console.log(`${mode}: created ${config} in ${getSignatureFromTransaction(transaction)}`);
 }
 const after = (await rpc.getBalance(payer.address, { commitment: "confirmed" }).send()).value;
-console.log(`Spent ${Number(before - after) / 1e9} SOL. Record both addresses in packages/chain.`);
+console.log(`Spent ${Number(before - after) / 1e9} SOL. Record ${rehearsal ? "the address" : "both addresses"} in packages/chain.`);
