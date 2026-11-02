@@ -1,0 +1,162 @@
+/*
+ * Bundle Radar's flags on a coin's page (spec 6.4, 9): a strip of marshal's flags above the chart, red for wallets linked
+ * to the creator and yellow for same-slot buys, each opening its evidence below the strip.
+ */
+.radar {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  min-height: 30px;
+}
+
+.flagChip {
+  min-height: 30px;
+  padding: 4px 10px;
+  font-size: 0.8rem;
+  white-space: normal;
+  text-align: left;
+}
+
+.flagButton {
+  cursor: pointer;
+}
+
+.flagButton:hover {
+  border-color: currentColor;
+}
+
+.flagButton[aria-expanded="true"] {
+  border-color: currentColor;
+}
+
+.flagButton:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.flagFigure {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.caret {
+  flex: none;
+  width: 0;
+  height: 0;
+  margin-left: 2px;
+  border-top: 5px solid currentColor;
+  border-right: 4px solid transparent;
+  border-left: 4px solid transparent;
+}
+
+.flagButton[aria-expanded="true"] .caret {
+  transform: rotate(180deg);
+}
+
+/* The evidence behind a flag */
+.detail {
+  display: grid;
+  gap: 12px;
+  padding: 14px 18px 16px;
+  border-left-width: 3px;
+}
+
+.detailStop {
+  border-left-color: var(--stop);
+}
+
+.detailCaution {
+  border-left-color: var(--caution);
+}
+
+.detailHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+
+.detailHead h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.lead {
+  max-width: 80ch;
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
+.lead b {
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-weight: 500;
+}
+
+.wallets {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wallet {
+  display: grid;
+  gap: 6px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+
+.wallet:first-child {
+  padding-top: 2px;
+  border-top: 0;
+}
+
+.walletHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+
+.evidence {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.84rem;
+  color: var(--muted);
+}
+
+.evidence li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 16px;
+}
+
+.evidence a {
+  flex: none;
+}
+
+@media (max-width: 560px) {
+  .detail {
+    padding: 12px 14px 14px;
+  }
+
+  .evidence li {
+    flex-direction: column;
+    gap: 0;
+  }
+}

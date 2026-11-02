@@ -1,5 +1,6 @@
 import {
   ApiError,
+  BundleRadar,
   ClaimOutcome,
   Coin,
   CoinCandles,
@@ -152,6 +153,9 @@ export function getCoinTrades(mint: string, query: { after?: string; before?: st
   const params = new URLSearchParams(Object.entries(query).flatMap(([k, v]) => (v === undefined ? [] : [[k, String(v)]])));
   return call(CoinTrades, `/coins/${encodeURIComponent(mint)}/trades${params.size ? `?${params}` : ""}`);
 }
+
+/** What Bundle Radar labels on a coin, with the evidence behind each label. */
+export const getCoinRadar = (mint: string) => call(BundleRadar, `/coins/${encodeURIComponent(mint)}/radar`);
 
 export const getCoinCandles = (mint: string, seconds: CandleSeconds) => call(CoinCandles, `/coins/${encodeURIComponent(mint)}/candles?seconds=${seconds}`);
 

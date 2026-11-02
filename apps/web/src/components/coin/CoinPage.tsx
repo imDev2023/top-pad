@@ -8,6 +8,7 @@ import { CandleChart, type ChartFeed } from "./CandleChart";
 import styles from "./Coin.module.css";
 import { GraduationPanel } from "./GraduationPanel";
 import { QuickTrade } from "./QuickTrade";
+import { RadarFlags } from "./RadarFlags";
 import { TaxBand } from "./TaxBand";
 import { TradeList } from "./TradeList";
 import { useLiveRoom } from "./useLiveRoom";
@@ -27,6 +28,8 @@ export function CoinPage({ initial }: { initial: Coin }) {
   const [offsetMs, setOffsetMs] = useState(0);
   const [trades, setTrades] = useState<Trade[] | null>(null);
   const [fresh, setFresh] = useState<ReadonlySet<string>>(new Set());
+  // Bundle Radar's labels, read again on each change the coin's room reports.
+  const [radarVersion, setRadarVersion] = useState(0);
   // Trades this page sent, shown the moment they confirmed, until the indexer reports them (spec 10.2).
   const [pending, setPending] = useState<ReadonlySet<string>>(new Set());
   // The API's clock as the page was served: the server's render and the browser's first one must say the same.
@@ -130,6 +133,7 @@ export function CoinPage({ initial }: { initial: Coin }) {
       const landed = batch.events.flatMap((e) => (e.type === "trade" && e.mint === mint ? [e.trade] : []));
       merge(landed, { live: true });
       chart.current?.add(landed);
+      if (batch.events.some((e) => e.type === "radar" && e.mint === mint)) setRadarVersion((v) => v + 1);
       // A Graduation moving on: the coin again, for its new pool and how it stands.
       if (batch.events.some((e) => e.type === "graduation" && e.mint === mint)) {
         void getCoin(mint)
@@ -240,6 +244,8 @@ export function CoinPage({ initial }: { initial: Coin }) {
           </span>
         </div>
       )}
+
+      {coin.heat && <RadarFlags mint={mint} ticker={coin.ticker} decimals={decimals} version={radarVersion} />}
 
       <TaxBand coin={coin} now={now + offsetMs} />
 

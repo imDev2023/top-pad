@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ago, coinAmount, compactNumber, rawAmountOf, solAmount, span, tickLabels, typedAmount } from "./format";
+import { ago, coinAmount, compactNumber, ordinal, rawAmountOf, shareOf, solAmount, span, tickLabels, typedAmount } from "./format";
 
 const sub = (n: number) => String.fromCodePoint(0x2080 + n);
 
@@ -85,5 +85,19 @@ describe("an amount as typed", () => {
     expect(typedAmount(1_250_500_000n, 6)).toBe("1250.5");
     expect(typedAmount(3_000_000n, 6)).toBe("3");
     expect(rawAmountOf(typedAmount(123_456_789n, 6), 6)).toBe(123_456_789n);
+  });
+});
+
+describe("shares and places", () => {
+  it("write a share of supply to two places, rounded down, and a sliver as under 0.01%", () => {
+    const supply = 1_000_000_000_000_000n;
+    expect(shareOf(12_120_000_000_000n, supply)).toBe("1.21%");
+    expect(shareOf(10_000_000_000_000n, supply)).toBe("1.00%");
+    expect(shareOf("99999999999", supply.toString())).toBe("under 0.01%");
+    expect(shareOf(0n, supply)).toBe("0.00%");
+  });
+
+  it("name places as English does", () => {
+    expect([1, 2, 3, 4, 11, 12, 13, 21, 22, 104].map(ordinal)).toEqual(["1st", "2nd", "3rd", "4th", "11th", "12th", "13th", "21st", "22nd", "104th"]);
   });
 });

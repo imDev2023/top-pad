@@ -93,3 +93,13 @@ export function typedAmount(raw: bigint, decimals: number): string {
   const fraction = (raw % unit).toString().padStart(decimals, "0").replace(/0+$/, "");
   return `${raw / unit}${fraction ? `.${fraction}` : ""}`;
 }
+
+/** A part of a whole in raw units as a percentage to two places, rounded down: 1.21%, or "under 0.01%" for a sliver. */
+export function shareOf(part: bigint | string, whole: bigint | string) {
+  const hundredths = (BigInt(part) * 10_000n) / BigInt(whole);
+  if (hundredths === 0n && BigInt(part) > 0n) return "under 0.01%";
+  return `${hundredths / 100n}.${(hundredths % 100n).toString().padStart(2, "0")}%`;
+}
+
+/** A place in English: 1st, 2nd, 3rd, 4th, 11th, 22nd. */
+export const ordinal = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? "th" : (["th", "st", "nd", "rd"][n % 10] ?? "th")}`;
