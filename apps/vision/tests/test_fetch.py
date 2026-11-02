@@ -110,3 +110,22 @@ def test_non_public_addresses_are_refused_by_default(image_server):
         Fetcher().fetch(f"{image_server}/logo.png")
     with pytest.raises(FetchError, match="not a public address"):
         Fetcher().fetch(image_server.replace("127.0.0.1", "localhost") + "/logo.png")
+
+
+def test_an_ipfs_image_a_gateway_refuses_is_asked_of_the_next(image_server):
+    fetcher = Fetcher(allow_private_networks=True, ipfs_fallbacks=(f"{image_server}/serving-gateway/ipfs/",))
+    data, content_type = fetcher.fetch(f"{image_server}/denying-gateway/ipfs/bafkreigh2akiscaildc/logo.png?x=1")
+    assert data == PNG_BYTES and content_type == "image/png"
+
+
+def test_the_first_error_is_reported_when_no_gateway_serves_it(image_server):
+    fetcher = Fetcher(allow_private_networks=True, ipfs_fallbacks=(f"{image_server}/denying-gateway/ipfs/",))
+    with pytest.raises(FetchError, match="HTTP 404"):
+        fetcher.fetch(f"{image_server}/missing/ipfs/bafkreigh2akiscaildc")
+
+
+def test_a_url_outside_ipfs_is_not_asked_elsewhere(image_server):
+    fetcher = Fetcher(allow_private_networks=True, ipfs_fallbacks=(f"{image_server}/serving-gateway/ipfs/",))
+    # A 404 outside /ipfs/: had it been asked of the serving gateway, it would have come back as the logo.
+    with pytest.raises(FetchError, match="HTTP 404"):
+        fetcher.fetch(f"{image_server}/denying-gateway/logo.png")

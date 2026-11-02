@@ -63,6 +63,11 @@ class _ImageHandler(BaseHTTPRequestHandler):
         path = self.path
         if path == "/logo.png":
             self._send(200, "image/png", PNG_BYTES)
+        elif path.startswith("/denying-gateway/ipfs/"):
+            # An IPFS gateway that refuses a CID, as ipfs.io refuses those on its denylist.
+            self._send(403, "text/plain", b"forbidden")
+        elif path.startswith("/serving-gateway/ipfs/"):
+            self._send(200, "image/png", PNG_BYTES)
         elif path == "/rocket.jpg":
             self._send(200, "image/jpeg", logos.encode(logos.rocket(), "JPEG", quality=90))
         elif path == "/page.html":

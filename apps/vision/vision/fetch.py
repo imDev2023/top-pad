@@ -22,6 +22,9 @@ MAX_BYTES = 5 * 1024 * 1024
 TIMEOUT_SECONDS = 15.0
 MAX_REDIRECTS = 3
 IPFS_GATEWAY = "https://ipfs.io/ipfs/"
+# Asked for an IPFS image when its own gateway refuses or fails it. ipfs.io and dweb.link answer 403 for CIDs on their
+# denylist, and so for about one verified logo in seven on 2026-11-02, which Pinata's public gateway served.
+IPFS_FALLBACK_GATEWAYS = ("https://gateway.pinata.cloud/ipfs/",)
 
 # Some image hosts and CDNs refuse or degrade requests that do not look like a browser's. AVIF is left out of Accept
 # on purpose: the decoder takes PNG, JPEG, GIF and WebP only, and a CDN that negotiates formats would otherwise send AVIF.
@@ -80,9 +83,11 @@ class Fetcher:
         allow_private_networks: bool = False,
         timeout: float = TIMEOUT_SECONDS,
         max_bytes: int = MAX_BYTES,
+        ipfs_fallbacks: tuple[str, ...] = IPFS_FALLBACK_GATEWAYS,
     ) -> None:
         self.timeout = timeout
         self.max_bytes = max_bytes
+        self.ipfs_fallbacks = ipfs_fallbacks
         connect = _within_deadline(_public_only if not allow_private_networks else socket.create_connection)
         # A bare OpenerDirector rather than build_opener: no file://, ftp:// or data: handlers, and no proxy settings
         # picked up from the environment.
@@ -99,7 +104,28 @@ class Fetcher:
         self._opener = opener
 
     def fetch(self, url: str) -> tuple[bytes, str]:
-        """The body at url and its Content-Type, or FetchError; url must already be normalised."""
+        """
+        The body at url and its Content-Type, or FetchError; url must already be normalised. An IPFS image (a path under
+        /ipfs/ on any host) that its gateway refuses or fails is asked of the fallback gateways in turn, each with its
+        own deadline; the first error is the one reported if none serves it.
+        """
+        try:
+            return self._fetch_once(url)
+        except FetchError as error:
+            rest = _ipfs_rest(url)
+            if rest is None or not _worth_another_gateway(error):
+                raise
+            for gateway in self.ipfs_fallbacks:
+                if url.startswith(gateway):
+                    continue
+                try:
+                    return self._fetch_once(gateway + rest)
+                except FetchError:
+                    continue
+            raise
+
+    def _fetch_once(self, url: str) -> tuple[bytes, str]:
+        """One fetch of url, within the deadline, size and redirect bounds."""
         deadline = time.monotonic() + self.timeout
         request = urllib.request.Request(
             url, headers={"User-Agent": USER_AGENT, "Accept": ACCEPT, "Accept-Encoding": "identity"}
@@ -154,6 +180,24 @@ class Fetcher:
             if total > self.max_bytes:
                 raise FetchError(f"the image is larger than {self.max_bytes // (1024 * 1024)} MB")
             chunks.append(chunk)
+
+
+def _ipfs_rest(url: str) -> str | None:
+    """
+    What follows /ipfs/ in a gateway URL (the CID, its path and query), or None for a URL that is not one; a gateway may
+    serve under a prefix, as dedicated ones do.
+    """
+    parts = urlsplit(url)
+    at = parts.path.find("/ipfs/")
+    if at < 0 or len(parts.path) <= at + len("/ipfs/"):
+        return None
+    return parts.path[at + len("/ipfs/") :] + (f"?{parts.query}" if parts.query else "")
+
+
+def _worth_another_gateway(error: FetchError) -> bool:
+    """A gateway's refusal, failure or slowness, which another gateway may not share; never a bad image or a size."""
+    message = str(error)
+    return message.startswith("HTTP ") or message.startswith("timed out") or "did not resolve" in message
 
 
 def _within_deadline(connect):
