@@ -2,14 +2,13 @@
 // sign once. The coin then exists on devnet as a Heat coin, its metadata on Arweave naming the creator's X, and no other
 // wallet can launch for the same record. Each step is photographed on a phone and a desktop, in both themes, for the
 // pixel check (spec 14: every screen ships both).
-import { readFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 import { address, generateKeyPairSigner } from "@solana/kit";
 import { CLUSTERS } from "@top-pad/chain";
 import { fetchVirtualPool } from "@top-pad/clients/dbc";
 import { fetchCoinRecord, findCoinRecordPda, LaunchMode } from "@top-pad/clients/fee";
 import { fundedWallets, rpc } from "@top-pad/tests-devnet/devnet";
-import { coinImage, newHandle, newTicker, pageErrors, short, snap } from "./steps";
+import { expectVampClear, newHandle, newTicker, pageErrors, runName, short, snap, uniqueCoinImage } from "./steps";
 import { TARGET } from "./target";
 import { connectTestWallet, installTestWallet } from "./wallet";
 
@@ -52,10 +51,12 @@ test("a creator launches an Instant launch from the site", async ({ browser, pag
 
   await page.getByLabel("Ticker").fill(ticker.toLowerCase());
   await expect(page.getByLabel("Ticker")).toHaveValue(ticker);
-  await page.getByLabel("Name").fill("E2E Lumen");
-  await page.locator('input[type="file"]').setInputFiles(coinImage);
-  await expect(page.getByText("No protected coin matches this ticker or name.")).toBeVisible();
-  await expect(page.getByText(/coin\.png · 160 × 160/)).toBeVisible();
+  const name = runName("E2E Lumen", ticker);
+  const picture = await uniqueCoinImage(page, ticker);
+  await page.getByLabel("Name").fill(name);
+  await page.locator('input[type="file"]').setInputFiles(picture);
+  await expectVampClear(page);
+  await expect(page.getByText(`${picture.name} · 256 × 256`)).toBeVisible();
   await snap(page, "4-coin-clear");
 
   await page.getByRole("button", { name: "Continue" }).click();
@@ -81,9 +82,9 @@ test("a creator launches an Instant launch from the site", async ({ browser, pag
   // On Arweave: the metadata, with the creator's X, and an image that is the one uploaded.
   const metadataUri = await page.getByRole("link", { name: "Its metadata on Arweave" }).getAttribute("href");
   const metadata = (await (await fetch(metadataUri!)).json()) as { name: string; symbol: string; image: string; twitter: string };
-  expect(metadata).toMatchObject({ name: "E2E Lumen", symbol: ticker, twitter: `https://x.com/${handle}` });
+  expect(metadata).toMatchObject({ name, symbol: ticker, twitter: `https://x.com/${handle}` });
   const image = new Uint8Array(await (await fetch(metadata.image)).arrayBuffer());
-  expect(image).toEqual(new Uint8Array(readFileSync(coinImage)));
+  expect(image).toEqual(new Uint8Array(picture.buffer));
 
   // The record now has its Creator wallet: the one that signed its first launch.
   await page.getByRole("button", { name: "Launch another" }).click();
@@ -106,9 +107,10 @@ test("a creator launches an Instant launch from the site", async ({ browser, pag
   await otherPage.getByRole("radio", { name: /Instant launch/ }).check();
   await otherPage.getByRole("button", { name: "Continue" }).click();
   await otherPage.getByLabel("Ticker").fill(otherTicker);
-  await otherPage.getByLabel("Name").fill("E2E Lumen");
-  await otherPage.locator('input[type="file"]').setInputFiles(coinImage);
-  await expect(otherPage.getByText("No protected coin matches this ticker or name.")).toBeVisible();
+  const otherPicture = await uniqueCoinImage(otherPage, otherTicker);
+  await otherPage.getByLabel("Name").fill(runName("E2E Lumen", otherTicker));
+  await otherPage.locator('input[type="file"]').setInputFiles(otherPicture);
+  await expectVampClear(otherPage);
   await otherPage.getByRole("button", { name: "Continue" }).click();
   await connectTestWallet(otherPage, otherPage.getByRole("main").getByRole("button", { name: "Connect wallet" }));
   await expect(otherPage.getByText("This is not your Creator wallet")).toBeVisible();
@@ -120,10 +122,10 @@ test("a creator launches an Instant launch from the site", async ({ browser, pag
     headers: { origin: TARGET.web },
     multipart: {
       mode: "instant",
-      name: "E2E Lumen",
+      name: runName("E2E Lumen", otherTicker),
       ticker: otherTicker,
       wallet: otherWallet.address,
-      image: { name: "coin.png", mimeType: "image/png", buffer: readFileSync(coinImage) },
+      image: otherPicture,
     },
   });
   expect(refused.status()).toBe(403);

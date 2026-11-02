@@ -18,7 +18,7 @@ import { fetchLaunch, LaunchStatus } from "@top-pad/clients/fair-open";
 import { FairOpen } from "@top-pad/contract";
 import { chainTime, coinBalance, fundedWallets, rpc, sweep } from "@top-pad/tests-devnet/devnet";
 import { admitted, deposit, newPerson, sellAll } from "@top-pad/tests-devnet/fair-open";
-import { coinImage, newHandle, newTicker, pageErrors, snap } from "./steps";
+import { expectVampClear, newHandle, newTicker, pageErrors, runName, snap, uniqueCoinImage } from "./steps";
 import { TARGET } from "./target";
 import { connectTestWallet, installTestWallet } from "./wallet";
 
@@ -64,9 +64,9 @@ test("a creator schedules a Fair Open from the site and signs once; the keeper o
     await page.getByRole("button", { name: "Continue" }).click();
 
     await page.getByLabel("Ticker").fill(ticker);
-    await page.getByLabel("Name").fill("E2E Heartbeat");
-    await page.locator('input[type="file"]').setInputFiles(coinImage);
-    await expect(page.getByText("No protected coin matches this ticker or name.")).toBeVisible();
+    await page.getByLabel("Name").fill(runName("E2E Heartbeat", ticker));
+    await page.locator('input[type="file"]').setInputFiles(await uniqueCoinImage(page, ticker));
+    await expectVampClear(page);
     await page.getByRole("button", { name: "Continue" }).click();
 
     // The schedule: refused teasers say why as they are typed; a later start shows when the coin opens.
@@ -142,7 +142,7 @@ test("a creator schedules a Fair Open from the site and signs once; the keeper o
     // The coin revealed is the one sealed: its name, ticker and metadata URI hash to the launch's identity hash, and its
     // metadata names the same coin and the image the page shows.
     const revealed = await revealedCoin(launch);
-    expect(revealed).toMatchObject({ name: "E2E Heartbeat", ticker });
+    expect(revealed).toMatchObject({ name: runName("E2E Heartbeat", ticker), ticker });
     expect(hex(await identityHash(revealed))).toBe(hex(opened.identityHash));
     const metadata = (await (await fetch(revealed.uri)).json()) as { name: string; symbol: string; image: string };
     expect(metadata).toMatchObject({ name: revealed.name, symbol: revealed.ticker, image: revealed.imageUri });

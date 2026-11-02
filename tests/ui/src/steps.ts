@@ -9,7 +9,63 @@ import { connectTestWallet, installTestWallet, type TestWallet } from "./wallet"
 
 const here = dirname(fileURLToPath(import.meta.url));
 const shots = join(here, "..", "test-results", "shots");
-export const coinImage = join(here, "..", "fixtures", "coin.png");
+/**
+ * A coin's picture made for one run, drawn from `seed` in the page's canvas: shapes, colours and the seed's text, so no
+ * two runs share a picture. Every Fair Open's coin becomes a protected Heat coin at its open (spec 6.2), so a picture
+ * used twice would be refused as a copy of the first coin's, as would a name.
+ */
+export async function uniqueCoinImage(page: Page, seed: string): Promise<{ name: string; mimeType: string; buffer: Buffer }> {
+  const base64 = await page.evaluate(async (seed) => {
+    let h = 2166136261;
+    for (const c of seed) h = Math.imul(h ^ c.charCodeAt(0), 16777619);
+    const random = () => {
+      h ^= h << 13;
+      h ^= h >>> 17;
+      h ^= h << 5;
+      return (h >>> 0) / 4294967296;
+    };
+    const size = 256;
+    const canvas = new OffscreenCanvas(size, size);
+    const ctx = canvas.getContext("2d")!;
+    const hue = Math.floor(random() * 360);
+    ctx.fillStyle = `hsl(${hue} 60% 20%)`;
+    ctx.fillRect(0, 0, size, size);
+    for (let i = 0; i < 9; i++) {
+      ctx.fillStyle = `hsl(${Math.floor(random() * 360)} ${50 + Math.floor(random() * 40)}% ${35 + Math.floor(random() * 40)}%)`;
+      const x = random() * size;
+      const y = random() * size;
+      const r = 18 + random() * 70;
+      ctx.beginPath();
+      const kind = Math.floor(random() * 3);
+      if (kind === 0) ctx.arc(x, y, r, 0, Math.PI * 2);
+      else if (kind === 1) ctx.rect(x - r, y - r / 2, r * 2, r);
+      else {
+        ctx.moveTo(x, y - r);
+        ctx.lineTo(x + r, y + r);
+        ctx.lineTo(x - r, y + r);
+        ctx.closePath();
+      }
+      ctx.fill();
+    }
+    ctx.fillStyle = `hsl(${(hue + 180) % 360} 90% 85%)`;
+    ctx.font = "bold 44px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(seed.slice(-6), size / 2, size / 2 + 16);
+    const bytes = new Uint8Array(await (await canvas.convertToBlob({ type: "image/png" })).arrayBuffer());
+    let binary = "";
+    for (const b of bytes) binary += String.fromCharCode(b);
+    return btoa(binary);
+  }, seed);
+  return { name: `${seed.toLowerCase()}.png`, mimeType: "image/png", buffer: Buffer.from(base64, "base64") };
+}
+
+/** A coin's name made for one run: a protected Heat coin's name is refused to every later launch, like its ticker. */
+export const runName = (base: string, ticker: string) => `${base} ${ticker.slice(-5)}`;
+
+/** Waits for Vamp Shield to clear the coin: its ticker, name and image, the image's check maybe waking the vision service. */
+export async function expectVampClear(page: Page) {
+  await expect(page.getByTestId("vamp-headline")).toHaveText("Clear", { timeout: 90_000 });
+}
 
 /** An address as the pages and the API shorten it. */
 export const short = (a: string) => `${a.slice(0, 4)}\u{2026}${a.slice(-4)}`;
@@ -41,7 +97,8 @@ export async function snap(page: Page, step: string) {
 
 /**
  * Links X as a new creator, launches an Instant launch signed by `creator`, and leaves the page on the Done step; with
- * `linked`, the browser has linked X already and the creator launches again.
+ * `linked`, the browser has linked X already and the creator launches again. The coin's name gets the ticker's ending,
+ * and its picture is drawn for the run (uniqueCoinImage).
  */
 export async function launchCoin(
   page: Page,
@@ -60,9 +117,9 @@ export async function launchCoin(
   await page.getByRole("radio", { name: /Instant launch/ }).check();
   await page.getByRole("button", { name: "Continue" }).click();
   await page.getByLabel("Ticker").fill(coin.ticker);
-  await page.getByLabel("Name").fill(coin.name);
-  await page.locator('input[type="file"]').setInputFiles(coinImage);
-  await expect(page.getByText("No protected coin matches this ticker or name.")).toBeVisible();
+  await page.getByLabel("Name").fill(runName(coin.name, coin.ticker));
+  await page.locator('input[type="file"]').setInputFiles(await uniqueCoinImage(page, coin.ticker));
+  await expectVampClear(page);
   await page.getByRole("button", { name: "Continue" }).click();
   // A creator launching again finds the wallet it connected before connected again on its own.
   if (!linked) await connectTestWallet(page, page.getByRole("main").getByRole("button", { name: "Connect wallet" }));

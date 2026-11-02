@@ -9,7 +9,7 @@ import { fetchLaunch, LaunchStatus } from "@top-pad/clients/fair-open";
 import { FairOpen } from "@top-pad/contract";
 import { chainTime, coinBalance, fundedWallets, rpc, sweep } from "@top-pad/tests-devnet/devnet";
 import { admitted, deposit, newPerson, sellAll } from "@top-pad/tests-devnet/fair-open";
-import { coinImage, newHandle, newTicker, pageErrors, snap } from "./steps";
+import { expectVampClear, newHandle, newTicker, pageErrors, runName, snap, uniqueCoinImage } from "./steps";
 import { TARGET } from "./target";
 import { connectTestWallet, installTestWallet } from "./wallet";
 
@@ -40,9 +40,9 @@ test("a creator whose wallet cannot sign a batch schedules a Fair Open and signs
     await page.getByRole("button", { name: "Authorize app" }).click();
     await page.getByRole("button", { name: "Continue" }).click();
     await page.getByLabel("Ticker").fill(ticker);
-    await page.getByLabel("Name").fill("E2E Late Signer");
-    await page.locator('input[type="file"]').setInputFiles(coinImage);
-    await expect(page.getByText("No protected coin matches this ticker or name.")).toBeVisible();
+    await page.getByLabel("Name").fill(runName("E2E Late Signer", ticker));
+    await page.locator('input[type="file"]').setInputFiles(await uniqueCoinImage(page, ticker));
+    await expectVampClear(page);
     await page.getByRole("button", { name: "Continue" }).click();
     await page.getByRole("button", { name: "Continue" }).click();
 
