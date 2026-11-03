@@ -14,7 +14,8 @@
     "fair-open": "tsx scripts/fair-open.ts",
     "fair-open-open": "tsx scripts/fair-open-open.ts",
     "lookup-table": "tsx scripts/lookup-table.ts",
-    "quote-check": "tsx scripts/quote-check.ts"
+    "quote-check": "tsx scripts/quote-check.ts",
+    "xstock-stand-in": "tsx scripts/xstock-stand-in.ts"
   },
   "dependencies": {
     "@solana-program/address-lookup-table": "^0.15.0",
