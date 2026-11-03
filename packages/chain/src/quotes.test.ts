@@ -2,7 +2,8 @@ import { address, getBase64Encoder, none, some, type Address } from "@solana/kit
 import { AccountState, TOKEN_2022_PROGRAM_ADDRESS, getMintDecoder, type Extension, type Mint } from "@solana-program/token-2022";
 import { describe, expect, it } from "vitest";
 import nvdax from "./fixtures/xstock-nvdax.json";
-import { TOKEN_2022_NATIVE_MINT, TOKEN_PROGRAM_ADDRESS, quoteVerdict, scaledUiMultiplier, type QuoteMint } from "./quotes";
+import standIn from "./fixtures/xstock-stand-in.json";
+import { DEVNET_XSTOCK_STAND_IN, TOKEN_2022_NATIVE_MINT, TOKEN_PROGRAM_ADDRESS, quoteVerdict, scaledUiMultiplier, type QuoteMint } from "./quotes";
 
 // NVDAx's mint as mainnet held it on 2026-11-03, the xStock every case below starts from.
 const NVDAX = getMintDecoder().decode(getBase64Encoder().encode(nvdax.data));
@@ -84,6 +85,30 @@ describe("quoteVerdict", () => {
     expect(quoteVerdict({ ...quote(spl, false), tokenProgram: TOKEN_PROGRAM_ADDRESS }).accepted).toBe(true);
     expect(quoteVerdict({ ...quote(spl, false), address: TOKEN_2022_NATIVE_MINT }).refusals).toEqual(["token-2022-native-mint"]);
     expect(quoteVerdict({ ...quote(spl), tokenProgram: SOME_PROGRAM }).refusals).toEqual(["unknown-token-program"]);
+  });
+});
+
+describe("the devnet stand-in xStock", () => {
+  // Its account as devnet held it on 2026-11-03, just after `xstock-stand-in` made it.
+  const STAND_IN = getMintDecoder().decode(getBase64Encoder().encode(standIn.data));
+  const BANK = address("Ew6E318g8SYCSjCUdRqcpSywRUzuFUPoxLAQWYfZD933");
+
+  it("carries NVDAx's extensions in NVDAx's order, and its decimals", () => {
+    expect(standIn.address).toBe(DEVNET_XSTOCK_STAND_IN);
+    const verdict = quoteVerdict({ ...quote(STAND_IN), address: DEVNET_XSTOCK_STAND_IN });
+    expect(verdict.extensions).toEqual(quoteVerdict(quote(NVDAX)).extensions);
+    expect(STAND_IN.decimals).toBe(NVDAX.decimals);
+    expect(verdict).toMatchObject({ dbcAccepts: true, accepted: true });
+  });
+
+  it("gives Heat's devnet bank every power the xStocks issuer holds", () => {
+    const { powers } = quoteVerdict({ ...quote(STAND_IN), address: DEVNET_XSTOCK_STAND_IN });
+    expect(powers).toMatchObject({ permanentDelegate: BANK, pauseAuthority: BANK, freezeAuthority: BANK, mintAuthority: BANK });
+    expect(powers.scaledUiAmount).toMatchObject({ authority: BANK, multiplier: 1 });
+  });
+
+  it("needs a TokenBadge before DBC takes it", () => {
+    expect(quoteVerdict({ ...quote(STAND_IN, false), address: DEVNET_XSTOCK_STAND_IN }).refusals).toEqual(["needs-token-badge"]);
   });
 });
 
