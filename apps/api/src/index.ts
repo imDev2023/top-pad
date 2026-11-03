@@ -179,6 +179,11 @@ async function housekeeping(db: Db, env: Bindings) {
 
 /** The minute of each hour the protected set's hourly lists and image batch run, apart from the five-minute jobs. */
 const PROTECTED_LISTS_MINUTE = 2;
+/**
+ * The trending job's lease, shorter than the minute between its runs, so a lease the database failed to release skips
+ * no run: on 2026-11-02 one lost release of the default 15-minute lease skipped 15 (#52).
+ */
+const TRENDING_LEASE_SECONDS = 50;
 /** How long an image batch may keep the vision service busy, and when it must stop, inside the cron's 15 minutes. */
 const IMAGE_BATCH_MS = 10 * 60_000;
 const CRON_DONE_BY_MS = 13 * 60_000;
@@ -191,7 +196,7 @@ async function everyMinute(controller: ScheduledController, env: Bindings, ctx: 
   const cfg = config(env);
   const { db, close } = createDb(env.HYPERDRIVE.connectionString);
   try {
-    await runJob(db, "protected-trending", () => refreshTrending(db, env), { exclusive: true }).catch(() => undefined);
+    await runJob(db, "protected-trending", () => refreshTrending(db, env), { exclusive: true, leaseSeconds: TRENDING_LEASE_SECONDS }).catch(() => undefined);
     if (new Date(controller.scheduledTime).getUTCMinutes() === PROTECTED_LISTS_MINUTE) {
       await runJob(db, "protected-lists", () => refreshLists(db, cfg, env), { exclusive: true }).catch(() => undefined);
       // The lists may have spent minutes waiting on CoinGecko's limit: the batch takes what is left.

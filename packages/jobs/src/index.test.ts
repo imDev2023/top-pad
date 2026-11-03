@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createDb, jobLocks, operatorAlerts, type Db } from "@top-pad/db";
+import { eq, sql } from "drizzle-orm";
+import { createDb, jobLocks, jobRuns, operatorAlerts, type Db } from "@top-pad/db";
 import { createTestDatabase } from "@top-pad/db/testing";
 import { JobFailure, runJob } from "./index";
 
@@ -48,5 +49,25 @@ describe("the job runner", () => {
     const done = await runJob(db, "indexer-reconcile", async () => "ok", { exclusive: true });
     expect(done.status).toBe("succeeded");
     expect(await db.select().from(jobLocks)).toHaveLength(0);
+  });
+
+  it("holds a lease for the run's own length when it is given one", async () => {
+    let lease: Date | undefined;
+    await runJob(db, "protected-trending", async () => {
+      lease = (await db.select().from(jobLocks).where(eq(jobLocks.job, "protected-trending")))[0]?.expiresAt;
+    }, { exclusive: true, leaseSeconds: 50 });
+    expect(lease!.getTime() - Date.now()).toBeGreaterThan(40_000);
+    expect(lease!.getTime() - Date.now()).toBeLessThanOrEqual(50_000);
+    expect(await db.select().from(jobLocks)).toHaveLength(0);
+  });
+
+  it("records a failed query's statement and the database's reason, never its parameters", async () => {
+    const twice = () => db.execute(sql`insert into job_locks (job, run_id, expires_at) values ('lists', ${"a sealed coin's name"}, now())`);
+    await expect(runJob(db, "protected-images", async () => { await twice(); await twice(); })).rejects.toThrow();
+    const [run] = await db.select().from(jobRuns).where(eq(jobRuns.job, "protected-images"));
+    expect(run!.error).toBe(
+      'Failed query: insert into job_locks (job, run_id, expires_at) values (\'lists\', $1, now()): duplicate key value violates unique constraint "job_locks_pkey"',
+    );
+    await db.delete(jobLocks);
   });
 });
