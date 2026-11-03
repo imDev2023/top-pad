@@ -11,6 +11,7 @@ from __future__ import annotations
 import contextvars
 import http.client
 import ipaddress
+import re
 import socket
 import ssl
 import time
@@ -23,9 +24,13 @@ TIMEOUT_SECONDS = 15.0
 MAX_REDIRECTS = 3
 IPFS_GATEWAY = "https://ipfs.io/ipfs/"
 # Asked in turn for an IPFS image when its own gateway refuses or fails it. ipfs.io, dweb.link, w3s.link and
-# nftstorage.link share a denylist that refused about one verified logo in seven on 2026-11-02; Pinata's public gateway
-# served them, and 4everland's most, when Pinata's own limit answers 429 to a batch.
+# nftstorage.link share a denylist that refused about one verified logo in seven on 2026-11-02, and their subdomain
+# gateways (nftstorage.link redirects to dweb.link's) answered 429 to all 72 logos they host on 2026-11-03; Pinata's
+# public gateway served them, and 4everland's most, when Pinata's own limit answers 429 to a batch.
 IPFS_FALLBACK_GATEWAYS = ("https://gateway.pinata.cloud/ipfs/", "https://4everland.io/ipfs/")
+# A subdomain gateway's host, <cid>.ipfs.<gateway>: a CIDv1 in lowercase base32 ("b") or base36 ("k"), as a DNS label
+# must be.
+_SUBDOMAIN_GATEWAY = re.compile(r"^(b[a-z2-7]{40,}|k[a-z0-9]{40,})\.ipfs\.")
 
 # Some image hosts and CDNs refuse or degrade requests that do not look like a browser's. AVIF is left out of Accept
 # on purpose: the decoder takes PNG, JPEG, GIF and WebP only, and a CDN that negotiates formats would otherwise send AVIF.
@@ -107,8 +112,8 @@ class Fetcher:
     def fetch(self, url: str) -> tuple[bytes, str]:
         """
         The body at url and its Content-Type, or FetchError; url must already be normalised. An IPFS image (a path under
-        /ipfs/ on any host) that its gateway refuses or fails is asked of the fallback gateways in turn, each with its
-        own deadline; the first error is the one reported if none serves it.
+        /ipfs/ on any host, or a subdomain gateway's) that its gateway refuses or fails is asked of the fallback gateways
+        in turn, each with its own deadline; the first error is the one reported if none serves it.
         """
         try:
             return self._fetch_once(url)
@@ -185,14 +190,19 @@ class Fetcher:
 
 def _ipfs_rest(url: str) -> str | None:
     """
-    What follows /ipfs/ in a gateway URL (the CID, its path and query), or None for a URL that is not one; a gateway may
-    serve under a prefix, as dedicated ones do.
+    The IPFS content a gateway URL names, as a path gateway takes it after /ipfs/: the CID, its path and query; None for
+    a URL that is not a gateway's. A path gateway has it after /ipfs/, under a prefix on dedicated ones; a subdomain
+    gateway has the CID in its host, <cid>.ipfs.<gateway>/<path>.
     """
     parts = urlsplit(url)
+    query = f"?{parts.query}" if parts.query else ""
+    subdomain = _SUBDOMAIN_GATEWAY.match(parts.hostname or "")
+    if subdomain:
+        return subdomain.group(1) + (parts.path if parts.path not in ("", "/") else "") + query
     at = parts.path.find("/ipfs/")
     if at < 0 or len(parts.path) <= at + len("/ipfs/"):
         return None
-    return parts.path[at + len("/ipfs/") :] + (f"?{parts.query}" if parts.query else "")
+    return parts.path[at + len("/ipfs/") :] + query
 
 
 def _worth_another_gateway(error: FetchError) -> bool:

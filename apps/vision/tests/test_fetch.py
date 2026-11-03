@@ -7,7 +7,7 @@ import time
 import pytest
 
 from tests.conftest import PNG_BYTES
-from vision.fetch import FetchError, Fetcher, normalise_url
+from vision.fetch import FetchError, Fetcher, _ipfs_rest, normalise_url
 
 
 @pytest.mark.parametrize(
@@ -122,6 +122,35 @@ def test_the_first_error_is_reported_when_no_gateway_serves_it(image_server):
     fetcher = Fetcher(allow_private_networks=True, ipfs_fallbacks=(f"{image_server}/denying-gateway/ipfs/",))
     with pytest.raises(FetchError, match="HTTP 404"):
         fetcher.fetch(f"{image_server}/missing/ipfs/bafkreigh2akiscaildc")
+
+
+CID = "bafkreia2rq6bzgsq2jw2of54xv6hflj6zvkiw3zba2unmlomo2czhquqqy"
+
+
+@pytest.mark.parametrize(
+    ("url", "rest"),
+    [
+        (f"https://ipfs.io/ipfs/{CID}", CID),
+        (f"https://ipfs.io/ipfs/{CID}/logo.png?filename=a.png", f"{CID}/logo.png?filename=a.png"),
+        (f"https://heat.mypinata.cloud/ipfs/{CID}", CID),
+        (f"https://{CID}.ipfs.nftstorage.link", CID),
+        (f"https://{CID}.ipfs.dweb.link/", CID),
+        (f"https://{CID}.ipfs.w3s.link/logo.png?x=1", f"{CID}/logo.png?x=1"),
+        ("https://ipfs.io/ipfs/", None),
+        ("https://example.com/logo.png", None),
+        (f"https://{CID}.example.com/logo.png", None),
+        ("https://www.ipfs.example.com/logo.png", None),
+    ],
+)
+def test_the_ipfs_content_a_gateway_url_names(url, rest):
+    assert _ipfs_rest(url) == rest
+
+
+def test_a_subdomain_gateways_image_is_asked_of_a_path_gateway(image_server):
+    fetcher = Fetcher(allow_private_networks=True, ipfs_fallbacks=(f"{image_server}/serving-gateway/ipfs/",))
+    # The subdomain gateway does not resolve; the fallback serves the CID by its path.
+    data, content_type = fetcher.fetch(f"http://{CID}.ipfs.gateway.invalid/logo.png")
+    assert data == PNG_BYTES and content_type == "image/png"
 
 
 def test_a_url_outside_ipfs_is_not_asked_elsewhere(image_server):
