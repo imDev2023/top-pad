@@ -617,7 +617,7 @@ As built ([#53](https://github.com/imDev2023/top-pad/issues/53), 2026-11-02):
 - Jito's record is read from its public API (`bundles.jito.wtf`, no key, 404 for a transaction in no bundle) on mainnet only, for the creation and its slot's buys.
 - Measured on the deployed site (2026-11-02, `tests/ui/src/bundle-radar.spec.ts`): the Creator wallet and 4 wallets it funded put 18 buys in an Instant launch's creation slot; the coin's page showed its red flag 15.9 s after the open, and all four wallets linked after 31.1 s, since the indexer reads a slot's transactions one by one, each served 2 to 3 s after its block on Helius's free tier; a sniper the creator never funded, in the same slot but further down it, stayed a yellow label.
 - On devnet, which runs no Jito block engine, a buy sent right behind a launch can land in the four positions after its creation without any tie to the creator, and the position rule then links it: on one devnet run a sniper's buy did.
-  Jito's record settles it on mainnet; the Bundle Radar evaluation (11.5) should measure the position rule alone on launches whose creation was not bundled.
+  Jito's record settles it on mainnet; the Bundle Radar evaluation (11.5) measured the position rule alone on mainnet launches whose creation was not bundled: 258 wallets bought in those four positions after 1,577 such pump.fun launches, another direct link backs 123 of them, and none is known to be wrong, so it stays a direct link ([#61](https://github.com/imDev2023/top-pad/issues/61)).
 
 ### 6.5 Confirmed bundling and bars
 
@@ -625,7 +625,7 @@ Source: [Confirmed bundling](https://github.com/imDev2023/top-pad/issues/34).
 
 - **Only a direct link to the Creator wallet confirms a finding**:
   - the buy's signer or fee payer is the Creator wallet;
-  - the buy sits in the same Jito bundle as the coin's creation transaction, or in positions 1 to 4 right after it (185 of 186 such buys were in the launch bundle);
+  - the buy sits in the same Jito bundle as the coin's creation transaction, or in positions 1 to 4 right after it (185 of 186 such buys were in the launch bundle; measured again on 411 bundled mainnet launches, 650 of 652 wallets, both misses at position 4, section 11.5);
   - SOL or coins passed directly between the buying wallet and the Creator wallet in the 7 days before the open, or as proceeds sent back in the 7 days after it.
 - Probabilistic signals (multi-hop funding, exchange time windows, matching amounts or timing) only ever label.
 - **A floor of 1% of supply**: the linked wallets must have bought 1% or more between them, counted across the pot and the first hour of trading.
@@ -925,6 +925,16 @@ A graduation's real cost is the fifth of its target that stays locked in the gra
 - The Cryptstarter and Harmonized fleet (about 70 wallets across five launches, funded through exchanges and hop wallets) is the second case, covering what Jito cannot see.
 - Built with standard RPC reads on free tiers and Jito's public API; no paid Bitquery archive.
 
+As built ([#61](https://github.com/imDev2023/top-pad/issues/61), 2026-11-03), the report in [`docs/bundle-radar-evaluation.md`](bundle-radar-evaluation.md):
+- `pnpm --filter @top-pad/tests-radar-eval evaluate` reads 2,000 pump.fun launches, an even sample of the 40,384 made on 2026-10-25, from Solana's public mainnet endpoint and Jito's public API, keeps what it read in `tests/radar-eval/data`, and scores Bundle Radar's own rules (`labelBuy`, `fundingLinks`, `walletLabels`, which `radarOf` calls) against Jito's record of which buyers sat in the creation's bundle.
+- Jito bundled 411 of the 1,988 creations read (20.7%), and 900 wallets other than the Creator wallet bought those in their creation slot, 650 of them in the bundle.
+- No signal reaches 99% at the 95% Wilson lower bound, so none is promoted: positions 1 to 4, 652 flagged and 2 wrong (98.89%); signed or paid by the Creator wallet, 29 flagged and none wrong (88.30%, too few to pass); direct transfers, 263 flagged and 3 wrong (96.70%); the direct links together, 655 flagged and 5 wrong (98.23%).
+- Every wrong flag was a buy at position 4 or a trade, one transaction in which the Creator wallet sent the buyer coins and the buyer paid it SOL; positions 1 to 3 alone, and the direct links without position 4 and trades, made no mistake over 628 and 631 wallets (99.39%), but they were chosen after seeing the wrong flags, so they need a fresh day's launches before a rule changes.
+- So a person confirming a case (6.5) checks each link: about 1 in 130 direct-linked wallets sat outside the creator's bundle.
+- The fleet: of its 242 wallets, 234 joined or bought its five launches; direct links found 27, all CSTARTER's, through the proceeds sent back that define the fleet, and none of the other four launches', so funding through exchanges and hop wallets stays out of a direct link's reach.
+  Three of its launchpads pay the creator's fee to the Creator wallet in every trade, which reads as a direct transfer from every buyer; Heat's programs never pay the creator from a trade.
+- The kept set holds every creation-slot buy with its signers, block position and Jito bundle for the known-bot thresholds: 120 wallets bought in the creation slot of 3 or more launches, and 52 of them sat in a creation's bundle at least once.
+
 ## 12. Parameters
 
 | Parameter | Value | Source |
@@ -968,7 +978,7 @@ A graduation's real cost is the fifth of its target that stays locked in the gra
 | Trending window and refresh | last hour, recomputed every 15 s | [#37](https://github.com/imDev2023/top-pad/issues/37), [#36](https://github.com/imDev2023/top-pad/issues/36) |
 | Known-bot rule | first 2 s of 3 or more launches, or an in-transaction buy and sell | [#36](https://github.com/imDev2023/top-pad/issues/36) |
 | Candle retention | 1 s for 7 days, 15 s for 30 days, coarser forever | [#36](https://github.com/imDev2023/top-pad/issues/36) |
-| Bundle Radar evaluation | 2,000 launches, 99% at the 95% Wilson lower bound | [#35](https://github.com/imDev2023/top-pad/issues/35) |
+| Bundle Radar evaluation | 2,000 launches, 99% at the 95% Wilson lower bound; no signal passed (2026-11-03, section 11.5) | [#35](https://github.com/imDev2023/top-pad/issues/35), [#61](https://github.com/imDev2023/top-pad/issues/61) |
 | Cohort | about 30 creators and 100 traders, 2 weeks, 1 devnet SOL each | [#35](https://github.com/imDev2023/top-pad/issues/35) |
 | Upgrade timelock (mainnet) | 7 days, Squads | [#30](https://github.com/imDev2023/top-pad/issues/30) |
 
@@ -1053,6 +1063,7 @@ Risks that devnet cannot settle:
 - **Demand**: no evidence yet shows anyone picking a launchpad for a deposit window, or depositing blind into a sealed coin; the cohort measures it weakly.
 - **Upgradeable dependencies**: Meteora can upgrade DBC and DAMM v2 (one shared upgrade authority, `JADaUV8kvDpDbJr55wxXJHVaBS3VCj8thZZHjfeuCVLd`), and Jupiter can upgrade the Lock program (`CvQZZ23qYDWF2RUpxYJ8y9K4skmuvYEEjH7fK58jtipQ`); Jupiter Lock's source repository now returns 404.
 - **The guarantee's edge**: anyone can create pools on our configs; they are not listed, but aggregators may still name them after us.
+- **Mainnet's version 1 transactions**: mainnet carries them (2026-11), and a read asking `maxSupportedTransactionVersion: 0` is refused (-32015), a block holding one refused whole; the indexer's block and transaction reads, the funding scans' included, still ask for 0, which devnet allows, so they must ask for 1 and decode it before mainnet ([#61](https://github.com/imDev2023/top-pad/issues/61)).
 - **Admission key**: a stolen admission key could admit fake persons up to the tier caps until it is rotated (on mainnet, through the timelock).
 - **Prior art**: "fair launch on Meteora" has already been used as a scam wrapper (Cryptstarter and Harmonized), so every promise must be checkable on chain, not just claimed.
 
