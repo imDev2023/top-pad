@@ -1,0 +1,17 @@
+{
+  "name": "@top-pad/tests-radar-eval",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "evaluate": "tsx src/main.ts",
+    "test": "vitest run",
+    "typecheck": "tsc -p ."
+  },
+  "devDependencies": {
+    "@solana/kit": "^8.5.0",
+    "@top-pad/indexer": "workspace:*",
+    "@types/node": "^24.19.2",
+    "tsx": "^4.23.15",
+    "vitest": "^5.0.5"
+  }
+}
