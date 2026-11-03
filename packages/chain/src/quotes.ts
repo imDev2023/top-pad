@@ -7,6 +7,12 @@ import { AccountState, TOKEN_2022_PROGRAM_ADDRESS, type Extension, type Mint } f
 export const TOKEN_PROGRAM_ADDRESS = address("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 /** Token-2022's own wrapped SOL, which DBC refuses as a quote; SOL is quoted as the SPL Token wrapped SOL mint. */
 export const TOKEN_2022_NATIVE_MINT = address("9pan9bMn5HatX4EJdBwg9VgCa7Uz5HL8N1m5D3NdXejP");
+/**
+ * Devnet's stand-in xStock (spec 11.2), made on 2026-11-03 by `pnpm --filter @top-pad/chain xstock-stand-in devnet
+ * --send` with NVDAx's extensions, Heat's devnet bank holding every issuer authority. DBC takes it as a quote once Meteora
+ * creates its devnet TokenBadge (#26).
+ */
+export const DEVNET_XSTOCK_STAND_IN = address("Wm7nXsHnoHJm3NemWaLbnxd7QkmeHLALucsFC4qTUNK");
 /** How Token-2022 stores an unset optional authority: 32 zero bytes. */
 const NONE = address("11111111111111111111111111111111");
 
