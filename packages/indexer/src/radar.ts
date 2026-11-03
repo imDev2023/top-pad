@@ -83,6 +83,75 @@ export type Radar = {
   wallets: RadarWallet[];
 };
 
+// The rules themselves, as pure functions over what the chain says, so the Bundle Radar evaluation (spec 11.5) runs the
+// same code over mainnet launches that `radarOf` runs over Heat's indexed rows.
+
+/** A coin's creation transaction, as the rules read it. */
+export type RadarCreation = {
+  creator: string;
+  slot: number;
+  /** Its place in its block, or null when it is not known. */
+  blockIndex: number | null;
+  /** The Jito bundle it landed in (mainnet only), or null. */
+  jitoBundle: string | null;
+};
+
+/** A buy, as the rules read it. */
+export type RadarBuyFacts = {
+  trader: string;
+  slot: number;
+  blockIndex: number;
+  /** Its transaction's signers, the fee payer first; null when not recorded. */
+  signers: readonly string[] | null;
+  /** The Jito bundle it landed in (mainnet only), or null. */
+  jitoBundle: string | null;
+};
+
+/**
+ * A buy's labels and its place after the creation (spec 6.4): `same_slot` for a buy in the creation slot;
+ * `after_creation` for one in the four positions right after the creation transaction; `jito_bundle` for one in the
+ * creation's Jito bundle; `creator_signed` for one the Creator wallet signed or paid for, other than its own.
+ */
+export function labelBuy(creation: RadarCreation, buy: RadarBuyFacts): { position: number | null; labels: RadarLabel[] } {
+  const own = buy.trader === creation.creator;
+  const sameSlot = buy.slot === creation.slot;
+  const position = sameSlot && creation.blockIndex !== null && buy.blockIndex > creation.blockIndex ? buy.blockIndex - creation.blockIndex : null;
+  const labels: RadarLabel[] = [];
+  if (sameSlot) labels.push("same_slot");
+  if (position !== null && position <= POSITIONS_AFTER_CREATION) labels.push("after_creation");
+  if (creation.jitoBundle && buy.jitoBundle === creation.jitoBundle) labels.push("jito_bundle");
+  if (!own && buy.signers?.includes(creation.creator)) labels.push("creator_signed");
+  return { position, labels };
+}
+
+/**
+ * The funding graph's direct links (spec 6.5): the Creator wallet's direct transfers within 7 days either side of the
+ * open, by the wallet on their other side.
+ */
+export function fundingLinks<T extends Pick<RadarTransfer, "source" | "destination" | "at">>(creator: string, openedAt: Date, transfers: readonly T[]): Map<string, T[]> {
+  const from = openedAt.getTime() - FUNDING_WINDOW_MS;
+  const to = openedAt.getTime() + FUNDING_WINDOW_MS;
+  const links = new Map<string, T[]>();
+  for (const t of transfers) {
+    const at = t.at.getTime();
+    if (at < from || at > to || (t.source !== creator && t.destination !== creator)) continue;
+    const other = t.source === creator ? t.destination : t.source;
+    if (other === creator) continue;
+    links.set(other, [...(links.get(other) ?? []), t]);
+  }
+  return links;
+}
+
+/** A wallet's labels: its buys' labels, `creator_funded` when it passed funds with the Creator wallet, in a fixed order. */
+export function walletLabels({ buyLabels, funded, creator }: { buyLabels: readonly RadarLabel[]; funded: boolean; creator: boolean }): RadarLabel[] {
+  const labels = new Set(buyLabels);
+  if (!creator && funded) labels.add("creator_funded");
+  return (["same_slot", "after_creation", "jito_bundle", "creator_signed", "creator_funded"] as const).filter((l) => labels.has(l));
+}
+
+/** Whether labels hold a direct link to the Creator wallet, which alone can put a wallet in a case (spec 6.5). */
+export const isDirectLink = (labels: readonly RadarLabel[]) => labels.some((l) => DIRECT_LINKS.has(l));
+
 /** A Heat coin as Bundle Radar reads it, or null for a pool our launch key never co-signed (spec 2.4). */
 async function coinOf(db: Db, mint: string) {
   const [row] = await db
@@ -117,6 +186,7 @@ export async function radarOf(db: Db, mint: string): Promise<Radar | null> {
 
   const [creationJito] = await db.select({ bundleId: jitoBundles.bundleId }).from(jitoBundles).where(eq(jitoBundles.signature, coin.createdSignature));
   const creationBundle = creationJito?.bundleId ?? null;
+  const creation: RadarCreation = { creator, slot: coin.createdSlot, blockIndex: coin.creationIndex, jitoBundle: creationBundle };
 
   // The Creator wallet's direct transfers in the window, by the other wallet.
   const transferRows = await db
@@ -124,11 +194,11 @@ export async function radarOf(db: Db, mint: string): Promise<Radar | null> {
     .from(transfers)
     .where(and(or(eq(transfers.source, creator), eq(transfers.destination, creator)), gte(transfers.at, from), lte(transfers.at, to)))
     .orderBy(transfers.at, transfers.signature, transfers.ordinal);
-  const funded = new Map<string, RadarTransfer[]>();
-  for (const t of transferRows) {
-    const other = t.source === creator ? t.destination : t.source;
-    funded.set(other, [...(funded.get(other) ?? []), { ...t, amount: BigInt(t.amount) }]);
-  }
+  const funded = fundingLinks(
+    creator,
+    coin.openedAt,
+    transferRows.map((t): RadarTransfer => ({ ...t, amount: BigInt(t.amount) })),
+  );
   const fundedWallets = [...funded.keys()];
 
   // The buys that may carry a label: in the creation slot, by a wallet the Creator wallet passed funds with, signed or
@@ -165,14 +235,7 @@ export async function radarOf(db: Db, mint: string): Promise<Radar | null> {
     const key = `${trade.signature}:${trade.eventIndex}`;
     if (seen.has(key)) return;
     seen.add(key);
-    const own = trade.trader === creator;
-    const sameSlot = trade.slot === coin.createdSlot;
-    const position = sameSlot && coin.creationIndex !== null && trade.blockIndex > coin.creationIndex ? trade.blockIndex - coin.creationIndex : null;
-    const labels: RadarLabel[] = [];
-    if (sameSlot) labels.push("same_slot");
-    if (position !== null && position <= POSITIONS_AFTER_CREATION) labels.push("after_creation");
-    if (creationBundle && jitoBundle === creationBundle) labels.push("jito_bundle");
-    if (!own && signers?.includes(creator)) labels.push("creator_signed");
+    const { position, labels } = labelBuy(creation, { trader: trade.trader, slot: trade.slot, blockIndex: trade.blockIndex, signers, jitoBundle });
     walletOf(trade.trader).buys.push({
       signature: trade.signature,
       eventIndex: trade.eventIndex,
@@ -207,7 +270,7 @@ export async function radarOf(db: Db, mint: string): Promise<Radar | null> {
   const linkedWallets = new Set([...funded.keys(), ...signedFor, ...buyRows.filter((r) => directlyLinked(r.trade.trader)).map((r) => r.trade.trader)]);
   linkedWallets.delete(creator);
   function directlyLinked(wallet: string) {
-    return wallets.get(wallet)?.buys.some((b) => b.labels.some((l) => DIRECT_LINKS.has(l))) ?? false;
+    return wallets.get(wallet)?.buys.some((b) => isDirectLink(b.labels)) ?? false;
   }
   const unseen = [...linkedWallets].filter((w) => !funded.has(w));
   if (unseen.length) (await buysOf(inArray(trades.trader, unseen))).forEach(addBuy);
@@ -220,10 +283,9 @@ export async function radarOf(db: Db, mint: string): Promise<Radar | null> {
   for (const w of wallets.values()) w.buys.sort((a, b) => a.slot - b.slot || a.at.getTime() - b.at.getTime());
 
   for (const w of wallets.values()) {
-    const labels = new Set(w.buys.flatMap((b) => b.labels));
-    if (!w.creator && w.transfers.length) labels.add("creator_funded");
-    if (w.deposits.some((d) => d.creatorSigned)) labels.add("creator_signed");
-    w.labels = (["same_slot", "after_creation", "jito_bundle", "creator_signed", "creator_funded"] as const).filter((l) => labels.has(l));
+    const buyLabels = w.buys.flatMap((b) => b.labels);
+    if (w.deposits.some((d) => d.creatorSigned)) buyLabels.push("creator_signed");
+    w.labels = walletLabels({ buyLabels, funded: w.transfers.length > 0, creator: w.creator });
     w.linked = linkedWallets.has(w.wallet);
     // A wallet not linked shows only its labelled buys.
     if (!w.linked) w.buys = w.buys.filter((b) => b.labels.length);
