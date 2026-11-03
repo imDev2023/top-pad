@@ -13,13 +13,15 @@
     "fair-open-config": "tsx scripts/fair-open-config.ts",
     "fair-open": "tsx scripts/fair-open.ts",
     "fair-open-open": "tsx scripts/fair-open-open.ts",
-    "lookup-table": "tsx scripts/lookup-table.ts"
+    "lookup-table": "tsx scripts/lookup-table.ts",
+    "quote-check": "tsx scripts/quote-check.ts"
   },
   "dependencies": {
     "@solana-program/address-lookup-table": "^0.15.0",
     "@solana-program/compute-budget": "^0.20.0",
     "@solana-program/system": "^0.16.0",
     "@solana-program/token": "^0.18.0",
+    "@solana-program/token-2022": "0.20.0",
     "@solana/kit": "^8.5.0",
     "@top-pad/clients": "workspace:*",
     "@top-pad/contract": "workspace:*"
