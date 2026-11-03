@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { and, eq, sql } from "drizzle-orm";
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { CLUSTERS } from "@top-pad/chain";
 import { coins, createDb, pools, protectedCoins, protectedImages, trades, type Db } from "@top-pad/db";
 import { createTestDatabase } from "@top-pad/db/testing";
@@ -235,6 +235,9 @@ describe("the hourly refresh", () => {
 
 describe("Heat's own coins", () => {
   const env = () => testBindings(url);
+  // No chain: a holder count the pool does not hold fresh fails at once, rather than asking devnet's public RPC, whose
+  // slow answers timed this test out (2026-11-03).
+  beforeEach(() => void outside({}));
 
   it("protects a Fair Open's coin, and an Instant coin that reaches 100 holders, with its ticker's key when free", async () => {
     await db.update(coins).set({ launchMode: "fair_open" }).where(eq(coins.mint, MINT));
