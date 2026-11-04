@@ -3,7 +3,10 @@
 // creator's coins locked, the Tax Share collected once the Tax window ends and pushed to every seat, closing it, and the
 // launch closed; or, if the open cannot run, the launch marked failed and every seat refunded; then the nonce's rent back
 // to the creator and the ticker released. The Workflow in ./keeperWorkflow runs each as a step, and every step is safe to
-// repeat: each reads the chain first and does only what is still undone, so a step tried again does nothing twice.
+// repeat: each reads the chain first and does only what is still undone, so a step tried again does nothing twice. A
+// launch in a quote other than SOL is kept the same way, its quote read from the chain: every refund and Tax Share goes
+// from its pot to the wallet's associated account of the quote, which the keeper makes first for a wallet that closed it
+// (ADR 0007 decision 1).
 import {
   address,
   appendTransactionMessageInstructions,
@@ -33,17 +36,22 @@ import {
   FAIR_OPEN_PROGRAM_ADDRESS,
   fairOpenPhase,
   fetchLookupTable,
+  fetchQuoteToken,
+  inSol,
+  pushSeats as pushSeatsIn,
+  quoteTokenAccount,
+  quoteTokenAccountInstruction,
+  refundSeats,
+  taxShareSeats,
+  type QuoteToken,
   LATE_OPEN_SECONDS,
   lockCreatorInstructions,
   markFailedInstructions,
   pushInstructions,
   pushTaxShareInstructions,
-  PUSH_SEATS,
-  REFUND_SEATS,
   refundsInstructions,
   rungAtOrBelow,
   SEAT_LAYOUT,
-  TAX_SHARE_SEATS,
   type LookupTable,
 } from "@top-pad/chain";
 import { fetchVirtualPool } from "@top-pad/clients/dbc";
@@ -111,6 +119,32 @@ async function keeperSends(cfg: Config, rpc: Rpc, keeper: Keeper, instructions: 
   const signature = getSignatureFromTransaction(transaction);
   await sendAndConfirm(rpc, getBase64EncodedWireTransaction(transaction), signature);
   return signature;
+}
+
+/** Associated accounts of a token quote a transaction makes at most, each about 25,000 units and 100 bytes. */
+const QUOTE_ACCOUNTS_AT_ONCE = 4;
+
+/**
+ * In a quote other than SOL, makes each of `owners`' associated accounts of the quote that does not exist, our keeper
+ * paying its rent: the pot pays refunds and Tax Shares only into them, and a depositor may have closed theirs after
+ * depositing from it. Nothing in SOL, or when every account exists, which is the usual case.
+ */
+async function ensureQuoteAccounts(cfg: Config, rpc: Rpc, keeper: Keeper, quote: QuoteToken, owners: Address[]): Promise<number> {
+  if (inSol(quote) || owners.length === 0) return 0;
+  const unique = [...new Set(owners)];
+  const accounts = await Promise.all(unique.map((owner) => quoteTokenAccount(owner, quote)));
+  const missing: Address[] = [];
+  for (let i = 0; i < accounts.length; i += 100) {
+    const { value } = await rpc.getMultipleAccounts(accounts.slice(i, i + 100), { encoding: "base64", commitment: "confirmed" }).send(limited());
+    value.forEach((account, j) => {
+      if (!account) missing.push(unique[i + j]!);
+    });
+  }
+  for (let i = 0; i < missing.length; i += QUOTE_ACCOUNTS_AT_ONCE) {
+    const made = await Promise.all(missing.slice(i, i + QUOTE_ACCOUNTS_AT_ONCE).map((owner) => quoteTokenAccountInstruction(keeper.signer, owner, quote)));
+    await keeperSends(cfg, rpc, keeper, made);
+  }
+  return missing.length;
 }
 
 /** Where a Fair Open stands on chain, and when it opens and is late, in milliseconds since the epoch. */
@@ -377,7 +411,7 @@ async function seatsOf(rpc: Rpc, launch: Address): Promise<SeatAccount[]> {
 export type Delivered = { transactions: number; seats: number; remaining: number };
 
 /**
- * Step 4: every seat gets its coins and refund (spec 2.1 step 12), 7 seats a push and 10 pushes at a time, round after
+ * Step 4: every seat gets its coins and refund (spec 2.1 step 12), 7 seats a push (5 in a token quote) and 10 pushes at a time, round after
  * round until none is left; the creator's seat waits for the Creator lock (#49). A push names only seats still owed, and
  * the program passes over a seat already delivered, so a step tried again sends nothing for those.
  */
@@ -389,6 +423,8 @@ export async function pushSeats(db: Db, cfg: Config, keeperKey: SecretBinding, l
   const found = await fetchMaybeLaunch(rpc, launch, { commitment: "confirmed", ...limited() });
   if (!found.exists || found.data.status !== LaunchStatus.Opened) throw new Error(`${launch} has not opened`);
   const account = found.data;
+  const quote = await fetchQuoteToken(rpc, account.quoteMint);
+  const perPush = pushSeatsIn(quote);
   let transactions = 0;
   let seats = 0;
   for (let round = 0; round < 10; round++) {
@@ -397,12 +433,18 @@ export async function pushSeats(db: Db, cfg: Config, keeperKey: SecretBinding, l
       await db.update(launches).set({ deliveredAt: sql`now()` }).where(and(eq(launches.fairOpen, launch), isNull(launches.deliveredAt)));
       return { transactions, seats, remaining: 0 };
     }
+    await ensureQuoteAccounts(cfg, rpc, keeper, quote, waiting.map((s) => s.wallet));
     const batches: SeatAccount[][] = [];
-    for (let i = 0; i < waiting.length; i += PUSH_SEATS) batches.push(waiting.slice(i, i + PUSH_SEATS));
+    for (let i = 0; i < waiting.length; i += perPush) batches.push(waiting.slice(i, i + perPush));
     for (let i = 0; i < batches.length; i += PUSHES_AT_ONCE) {
       const sent = await Promise.allSettled(
         batches.slice(i, i + PUSHES_AT_ONCE).map(async (batch) =>
-          keeperSends(cfg, rpc, keeper, await pushInstructions({ launch, mint: account.mint, payer: keeper.signer, seats: batch, computeUnitPrice: cfg.computeUnitPrice })),
+          keeperSends(
+            cfg,
+            rpc,
+            keeper,
+            await pushInstructions({ launch, mint: account.mint, payer: keeper.signer, seats: batch, computeUnitPrice: cfg.computeUnitPrice, quote }),
+          ),
         ),
       );
       for (const [j, result] of sent.entries()) {
@@ -439,7 +481,9 @@ export async function lockCreator(cfg: Config, keeperKey: SecretBinding, launch:
   if (!seat) return { signatures: [], locked: false };
   const keeper = await loadKeeper(keeperKey, heat.keys.keeper);
   const pool = await dbcPoolAddress(found.data.dbcConfig, found.data.mint, found.data.quoteMint);
-  const instructions = await lockCreatorInstructions({ launch, creator, seat: seat.seat, mint: found.data.mint, pool, computeUnitPrice: cfg.computeUnitPrice });
+  const quote = await fetchQuoteToken(rpc, found.data.quoteMint);
+  await ensureQuoteAccounts(cfg, rpc, keeper, quote, [creator]);
+  const instructions = await lockCreatorInstructions({ launch, creator, seat: seat.seat, mint: found.data.mint, pool, computeUnitPrice: cfg.computeUnitPrice, quote });
   return { signatures: [await keeperSends(cfg, rpc, keeper, instructions)], locked: true };
 }
 
@@ -452,7 +496,7 @@ export async function taxWindowEnd(cfg: Config, launch: Address): Promise<number
   if (!found.exists || found.data.status !== LaunchStatus.Opened) throw new Error(`${launch} has not opened`);
   const pool = await dbcPoolAddress(found.data.dbcConfig, found.data.mint, found.data.quoteMint);
   const state = await fetchVirtualPool(rpc, pool, limited());
-  return Number(claimablePool(pool, state.data.poolState, heat.quote.mint).windowEndsAt) * 1000;
+  return Number(claimablePool(pool, state.data.poolState, found.data.quoteMint).windowEndsAt) * 1000;
 }
 
 /**
@@ -470,11 +514,20 @@ export async function collectTaxShare(cfg: Config, keeperKey: SecretBinding, lau
   const record = await fetchMaybeCoinRecord(rpc, (await findCoinRecordPda({ mint: found.data.mint }))[0], limited());
   if (!record.exists) throw new Error(`${found.data.mint} has no CoinRecord on chain yet`);
   const state = await fetchVirtualPool(rpc, record.data.pool, limited());
-  const pool = claimablePool(record.data.pool, state.data.poolState, heat.quote.mint);
+  const pool = claimablePool(record.data.pool, state.data.poolState, found.data.quoteMint);
   const keeper = await loadKeeper(keeperKey, heat.keys.keeper);
+  const quote = await fetchQuoteToken(rpc, found.data.quoteMint);
   const sentAt = Date.now();
   try {
-    const signature = await keeperSends(cfg, rpc, keeper, await collectTaxShareInstructions({ launch, pool, treasury: heat.keys.treasury, computeUnitPrice: cfg.computeUnitPrice }));
+    const instructions = await collectTaxShareInstructions({
+      launch,
+      pool,
+      treasury: heat.keys.treasury,
+      computeUnitPrice: cfg.computeUnitPrice,
+      quote,
+      payer: keeper.signer,
+    });
+    const signature = await keeperSends(cfg, rpc, keeper, instructions);
     return { signatures: [signature], sentLateMs: sentAt - Number(pool.windowEndsAt) * 1000 };
   } catch (e) {
     // Most often "The pool's Tax window has not ended": the chain's clock trails this Worker's by a second or so.
@@ -484,7 +537,7 @@ export async function collectTaxShare(cfg: Config, keeperKey: SecretBinding, lau
 
 /**
  * Step 6: every seat but the creator's is paid its Tax Share and closes, its rent back to its wallet (spec 2.1 step 14),
- * 13 seats a push and 10 pushes at a time, round after round; then the launch closes, its rent and what is left of the
+ * 13 seats a push (8 in a token quote) and 10 pushes at a time, round after round; then the launch closes, its rent and what is left of the
  * creator's prepaid rent going back to the creator. A push names only seats still open, so a step tried again sends
  * nothing for those paid.
  */
@@ -495,23 +548,28 @@ export async function pushTaxShare(cfg: Config, keeperKey: SecretBinding, launch
   const keeper = await loadKeeper(keeperKey, heat.keys.keeper);
   const signatures: string[] = [];
   let seats = 0;
+  let quote: QuoteToken | null = null;
   for (let round = 0; round < 10; round++) {
     const found = await fetchMaybeLaunch(rpc, launch, { commitment: "confirmed", ...limited() });
     if (!found.exists) return { signatures, seats, closed: true };
     if (!found.data.taxCollected) throw new Error(`${launch} has not collected its Tax Share`);
+    quote ??= await fetchQuoteToken(rpc, found.data.quoteMint);
     const waiting = (await seatsOf(rpc, launch)).filter((s) => s.delivered && s.wallet !== found.data.creator);
     if (waiting.length === 0) {
       // Every seat has closed, the creator's with the Creator lock: the launch is done.
       if (found.data.seats > 0) throw new Error(`${found.data.seats} seats of ${launch} are still open, owed their coins or the Creator lock`);
-      signatures.push(await keeperSends(cfg, rpc, keeper, await closeLaunchInstructions({ launch, creator: found.data.creator, computeUnitPrice: cfg.computeUnitPrice })));
+      const close = await closeLaunchInstructions({ launch, creator: found.data.creator, computeUnitPrice: cfg.computeUnitPrice, quote });
+      signatures.push(await keeperSends(cfg, rpc, keeper, close));
       return { signatures, seats, closed: true };
     }
+    await ensureQuoteAccounts(cfg, rpc, keeper, quote, waiting.map((s) => s.wallet));
+    const perPush = taxShareSeats(quote);
     const batches: SeatAccount[][] = [];
-    for (let i = 0; i < waiting.length; i += TAX_SHARE_SEATS) batches.push(waiting.slice(i, i + TAX_SHARE_SEATS));
+    for (let i = 0; i < waiting.length; i += perPush) batches.push(waiting.slice(i, i + perPush));
     for (let i = 0; i < batches.length; i += PUSHES_AT_ONCE) {
       const sent = await Promise.allSettled(
         batches.slice(i, i + PUSHES_AT_ONCE).map(async (batch) =>
-          keeperSends(cfg, rpc, keeper, await pushTaxShareInstructions({ launch, seats: batch, computeUnitPrice: cfg.computeUnitPrice })),
+          keeperSends(cfg, rpc, keeper, await pushTaxShareInstructions({ launch, seats: batch, computeUnitPrice: cfg.computeUnitPrice, quote })),
         ),
       );
       for (const [j, result] of sent.entries()) {
@@ -549,12 +607,15 @@ export async function failAndRefund(cfg: Config, keeperKey: SecretBinding, launc
     if (!found.exists) return { marked, refunded: 0, closed: false };
   }
   if (found.data.status !== LaunchStatus.Failed) throw new Error(`${launch} opened: it has nothing to refund`);
+  const quote = await fetchQuoteToken(rpc, found.data.quoteMint);
   const seats = await seatsOf(rpc, launch);
-  for (let i = 0; i < seats.length; i += REFUND_SEATS) {
-    const batch = seats.slice(i, i + REFUND_SEATS).map(({ seat, wallet }) => ({ seat, wallet }));
-    await keeperSends(cfg, rpc, keeper, await refundsInstructions({ launch, seats: batch, computeUnitPrice: cfg.computeUnitPrice }));
+  await ensureQuoteAccounts(cfg, rpc, keeper, quote, seats.map((s) => s.wallet));
+  const perRefund = refundSeats(quote);
+  for (let i = 0; i < seats.length; i += perRefund) {
+    const batch = seats.slice(i, i + perRefund).map(({ seat, wallet }) => ({ seat, wallet }));
+    await keeperSends(cfg, rpc, keeper, await refundsInstructions({ launch, seats: batch, computeUnitPrice: cfg.computeUnitPrice, quote }));
   }
-  await keeperSends(cfg, rpc, keeper, await closeLaunchInstructions({ launch, creator: found.data.creator, computeUnitPrice: cfg.computeUnitPrice }));
+  await keeperSends(cfg, rpc, keeper, await closeLaunchInstructions({ launch, creator: found.data.creator, computeUnitPrice: cfg.computeUnitPrice, quote }));
   return { marked, refunded: seats.length, closed: true };
 }
 

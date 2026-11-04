@@ -1,7 +1,9 @@
-// `pnpm --filter @top-pad/chain lookup-table devnet [--send]`: makes Heat's shared address lookup table (spec 2.1 step
-// 10), which every open's creation transaction and every push compresses its common accounts through: it creates the
-// table with every address `fairOpenLookupTableAddresses` lists, then freezes it, so no one can ever change what a signed
-// rung's lookups resolve to. Heat's bank pays and holds the table's authority until the freeze (BANK_KEYPAIR, or
+// `pnpm --filter @top-pad/chain lookup-table devnet [--refresh] [--send]`: makes Heat's shared address lookup table
+// (spec 2.1 step 10), which every open's creation transaction and every push compresses its common accounts through: it
+// creates the table with every address `fairOpenLookupTableAddresses` lists, then freezes it, so no one can ever change
+// what a signed rung's lookups resolve to. A frozen table is never changed, so a new address means a new table:
+// --refresh makes one beside the cluster's current table, which every rung already signed keeps naming and which stays
+// on chain, frozen; the new one must hold every address the current one does (#88 added Token-2022 and the quotes). Heat's bank pays and holds the table's authority until the freeze (BANK_KEYPAIR, or
 // ~/.config/top-pad/<cluster>/bank.json). It prints the table's address, which goes into `CLUSTERS`. It simulates first
 // and sends only with --send; the RPC is DEVNET_RPC_URL, or the public endpoint.
 import { readFileSync } from "node:fs";
@@ -37,13 +39,14 @@ import { CLUSTERS, fairOpenLookupTableAddresses } from "../src/index";
 
 const [cluster, ...flags] = process.argv.slice(2);
 const send = flags.includes("--send");
+const refresh = flags.includes("--refresh");
 const heat = cluster === "devnet" ? CLUSTERS.devnet : null;
 if (!heat?.configs) {
-  console.error("Usage: pnpm --filter @top-pad/chain lookup-table devnet [--send]");
+  console.error("Usage: pnpm --filter @top-pad/chain lookup-table devnet [--refresh] [--send]");
   process.exit(1);
 }
-if (heat.lookupTable) {
-  console.error(`${cluster} has its lookup table already, ${heat.lookupTable}; a frozen table is never replaced lightly.`);
+if (heat.lookupTable && !refresh) {
+  console.error(`${cluster} has its lookup table already, ${heat.lookupTable}; a frozen table is never replaced lightly (--refresh).`);
   process.exit(1);
 }
 
@@ -81,6 +84,17 @@ async function run(what: string, payer: KeyPairSigner, instructions: Instruction
 }
 
 const addresses = await fairOpenLookupTableAddresses(heat);
+if (heat.lookupTable) {
+  const current = await fetchAddressLookupTable(rpc, heat.lookupTable, { commitment: "confirmed" });
+  const missing = current.data.addresses.filter((a) => !addresses.includes(a));
+  if (missing.length > 0) throw new Error(`the new table would leave out ${missing.join(", ")}, which ${heat.lookupTable} holds`);
+  const added = addresses.filter((a) => !current.data.addresses.includes(a));
+  if (added.length === 0) {
+    console.log(`${heat.lookupTable} holds every address already; nothing to refresh.`);
+    process.exit(0);
+  }
+  console.log(`Refreshing ${heat.lookupTable}, adding ${added.length}: ${added.join(", ")}`);
+}
 // A table's address commits to a recent slot the program finds in the SlotHashes sysvar, newest first: one a few entries
 // back (each a slot and a hash, after the list's length), so a node of the endpoint that trails the others has it too.
 const slotHashes = await fetchEncodedAccount(rpc, address("SysvarS1otHashes111111111111111111111111111"), { commitment: "confirmed" });

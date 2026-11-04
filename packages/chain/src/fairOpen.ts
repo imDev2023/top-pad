@@ -1,8 +1,12 @@
 // A Fair Open on chain (spec 2.1, 5.3): the Fair Open program's accounts, the admission our server signs for each
 // deposit, the reference calculation of the allocation (spec 2.1 step 11), which the Fair Open page shows and the
 // program's own must match to the lamport, and the instructions of the window and the failure path. Kit only, so the
-// API, the keeper, the scripts and the tests build the same transactions.
+// API, the keeper, the scripts and the tests build the same transactions. A launch in SOL holds its deposits in its vault
+// as plain SOL; in any other quote its pot, a token account of the quote, holds them and every instruction that moves
+// them names the pot, the quote, the quote's token program and the wallet's account of it (ADR 0007 decision 1).
 import {
+  address,
+  fetchEncodedAccount,
   getAddressEncoder,
   getI64Encoder,
   getProgramDerivedAddress,
@@ -18,10 +22,12 @@ import {
 } from "@solana/kit";
 import { getSetComputeUnitLimitInstruction, getSetComputeUnitPriceInstruction } from "@solana-program/compute-budget";
 import { fetchNonce, getCreateAccountInstruction, getInitializeNonceAccountInstruction, getTransferSolInstruction, SYSTEM_PROGRAM_ADDRESS } from "@solana-program/system";
+import { findAssociatedTokenPda, getCreateAssociatedTokenIdempotentInstruction } from "@solana-program/token";
 import { getInitializePoolParametersEncoder } from "@top-pad/clients/dbc";
 import {
   DEPOSIT_STEP,
   findLaunchPda,
+  findPotPda,
   findProgramConfigPda,
   findVaultPda,
   getCloseLaunchInstructionAsync,
@@ -39,10 +45,61 @@ import {
   WINDOW_SECONDS,
   type Launch,
 } from "@top-pad/clients/fair-open";
-import { eventAuthorityAddress } from "./dbc";
+import { eventAuthorityAddress, TOKEN_PROGRAM_ADDRESS } from "./dbc";
 import { FAIR_OPEN_PROGRAM_ADDRESS } from "./index";
 
 export { DEPOSIT_STEP, LATE_OPEN_SECONDS, Tier, WINDOW_SECONDS };
+
+/**
+ * A launch's quote as its instructions name it (ADR 0007 decision 1): its mint and the mint's own token program, SPL
+ * Token or Token-2022. Left out, or wrapped SOL, a launch is in SOL and names no token account of its quote.
+ */
+export type QuoteToken = { mint: Address; tokenProgram: Address };
+
+/** SPL Token's wrapped SOL, as `WSOL_MINT` is: `./index` imports this module, so its constants are not yet set while
+ * this one loads. */
+const WSOL = address("So11111111111111111111111111111111111111112");
+
+/** SOL as a quote: SPL Token's wrapped SOL. */
+export const SOL_QUOTE: QuoteToken = { mint: WSOL, tokenProgram: TOKEN_PROGRAM_ADDRESS };
+
+/** Whether a launch in `quote` holds its deposits as plain SOL. */
+export const inSol = (quote?: QuoteToken | null): boolean => !quote || quote.mint === WSOL;
+
+/** A launch's quote read from the chain: the quote mint's owner is its token program. */
+export async function fetchQuoteToken(rpc: Parameters<typeof fetchEncodedAccount>[0], mint: Address): Promise<QuoteToken> {
+  if (mint === WSOL) return SOL_QUOTE;
+  const account = await fetchEncodedAccount(rpc, mint, { commitment: "confirmed" });
+  if (!account.exists) throw new Error(`the quote ${mint} has no mint account`);
+  return { mint, tokenProgram: account.programAddress };
+}
+
+/** `owner`'s associated account of the quote, where the pot pays them and their deposits come from. */
+export async function quoteTokenAccount(owner: Address, quote: QuoteToken): Promise<Address> {
+  const [account] = await findAssociatedTokenPda({ owner, mint: quote.mint, tokenProgram: quote.tokenProgram });
+  return account;
+}
+
+/** `owner`'s associated account of the quote, made with `payer`'s rent if it is missing; nothing if it exists. */
+export async function quoteTokenAccountInstruction(payer: TransactionSigner, owner: Address, quote: QuoteToken): Promise<Instruction> {
+  const account = await quoteTokenAccount(owner, quote);
+  return getCreateAssociatedTokenIdempotentInstruction({ payer, ata: account, owner, mint: quote.mint, tokenProgram: quote.tokenProgram });
+}
+
+/**
+ * What an instruction of a launch in a token quote names besides its own accounts: the launch's pot, the quote and its
+ * token program. Nothing in SOL, which leaves the optional accounts out.
+ */
+export async function quoteAccountsOf(launch: Address, quote?: QuoteToken | null): Promise<{ pot?: Address; quoteMint?: Address; quoteTokenProgram?: Address }> {
+  if (!quote || inSol(quote)) return {};
+  const [pot] = await findPotPda({ launch });
+  return { pot, quoteMint: quote.mint, quoteTokenProgram: quote.tokenProgram };
+}
+
+/** `owner`'s associated account of a token quote, which an instruction names for them; none in SOL. */
+export async function walletQuoteOf(owner: Address, quote?: QuoteToken | null): Promise<Address | undefined> {
+  return !quote || inSol(quote) ? undefined : quoteTokenAccount(owner, quote);
+}
 
 const addressBytes = getAddressEncoder();
 const utf8 = getUtf8Encoder();
@@ -304,7 +361,10 @@ export function fairOpenPhase(launch: Launch, now: bigint): FairOpenPhase {
 /**
  * The compute each transaction may use, from the program's LiteSVM tests: a deposit that takes a seat used 41,686 units
  * and a top-up 34,368, a withdrawal about 28,400, `mark_failed` 74,047 (it computes the allocation) and a refund 27,919;
- * `create_launch` 35,406 after the nonce's creation.
+ * `create_launch` 35,406 after the nonce's creation. In a token quote each moves the quote by a token program's CPI as
+ * well, `inTokens` more (2026-11-04, `programs/fair_open/tests/token_quotes.rs`): `create_launch` 64,825 units in an
+ * xStock (it makes the pot), a deposit taking a seat 47,356 and 52,876 in USDC, a withdrawal 38,868 to 41,371, a refund
+ * 38,248 to 40,773 and `close_launch` 19,812 to 29,462.
  */
 export const FAIR_OPEN_COMPUTE_UNITS = {
   createLaunch: 60_000,
@@ -313,7 +373,11 @@ export const FAIR_OPEN_COMPUTE_UNITS = {
   markFailed: 110_000,
   withdrawFailed: 50_000,
   closeLaunch: 40_000,
+  inTokens: 40_000,
 } as const;
+
+/** `units` for a launch in `quote`: `inTokens` more in a token quote. */
+const unitsIn = (units: number, quote?: QuoteToken | null) => units + (inSol(quote) ? 0 : FAIR_OPEN_COMPUTE_UNITS.inTokens);
 
 /** The size of a durable nonce account. */
 export const NONCE_ACCOUNT_SPACE = 80n;
@@ -333,6 +397,9 @@ type LaunchTerms = {
   dbcConfig: Address;
   /** The quote's mint, whose `QuoteSettings` the program reads the config and step from. */
   quoteMint: Address;
+  /** The quote mint's own token program, SPL Token unless given; in a quote other than SOL the launch's pot, a token
+   * account of the quote, is made under it at scheduling (ADR 0007 decision 1). */
+  quoteTokenProgram?: Address;
   /** Heat's SOL Fair Open config, which the program config names and every quote's config is shaped as. */
   referenceConfig: Address;
   depositsOpenAt: bigint;
@@ -350,6 +417,8 @@ export type FairOpenSchedule = LaunchTerms & {
 
 async function createLaunchInstruction(t: LaunchTerms, nonce: Address): Promise<Instruction> {
   const { launch, vault } = await fairOpenAccounts(nonce);
+  const quote = { mint: t.quoteMint, tokenProgram: t.quoteTokenProgram ?? TOKEN_PROGRAM_ADDRESS };
+  const { pot, quoteTokenProgram } = await quoteAccountsOf(launch, quote);
   return getCreateLaunchInstructionAsync({
     programConfig: (await findProgramConfigPda())[0],
     creator: t.creator,
@@ -360,6 +429,8 @@ async function createLaunchInstruction(t: LaunchTerms, nonce: Address): Promise<
     nonce,
     launch,
     vault,
+    pot,
+    quoteTokenProgram,
     ...(await programAccounts()),
     depositsOpenAt: t.depositsOpenAt,
     minRaise: t.minRaise,
@@ -384,7 +455,7 @@ export async function fetchNonceValue(rpc: Parameters<typeof fetchNonce>[0], non
 /** Scheduling a Fair Open in one go, as the scripts and tests do: its durable nonce created and handed to the keeper, then `create_launch`. */
 export async function createLaunchInstructions(s: FairOpenSchedule): Promise<Instruction[]> {
   return [
-    ...budget(FAIR_OPEN_COMPUTE_UNITS.createLaunch, s.computeUnitPrice),
+    ...budget(unitsIn(FAIR_OPEN_COMPUTE_UNITS.createLaunch, { mint: s.quoteMint, tokenProgram: TOKEN_PROGRAM_ADDRESS }), s.computeUnitPrice),
     ...nonceAccountInstructions({ payer: s.creator, nonce: s.nonce, authority: s.keeper.address, rent: s.nonceRent }),
     await createLaunchInstruction(s, s.nonce.address),
   ];
@@ -397,7 +468,7 @@ export async function createLaunchInstructions(s: FairOpenSchedule): Promise<Ins
  */
 export async function scheduleInstructions(s: LaunchTerms & { nonce: Address; nonceRent: bigint }): Promise<Instruction[]> {
   return [
-    ...budget(FAIR_OPEN_COMPUTE_UNITS.createLaunch, s.computeUnitPrice),
+    ...budget(unitsIn(FAIR_OPEN_COMPUTE_UNITS.createLaunch, { mint: s.quoteMint, tokenProgram: TOKEN_PROGRAM_ADDRESS }), s.computeUnitPrice),
     getTransferSolInstruction({ source: s.creator, destination: s.keeper.address, amount: s.nonceRent }),
     await createLaunchInstruction(s, s.nonce),
   ];
@@ -412,6 +483,8 @@ export type FairOpenDeposit = {
   admissionSigner: Address;
   signature: ReadonlyUint8Array;
   computeUnitPrice: bigint;
+  /** The launch's quote; SOL when left out. In any other quote the deposit comes from the wallet's associated account. */
+  quote?: QuoteToken | null;
 };
 
 /** A deposit: the admission's precompile instruction, right before the deposit itself. */
@@ -423,6 +496,8 @@ export async function depositInstructions(d: FairOpenDeposit): Promise<Instructi
     vault,
     seat: await seatAddress(d.launch, d.admission.person),
     depositor: d.wallet,
+    ...(await quoteAccountsOf(d.launch, d.quote)),
+    depositorQuote: await walletQuoteOf(d.wallet.address, d.quote),
     ...(await programAccounts()),
     amount: d.amount,
     person: d.admission.person,
@@ -430,54 +505,83 @@ export async function depositInstructions(d: FairOpenDeposit): Promise<Instructi
     cap: d.admission.cap,
     expiresAt: d.admission.expiresAt,
   });
-  return [...budget(FAIR_OPEN_COMPUTE_UNITS.deposit, d.computeUnitPrice), ed25519Instruction(d.admissionSigner, d.signature, message), deposit];
+  return [...budget(unitsIn(FAIR_OPEN_COMPUTE_UNITS.deposit, d.quote), d.computeUnitPrice), ed25519Instruction(d.admissionSigner, d.signature, message), deposit];
 }
 
-export type FairOpenWithdrawal = { launch: Address; seat: Address; wallet: TransactionSigner; amount: bigint; computeUnitPrice: bigint };
+export type FairOpenWithdrawal = { launch: Address; seat: Address; wallet: TransactionSigner; amount: bigint; computeUnitPrice: bigint; quote?: QuoteToken | null };
 
-/** Taking back part or all of a deposit while the window is open. */
+/**
+ * Taking back part or all of a deposit while the window is open. In a quote other than SOL it goes to the wallet's
+ * associated account of the quote, made first if the wallet has closed it.
+ */
 export async function withdrawInstructions(w: FairOpenWithdrawal): Promise<Instruction[]> {
   const [vault] = await findVaultPda({ launch: w.launch });
+  const quoteAccounts = { ...(await quoteAccountsOf(w.launch, w.quote)), walletQuote: await walletQuoteOf(w.wallet.address, w.quote) };
   return [
-    ...budget(FAIR_OPEN_COMPUTE_UNITS.withdraw, w.computeUnitPrice),
-    await getWithdrawInstructionAsync({ launch: w.launch, vault, seat: w.seat, wallet: w.wallet, ...(await programAccounts()), amount: w.amount }),
+    ...budget(unitsIn(FAIR_OPEN_COMPUTE_UNITS.withdraw, w.quote), w.computeUnitPrice),
+    ...(inSol(w.quote) ? [] : [await quoteTokenAccountInstruction(w.wallet, w.wallet.address, w.quote!)]),
+    await getWithdrawInstructionAsync({ launch: w.launch, vault, seat: w.seat, wallet: w.wallet, ...quoteAccounts, ...(await programAccounts()), amount: w.amount }),
   ];
 }
 
-type Refund = { launch: Address; seat: Address; wallet: Address };
+type Refund = { launch: Address; seat: Address; wallet: Address; quote?: QuoteToken | null };
 
 async function withdrawFailedInstruction(r: Refund): Promise<Instruction> {
   const [vault] = await findVaultPda({ launch: r.launch });
-  return getWithdrawFailedInstructionAsync({ launch: r.launch, vault, seat: r.seat, wallet: r.wallet, ...(await programAccounts()) });
+  const quoteAccounts = { ...(await quoteAccountsOf(r.launch, r.quote)), walletQuote: await walletQuoteOf(r.wallet, r.quote) };
+  return getWithdrawFailedInstructionAsync({ launch: r.launch, vault, seat: r.seat, wallet: r.wallet, ...quoteAccounts, ...(await programAccounts()) });
 }
 
 /**
  * Marking a launch failed, which anyone may send once it cannot open; with `refund`, the sender's own seat comes back in
  * the same transaction.
  */
-export async function markFailedInstructions(m: { launch: Address; refund?: Omit<Refund, "launch">; computeUnitPrice: bigint }): Promise<Instruction[]> {
-  const units = FAIR_OPEN_COMPUTE_UNITS.markFailed + (m.refund ? FAIR_OPEN_COMPUTE_UNITS.withdrawFailed : 0);
-  const refund = m.refund ? [await withdrawFailedInstruction({ launch: m.launch, ...m.refund })] : [];
+export async function markFailedInstructions(m: {
+  launch: Address;
+  refund?: Omit<Refund, "launch" | "quote">;
+  computeUnitPrice: bigint;
+  quote?: QuoteToken | null;
+}): Promise<Instruction[]> {
+  const units = FAIR_OPEN_COMPUTE_UNITS.markFailed + (m.refund ? unitsIn(FAIR_OPEN_COMPUTE_UNITS.withdrawFailed, m.quote) : 0);
+  const refund = m.refund ? [await withdrawFailedInstruction({ launch: m.launch, ...m.refund, quote: m.quote })] : [];
   return [...budget(units, m.computeUnitPrice), getMarkFailedInstruction({ launch: m.launch, ...(await programAccounts()) }), ...refund];
 }
 
-/** A failed launch's seat returned to its wallet: anyone may send it, the sender paying the fee. */
+/**
+ * A failed launch's seat returned to its wallet: anyone may send it, the sender paying the fee. In a quote other than SOL
+ * the deposit goes to the wallet's associated account of the quote, which must exist.
+ */
 export async function withdrawFailedInstructions(r: Refund & { computeUnitPrice: bigint }): Promise<Instruction[]> {
-  return [...budget(FAIR_OPEN_COMPUTE_UNITS.withdrawFailed, r.computeUnitPrice), await withdrawFailedInstruction(r)];
+  return [...budget(unitsIn(FAIR_OPEN_COMPUTE_UNITS.withdrawFailed, r.quote), r.computeUnitPrice), await withdrawFailedInstruction(r)];
 }
 
-/** Seats a refunds transaction returns: each takes its seat and its wallet, so 8 fit with room to spare. */
+/**
+ * Seats a refunds transaction returns through Heat's shared lookup table: each takes its seat and its wallet, so 8 fit
+ * with room to spare (10 would); in a token quote each brings the wallet's account of the quote too, and 6 fit with room
+ * to spare (7 would, 2026-11-04).
+ */
 export const REFUND_SEATS = 8;
+export const REFUND_SEATS_IN_TOKENS = 6;
+export const refundSeats = (quote?: QuoteToken | null) => (inSol(quote) ? REFUND_SEATS : REFUND_SEATS_IN_TOKENS);
 
 /** Several seats of a failed launch returned to their wallets in one transaction, which anyone may send. */
-export async function refundsInstructions(r: { launch: Address; seats: Omit<Refund, "launch">[]; computeUnitPrice: bigint }): Promise<Instruction[]> {
-  const refunds = await Promise.all(r.seats.map((seat) => withdrawFailedInstruction({ launch: r.launch, ...seat })));
-  return [...budget(FAIR_OPEN_COMPUTE_UNITS.withdrawFailed * r.seats.length, r.computeUnitPrice), ...refunds];
+export async function refundsInstructions(r: {
+  launch: Address;
+  seats: Omit<Refund, "launch" | "quote">[];
+  computeUnitPrice: bigint;
+  quote?: QuoteToken | null;
+}): Promise<Instruction[]> {
+  const refunds = await Promise.all(r.seats.map((seat) => withdrawFailedInstruction({ launch: r.launch, ...seat, quote: r.quote })));
+  return [...budget(unitsIn(FAIR_OPEN_COMPUTE_UNITS.withdrawFailed, r.quote) * r.seats.length, r.computeUnitPrice), ...refunds];
 }
 
-/** A failed launch closed once every seat is back, its rent and its vault's returned to the creator. */
-export async function closeLaunchInstructions(c: { launch: Address; creator: Address; computeUnitPrice: bigint }): Promise<Instruction[]> {
+/**
+ * A launch closed once it is done, its rent and its vault's returned to the creator; in a quote other than SOL its pot
+ * closes too, anything sent to it besides the deposits going to the creator's associated account of the quote.
+ */
+export async function closeLaunchInstructions(c: { launch: Address; creator: Address; computeUnitPrice: bigint; quote?: QuoteToken | null }): Promise<Instruction[]> {
   const [vault] = await findVaultPda({ launch: c.launch });
-  const close = await getCloseLaunchInstructionAsync({ launch: c.launch, vault, creator: c.creator, ...(await programAccounts()) });
-  return [...budget(FAIR_OPEN_COMPUTE_UNITS.closeLaunch, c.computeUnitPrice), close];
+  const quoteAccounts = { ...(await quoteAccountsOf(c.launch, c.quote)), creatorQuote: await walletQuoteOf(c.creator, c.quote) };
+  const close = await getCloseLaunchInstructionAsync({ launch: c.launch, vault, creator: c.creator, ...quoteAccounts, ...(await programAccounts()) });
+  return [...budget(unitsIn(FAIR_OPEN_COMPUTE_UNITS.closeLaunch, c.quote), c.computeUnitPrice), close];
 }

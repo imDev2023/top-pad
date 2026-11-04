@@ -5,6 +5,9 @@
 // to the creator. Kit only, so the API, the keeper, the scripts and the tests build the same transactions.
 import {
   AccountRole,
+  getAddressEncoder,
+  getProgramDerivedAddress,
+  getUtf8Encoder,
   appendTransactionMessageInstructions,
   compressTransactionMessageUsingAddressLookupTables,
   createTransactionMessage,
@@ -25,6 +28,7 @@ import { fetchAddressLookupTable } from "@solana-program/address-lookup-table";
 import { getSetComputeUnitLimitInstruction, getSetComputeUnitPriceInstruction } from "@solana-program/compute-budget";
 import { getWithdrawNonceAccountInstruction, SYSTEM_PROGRAM_ADDRESS } from "@solana-program/system";
 import { ASSOCIATED_TOKEN_PROGRAM_ADDRESS, findAssociatedTokenPda, getCreateAssociatedTokenIdempotentInstructionAsync } from "@solana-program/token";
+import { TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import { findBaseVaultPda, findQuoteVaultPda, getInitializeVirtualPoolWithSplTokenInstructionAsync, getSwap2Instruction } from "@top-pad/clients/dbc";
 import {
   findCoinRegistrarPda,
@@ -39,7 +43,7 @@ import {
 } from "@top-pad/clients/fair-open";
 import { findCoinRecordPda, findFeeConfigPda } from "@top-pad/clients/fee";
 import { DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS, TOKEN_METADATA_PROGRAM_ADDRESS, TOKEN_PROGRAM_ADDRESS, dbcPoolAddress, eventAuthorityAddress, mintMetadataAddress } from "./dbc";
-import { rungs } from "./fairOpen";
+import { inSol, quoteAccountsOf, quoteTokenAccountInstruction, rungs, walletQuoteOf, type QuoteToken } from "./fairOpen";
 import { FAIR_OPEN_PROGRAM_ADDRESS, FEE_PROGRAM_ADDRESS, type HeatCluster } from "./index";
 
 const SYSVAR_INSTRUCTIONS = "Sysvar1nstructions1111111111111111111111111" as Address;
@@ -58,6 +62,18 @@ const EXACT_IN = 0;
 export const OPEN_COMPUTE_UNITS = 450_000;
 export const PUSH_COMPUTE_UNITS = { base: 30_000, seat: 60_000 } as const;
 export const CLAIM_COMPUTE_UNITS = 80_000;
+
+/**
+ * DBC's TokenBadge of a quote mint, which only Meteora's operators make: DBC takes a Token-2022 quote whose extensions
+ * are not all metadata only with its badge as the pool creation's first remaining account (ADR 0007).
+ */
+export async function tokenBadgeAddress(quoteMint: Address): Promise<Address> {
+  const [badge] = await getProgramDerivedAddress({
+    programAddress: DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS,
+    seeds: [getUtf8Encoder().encode("token_badge"), getAddressEncoder().encode(quoteMint)],
+  });
+  return badge;
+}
 /**
  * Seats per push. A transaction's instructions, its programs' calls to others included, stop at 64 (devnet, 2026-10-31:
  * "Max instruction trace length exceeded" at 8 seats): a seat whose coin account the push makes takes 8 of them (the
@@ -110,6 +126,10 @@ export type Creation = {
   /** What the pot spends: one rung of the ladder. */
   rung: bigint;
   computeUnitPrice: bigint;
+  /** The quote mint's own token program, SPL Token unless given (ADR 0007). */
+  quoteTokenProgram?: Address;
+  /** Whether DBC takes the quote only with its TokenBadge, which the pool's creation then names. */
+  quoteBadge?: boolean;
 };
 
 /** The coin's accounts where DBC and the open make them. */
@@ -130,7 +150,8 @@ export async function creationInstructions(c: Creation): Promise<Instruction[]> 
   const mint = c.mint.address;
   const { pool, potCoins, pot, coinRecord } = await creationAccounts({ ...c, mint });
   const dbcEvents = await eventAuthorityAddress(DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS);
-  const open = await getOpenInstructionAsync({ launch: c.launch, keeper: c.keeper, quoteMint: c.quoteMint, rung: c.rung });
+  const quoteProgram = c.quoteTokenProgram ?? TOKEN_PROGRAM_ADDRESS;
+  const open = await getOpenInstructionAsync({ launch: c.launch, keeper: c.keeper, quoteMint: c.quoteMint, tokenProgram: quoteProgram, rung: c.rung });
   const init = await getInitializeVirtualPoolWithSplTokenInstructionAsync({
     config: c.dbcConfig,
     creator: c.creator,
@@ -139,11 +160,12 @@ export async function creationInstructions(c: Creation): Promise<Instruction[]> 
     pool,
     mintMetadata: await mintMetadataAddress(mint),
     payer: c.keeper,
-    tokenQuoteProgram: TOKEN_PROGRAM_ADDRESS,
+    tokenQuoteProgram: quoteProgram,
     eventAuthority: dbcEvents,
     program: DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS,
     params: { name: c.coin.name, symbol: c.coin.ticker, uri: c.coin.uri },
   });
+  const badge = c.quoteBadge ? [{ address: await tokenBadgeAddress(c.quoteMint), role: AccountRole.READONLY }] : [];
   const potCoinAccount = await getCreateAssociatedTokenIdempotentInstructionAsync({ payer: c.keeper, owner: c.launch, mint });
   const swap = getSwap2Instruction({
     config: c.dbcConfig,
@@ -156,7 +178,7 @@ export async function creationInstructions(c: Creation): Promise<Instruction[]> 
     quoteMint: c.quoteMint,
     payer: c.keeper,
     tokenBaseProgram: TOKEN_PROGRAM_ADDRESS,
-    tokenQuoteProgram: TOKEN_PROGRAM_ADDRESS,
+    tokenQuoteProgram: quoteProgram,
     eventAuthority: dbcEvents,
     program: DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS,
     // The least out: the pool is new, so nothing can move its price before the pot's buy.
@@ -179,7 +201,7 @@ export async function creationInstructions(c: Creation): Promise<Instruction[]> 
   return [
     ...budget(OPEN_COMPUTE_UNITS, c.computeUnitPrice),
     open,
-    init,
+    { ...init, accounts: [...init.accounts, ...badge] },
     potCoinAccount,
     // DBC gives the first-swap discount only to a swap that passes the instructions sysvar.
     { ...swap, accounts: [...swap.accounts, { address: SYSVAR_INSTRUCTIONS, role: AccountRole.READONLY }] },
@@ -263,6 +285,9 @@ export async function fairOpenLookupTableAddresses(heat: HeatCluster): Promise<A
     FEE_PROGRAM_ADDRESS,
     await eventAuthorityAddress(FEE_PROGRAM_ADDRESS),
     (await findFeeConfigPda())[0],
+    // Stock-priced coins (ADR 0007, #88): Token-2022, and each listed quote's mint and DBC TokenBadge.
+    TOKEN_2022_PROGRAM_ADDRESS,
+    ...(await Promise.all(heat.tableQuotes.map(async (q) => (q.badge ? [q.mint, await tokenBadgeAddress(q.mint)] : [q.mint])))).flat(),
   ];
 }
 
@@ -270,33 +295,66 @@ export async function fairOpenLookupTableAddresses(heat: HeatCluster): Promise<A
 
 export type PushSeat = { seat: Address; wallet: Address };
 
-/** A push of up to `PUSH_SEATS` seats, which anyone may send: each seat with its wallet and the wallet's coin account. */
-export async function pushInstructions(p: { launch: Address; mint: Address; payer: TransactionSigner; seats: PushSeat[]; computeUnitPrice: bigint }): Promise<Instruction[]> {
+/**
+ * Seats a push delivers in a token quote: each seat brings a fourth address no table can hold, its wallet's account of
+ * the quote, so 5 fit in a transaction's 1,232 bytes (1,104 bytes with a compute unit price, 2026-11-04); and its refund
+ * is a `TransferChecked` of the quote, one more call than in SOL, which alone would allow 6 (a transaction runs at most 64
+ * instructions, its programs' calls included, and a push of 6 runs 59 in a token quote in LiteSVM).
+ */
+export const PUSH_SEATS_IN_TOKENS = 5;
+export const pushSeats = (quote?: QuoteToken | null) => (inSol(quote) ? PUSH_SEATS : PUSH_SEATS_IN_TOKENS);
+
+/**
+ * A push of up to `pushSeats(quote)` seats, which anyone may send: each seat with its wallet and the wallet's coin
+ * account, and in a token quote the wallet's associated account of the quote, which its refund goes to.
+ */
+export async function pushInstructions(p: {
+  launch: Address;
+  mint: Address;
+  payer: TransactionSigner;
+  seats: PushSeat[];
+  computeUnitPrice: bigint;
+  quote?: QuoteToken | null;
+}): Promise<Instruction[]> {
   const tokens = { mint: p.mint, tokenProgram: TOKEN_PROGRAM_ADDRESS };
   const push = await getPushInstructionAsync({
     launch: p.launch,
     potCoins: (await findAssociatedTokenPda({ owner: p.launch, ...tokens }))[0],
     mint: p.mint,
     payer: p.payer,
+    ...(await quoteAccountsOf(p.launch, p.quote)),
     eventAuthority: await eventAuthorityAddress(FAIR_OPEN_PROGRAM_ADDRESS),
     program: FAIR_OPEN_PROGRAM_ADDRESS,
   });
   const seats = [];
   for (const s of p.seats) {
     const [coinAccount] = await findAssociatedTokenPda({ owner: s.wallet, ...tokens });
-    seats.push(...[s.seat, s.wallet, coinAccount].map((address) => ({ address, role: AccountRole.WRITABLE })));
+    const quoteAccount = inSol(p.quote) ? [] : [(await findAssociatedTokenPda({ owner: s.wallet, mint: p.quote!.mint, tokenProgram: p.quote!.tokenProgram }))[0]];
+    seats.push(...[s.seat, s.wallet, coinAccount, ...quoteAccount].map((address) => ({ address, role: AccountRole.WRITABLE })));
   }
   const units = PUSH_COMPUTE_UNITS.base + PUSH_COMPUTE_UNITS.seat * p.seats.length;
   return [...budget(units, p.computeUnitPrice), { ...push, accounts: [...push.accounts, ...seats] }];
 }
 
-/** A depositor's own claim of their seat's coins and refund, into their own coin account, made first if missing. */
-export async function claimInstructions(c: { launch: Address; mint: Address; seat: Address; wallet: TransactionSigner; computeUnitPrice: bigint }): Promise<Instruction[]> {
+/**
+ * A depositor's own claim of their seat's coins and refund, into their own coin account, made first if missing; in a
+ * token quote the refund goes to their associated account of the quote, made first too.
+ */
+export async function claimInstructions(c: {
+  launch: Address;
+  mint: Address;
+  seat: Address;
+  wallet: TransactionSigner;
+  computeUnitPrice: bigint;
+  quote?: QuoteToken | null;
+}): Promise<Instruction[]> {
   const tokens = { mint: c.mint, tokenProgram: TOKEN_PROGRAM_ADDRESS };
   const [coinAccount] = await findAssociatedTokenPda({ owner: c.wallet.address, ...tokens });
+  const inQuote = inSol(c.quote) ? [] : [await quoteTokenAccountInstruction(c.wallet, c.wallet.address, c.quote!)];
   return [
-    ...budget(CLAIM_COMPUTE_UNITS, c.computeUnitPrice),
+    ...budget(CLAIM_COMPUTE_UNITS + inQuote.length * 20_000, c.computeUnitPrice),
     await getCreateAssociatedTokenIdempotentInstructionAsync({ payer: c.wallet, owner: c.wallet.address, mint: c.mint }),
+    ...inQuote,
     await getClaimInstructionAsync({
       launch: c.launch,
       seat: c.seat,
@@ -304,6 +362,8 @@ export async function claimInstructions(c: { launch: Address; mint: Address; sea
       coinAccount,
       potCoins: (await findAssociatedTokenPda({ owner: c.launch, ...tokens }))[0],
       mint: c.mint,
+      ...(await quoteAccountsOf(c.launch, c.quote)),
+      walletQuote: await walletQuoteOf(c.wallet.address, c.quote),
       eventAuthority: await eventAuthorityAddress(FAIR_OPEN_PROGRAM_ADDRESS),
       program: FAIR_OPEN_PROGRAM_ADDRESS,
     }),

@@ -20,13 +20,18 @@ import {
   lockCreatorInstructions,
   pushTaxShareInstructions,
   TAX_SHARE_SEATS,
+  TAX_SHARE_SEATS_IN_TOKENS,
   taxShareOf,
 } from "./afterOpen";
+import { ASSOCIATED_TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
+import { TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
+import { DEVNET_XSTOCK_STAND_IN } from "./quotes";
 import { CLUSTERS } from "./index";
 import { fairOpenLookupTableAddresses } from "./open";
 
 const devnet = CLUSTERS.devnet!;
 const random = async () => (await generateKeyPairSigner()).address;
+const XSTOCK = { mint: DEVNET_XSTOCK_STAND_IN, tokenProgram: TOKEN_2022_PROGRAM_ADDRESS };
 const LIMIT = 1_232;
 
 /** A transaction's size, our keeper paying, through Heat's shared lookup table as the keeper sends it. */
@@ -73,6 +78,39 @@ describe("the Tax Share", () => {
     // One seat more would not fit.
     const more = [...seats, { seat: await random(), wallet: await random() }];
     expect(await size(payer, await pushTaxShareInstructions({ launch, seats: more, computeUnitPrice: 1n }))).toBeGreaterThan(LIMIT);
+  });
+
+  it(`pushes ${TAX_SHARE_SEATS_IN_TOKENS} seats in a token quote, each with its wallet's account of the quote`, async () => {
+    const [payer, launch] = await Promise.all([generateKeyPairSigner(), random()]);
+    const seats = await Promise.all(Array.from({ length: TAX_SHARE_SEATS_IN_TOKENS }, async () => ({ seat: await random(), wallet: await random() })));
+    const ixs = await pushTaxShareInstructions({ launch, seats, computeUnitPrice: 1n, quote: XSTOCK });
+    const bytes = await size(payer, ixs);
+    console.log(`a Tax Share push of ${TAX_SHARE_SEATS_IN_TOKENS} seats in a Token-2022 quote: ${bytes} bytes`);
+    expect(bytes).toBeLessThanOrEqual(LIMIT);
+    const more = [...seats, { seat: await random(), wallet: await random() }];
+    expect(await size(payer, await pushTaxShareInstructions({ launch, seats: more, computeUnitPrice: 1n, quote: XSTOCK }))).toBeGreaterThan(LIMIT);
+  });
+
+  it("collects in a token quote, making the fee claimer's and the treasury's accounts of it first", async () => {
+    const payer = await generateKeyPairSigner();
+    const pool = {
+      pool: await random(),
+      config: await random(),
+      mint: await random(),
+      quoteMint: XSTOCK.mint,
+      baseVault: await random(),
+      quoteVault: await random(),
+      creator: await random(),
+      partnerQuoteFee: 0n,
+      windowEndsAt: 0n,
+    };
+    const launch = await random();
+    await expect(collectTaxShareInstructions({ launch, pool, treasury: devnet.keys!.treasury, computeUnitPrice: 1n, quote: XSTOCK })).rejects.toThrow(/payer/);
+    const ixs = await collectTaxShareInstructions({ launch, pool, treasury: devnet.keys!.treasury, computeUnitPrice: 1n, quote: XSTOCK, payer });
+    expect(ixs.filter((ix) => ix.programAddress === ASSOCIATED_TOKEN_PROGRAM_ADDRESS)).toHaveLength(2);
+    const bytes = await size(payer, ixs);
+    console.log(`the Tax Share's collection in a Token-2022 quote: ${bytes} bytes`);
+    expect(bytes).toBeLessThanOrEqual(LIMIT);
   });
 
   it("collects in a transaction our keeper sends", async () => {

@@ -17,6 +17,10 @@ export const FEE_CLAIMER_SEED = "fee_claimer";
 export const FEE_CLAIMER_ADDRESS = address("4Garg7N38ShAr8z38ZKkHrgP9Lj5nRKiy3HGtNDqTpko");
 
 export const WSOL_MINT = address("So11111111111111111111111111111111111111112");
+/** Circle's devnet USDC, an SPL Token mint DBC takes as a quote with no badge (ADR 0007, #88). */
+export const DEVNET_USDC = address("4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU");
+const SPL_TOKEN = address("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+const TOKEN_2022 = address("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
 
 /**
  * The rehearsal config's Graduation Target, 0.25 SOL: its curve A, solved like the real one's, leaves one raw coin over,
@@ -60,6 +64,13 @@ export type HeatCluster = {
    * accounts through (spec 2.1 step 10), made and frozen by `pnpm --filter @top-pad/chain lookup-table <cluster>`.
    */
   lookupTable: Address | null;
+  /**
+   * The quotes besides SOL whose mint, and TokenBadge when DBC takes the mint only with one, the shared lookup table
+   * holds (ADR 0007, #88): a creation transaction in a Token-2022 quote names its mint, Token-2022 and the badge, which
+   * came to exactly the 1,232-byte limit for the longest coin, with no room for a compute unit price, until the table
+   * held them. A quote not listed still fits a creation, 32 bytes more an address; a quote added means a new table.
+   */
+  tableQuotes: { mint: Address; tokenProgram: Address; badge: boolean }[];
 };
 
 /**
@@ -90,6 +101,11 @@ export const CLUSTERS: Record<Cluster, HeatCluster | null> = {
     lookupTable: address("B2XYd5qp7wyT5Dnvg3CJh6aZxoiiAAX4QRvLLMsgxMHT"),
     // Created on 2026-11-02 (#51).
     rehearsal: address("FpBAjo24FLrxj69qfu92NodVvWJE8zSPPxPxmearft27"),
+    tableQuotes: [
+      { mint: DEVNET_USDC, tokenProgram: SPL_TOKEN, badge: false },
+      // `DEVNET_XSTOCK_STAND_IN`, with every xStock extension: DBC takes it once Meteora badges it (#91).
+      { mint: address("Wm7nXsHnoHJm3NemWaLbnxd7QkmeHLALucsFC4qTUNK"), tokenProgram: TOKEN_2022, badge: true },
+    ],
   },
   mainnet: {
     quote: { mint: WSOL_MINT, symbol: "SOL", decimals: 9 },
@@ -99,6 +115,7 @@ export const CLUSTERS: Record<Cluster, HeatCluster | null> = {
     keys: null,
     lookupTable: null,
     rehearsal: null,
+    tableQuotes: [],
   },
 };
 

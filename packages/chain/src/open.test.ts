@@ -22,7 +22,7 @@ import { DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS } from "@top-pad/clients/dbc";
 import { Tier } from "@top-pad/clients/fair-open";
 import { describe, expect, it } from "vitest";
 import cases from "./fixtures/allocations.json";
-import { allocate, DEPOSIT_STEP, rungAtOrBelow } from "./fairOpen";
+import { allocate, DEPOSIT_STEP, refundsInstructions, REFUND_SEATS, REFUND_SEATS_IN_TOKENS, rungAtOrBelow, type QuoteToken } from "./fairOpen";
 import { CLUSTERS, FAIR_OPEN_PROGRAM_ADDRESS } from "./index";
 import {
   creationInstructions,
@@ -30,11 +30,16 @@ import {
   fairOpenLookupTableAddresses,
   pushInstructions,
   PUSH_SEATS,
+  PUSH_SEATS_IN_TOKENS,
   seatOutcome,
   shareOf,
   signLadder,
+  tokenBadgeAddress,
   type Creation,
 } from "./open";
+import { DEVNET_XSTOCK_STAND_IN } from "./quotes";
+import { DEVNET_USDC } from "./index";
+import { TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 
 const devnet = CLUSTERS.devnet!;
 const random = async () => (await generateKeyPairSigner()).address;
@@ -60,6 +65,22 @@ async function creation(over: Partial<Creation> = {}): Promise<Creation> {
 }
 
 const table = async () => ({ address: await random(), addresses: await fairOpenLookupTableAddresses(devnet) });
+/** Devnet's stand-in xStock, a Token-2022 quote DBC takes only with its TokenBadge (ADR 0007). */
+const XSTOCK: QuoteToken = { mint: DEVNET_XSTOCK_STAND_IN, tokenProgram: TOKEN_2022_PROGRAM_ADDRESS };
+/** A transaction's size, through the shared lookup table as our keeper sends it. */
+async function pushSize(payer: Parameters<typeof setTransactionMessageFeePayerSigner>[0], ixs: Parameters<typeof appendTransactionMessageInstructions>[0]) {
+  const { address: tableAddress, addresses } = await table();
+  const message = compressTransactionMessageUsingAddressLookupTables(
+    pipe(
+      createTransactionMessage({ version: 0 }),
+      (m) => setTransactionMessageFeePayerSigner(payer, m),
+      (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash: "11111111111111111111111111111111" as Blockhash, lastValidBlockHeight: 0n }, m),
+      (m) => appendTransactionMessageInstructions(ixs, m),
+    ),
+    { [tableAddress]: addresses },
+  );
+  return getTransactionEncoder().encode(compileTransaction(message)).length;
+}
 
 describe("a seat's part of the open", () => {
   it("matches the program's shares, added up, on every fixture pot that opens", () => {
@@ -142,6 +163,38 @@ describe("the creation transaction", () => {
     expect(getTransactionEncoder().encode(compileTransaction(plain)).length).toBeGreaterThan(LIMIT);
   });
 
+  it("fits in a Token-2022 quote with DBC's TokenBadge, with room for a compute unit price, by the shared table", async () => {
+    const nonce = await random();
+    const sizeOf = async (c: Creation) => {
+      const lifetime = { nonce, value: "11111111111111111111111111111111" as Nonce, authority: c.keeper.address };
+      return getTransactionEncoder().encode(compileTransaction(await creationMessage(c, lifetime, await table()))).length;
+    };
+    const priced = { computeUnitPrice: 1n };
+    const xstock = await creation({ ...priced, quoteMint: XSTOCK.mint, quoteTokenProgram: XSTOCK.tokenProgram, quoteBadge: true });
+    const ixs = await creationInstructions(xstock);
+    const init = ixs[3]!;
+    expect(init.accounts!.at(-1)!.address).toBe(await tokenBadgeAddress(XSTOCK.mint));
+    expect(init.accounts![11]!.address).toBe(XSTOCK.tokenProgram);
+    expect(ixs[5]!.accounts![11]!.address).toBe(XSTOCK.tokenProgram);
+    expect(ixs[2]!.accounts!.find((a) => a.address === XSTOCK.tokenProgram)).toBeTruthy();
+    const [inSol, inXstock, inUsdc] = [
+      await sizeOf(await creation(priced)),
+      await sizeOf(xstock),
+      await sizeOf(await creation({ ...priced, quoteMint: DEVNET_USDC })),
+    ];
+    console.log(`the creation transaction with a compute unit price: ${inSol} bytes in SOL, ${inXstock} in an xStock, ${inUsdc} in USDC`);
+    // The table holds the listed quotes' mints, their badges and Token-2022, so each costs a byte, not 32.
+    expect(inXstock).toBeLessThanOrEqual(inSol + 3);
+    expect(inUsdc).toBe(inSol);
+    // A Token-2022 quote the table does not list still fits, priced, its mint and badge 32 bytes each (#88); before the
+    // table held Token-2022 too, an unpriced creation in one came to exactly the 1,232-byte limit.
+    const unlisted = await creation({ ...priced, quoteMint: await random(), quoteTokenProgram: XSTOCK.tokenProgram, quoteBadge: true });
+    const inUnlisted = await sizeOf(unlisted);
+    console.log(`in a Token-2022 quote the table does not list: ${inUnlisted} bytes`);
+    expect(inUnlisted).toBe(inXstock + 2 * 31);
+    expect(inUnlisted).toBeLessThanOrEqual(LIMIT);
+  });
+
   it("signs a 64-rung ladder on one nonce, each rung complete", async () => {
     const c = await creation();
     const ladder = await signLadder({ ...c, potCap: 1_700_000_000n, nonce: await random(), nonceValue: "11111111111111111111111111111111" as Nonce, table: await table() });
@@ -185,8 +238,36 @@ describe("a push", () => {
     const size = getTransactionEncoder().encode(compileTransaction(message)).length;
     console.log(`a push of ${PUSH_SEATS} seats: ${size} bytes`);
     expect(size).toBeLessThanOrEqual(LIMIT);
-    // Each seat brings its seat, its wallet and the wallet's coin account.
-    expect(ixs.at(-1)!.accounts!.length).toBe(10 + 3 * PUSH_SEATS);
+    // Each seat brings its seat, its wallet and the wallet's coin account; the token quote's three are left out.
+    expect(ixs.at(-1)!.accounts!.length).toBe(13 + 3 * PUSH_SEATS);
+  });
+
+  it(`fits ${PUSH_SEATS_IN_TOKENS} seats in a token quote, each with its wallet's account of the quote`, async () => {
+    const [payer, launch, mint] = await Promise.all([generateKeyPairSigner(), random(), random()]);
+    const seats = await Promise.all(Array.from({ length: PUSH_SEATS_IN_TOKENS }, async () => ({ seat: await random(), wallet: await random() })));
+    const ixs = await pushInstructions({ launch, mint, payer, seats, computeUnitPrice: 1n, quote: XSTOCK });
+    const size = await pushSize(payer, ixs);
+    console.log(`a push of ${PUSH_SEATS_IN_TOKENS} seats in a Token-2022 quote: ${size} bytes`);
+    expect(size).toBeLessThanOrEqual(LIMIT);
+    // The pot, the quote and its program, then four accounts a seat.
+    expect(ixs.at(-1)!.accounts!.length).toBe(13 + 4 * PUSH_SEATS_IN_TOKENS);
+    // One seat more would not fit.
+    const more = [...seats, { seat: await random(), wallet: await random() }];
+    expect(await pushSize(payer, await pushInstructions({ launch, mint, payer, seats: more, computeUnitPrice: 1n, quote: XSTOCK }))).toBeGreaterThan(LIMIT);
+  });
+});
+
+describe("the refunds of a failed launch", () => {
+  it(`fit ${REFUND_SEATS} seats in SOL and ${REFUND_SEATS_IN_TOKENS} in a token quote`, async () => {
+    const payer = await generateKeyPairSigner();
+    const launch = await random();
+    for (const [quote, n] of [[undefined, REFUND_SEATS], [XSTOCK, REFUND_SEATS_IN_TOKENS]] as const) {
+      const seats = await Promise.all(Array.from({ length: n }, async () => ({ seat: await random(), wallet: await random() })));
+      const size = await pushSize(payer, await refundsInstructions({ launch, seats, computeUnitPrice: 1n, quote }));
+      console.log(`refunds of ${n} seats ${quote ? "in a Token-2022 quote" : "in SOL"}: ${size} bytes`);
+      // With room to spare, for a seat more.
+      expect(size).toBeLessThanOrEqual(LIMIT - 130);
+    }
   });
 });
 
@@ -196,5 +277,8 @@ describe("the shared lookup table", () => {
     expect(new Set(addresses).size).toBe(addresses.length);
     expect(addresses).toContain(devnet.configs!.fairOpen as Address);
     expect(addresses).toContain(address(SYSVAR_INSTRUCTIONS));
+    // Token-2022 and the listed quotes, with the badge of the one DBC takes only with it (#88).
+    expect(addresses).toEqual(expect.arrayContaining([TOKEN_2022_PROGRAM_ADDRESS, DEVNET_USDC, XSTOCK.mint, await tokenBadgeAddress(XSTOCK.mint)]));
+    expect(addresses).not.toContain(await tokenBadgeAddress(DEVNET_USDC));
   });
 });

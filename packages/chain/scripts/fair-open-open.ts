@@ -41,7 +41,8 @@ import {
   fairOpenPhase,
   markFailedInstructions,
   pushInstructions,
-  PUSH_SEATS,
+  fetchQuoteToken,
+  pushSeats,
   rungAtOrBelow,
   SEAT_LAYOUT,
 } from "../src/index";
@@ -157,9 +158,11 @@ if (account.status === LaunchStatus.Opened) {
     .map((s) => ({ seat: s.pubkey, ...getSeatDecoder().decode(getBase64Encoder().encode(s.account.data[0])) }))
     .filter((s) => !s.delivered && s.wallet !== account.creator);
   console.log(`${waiting.length} seats to push.`);
-  for (let i = 0; i < waiting.length && send; i += PUSH_SEATS) {
-    const batch = waiting.slice(i, i + PUSH_SEATS).map((s) => ({ seat: s.seat, wallet: s.wallet }));
-    await keeperSends(`push of ${batch.length}`, await pushInstructions({ launch, mint: account.mint, payer: keeper, seats: batch, computeUnitPrice: 0n }));
+  // In a quote other than SOL each refund goes to the wallet's account of the quote, fewer seats a push (ADR 0007).
+  const quote = await fetchQuoteToken(rpc, account.quoteMint);
+  for (let i = 0; i < waiting.length && send; i += pushSeats(quote)) {
+    const batch = waiting.slice(i, i + pushSeats(quote)).map((s) => ({ seat: s.seat, wallet: s.wallet }));
+    await keeperSends(`push of ${batch.length}`, await pushInstructions({ launch, mint: account.mint, payer: keeper, seats: batch, computeUnitPrice: 0n, quote }));
   }
   const pool = await dbcPoolAddress(account.dbcConfig, account.mint, account.quoteMint);
   console.log(`The coin ${account.mint}, pool ${pool}: https://top-pad-web-devnet.imdev2023.workers.dev/coin/${account.mint}`);

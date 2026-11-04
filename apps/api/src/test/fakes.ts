@@ -295,6 +295,8 @@ export function fairOpenLaunch(p: {
   creator: Address;
   nonce: Address;
   depositsOpenAt: bigint;
+  /** Its quote: wrapped SOL unless given (ADR 0007). */
+  quoteMint?: Address;
   minRaise?: bigint;
   asks?: [number, Tier][];
   failure?: number;
@@ -311,7 +313,7 @@ export function fairOpenLaunch(p: {
   const launch: LaunchArgs = {
     creator: p.creator,
     dbcConfig: "rPqMj6mwJp9qnZBMeawF8s2iC74EkhpbUSvhWd9XTnC" as Address,
-    quoteMint: "So11111111111111111111111111111111111111112" as Address,
+    quoteMint: p.quoteMint ?? ("So11111111111111111111111111111111111111112" as Address),
     nonce: p.nonce,
     identityHash: new Uint8Array(32).fill(0xab),
     depositsOpenAt: p.depositsOpenAt,
@@ -345,7 +347,8 @@ export function fairOpenLaunch(p: {
     taxCollected: false,
     taxShare: 0n,
     taxFillsPaid: 0n,
-    reserved: new Uint8Array(2),
+    potBump: 0,
+    reserved: new Uint8Array(1),
     bump: 255,
     vaultBump: 254,
   };

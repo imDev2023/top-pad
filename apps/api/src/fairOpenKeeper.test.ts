@@ -4,13 +4,14 @@
 import { getAddressEncoder, getBase64EncodedWireTransaction, partiallySignTransaction, type Address, type KeyPairSigner } from "@solana/kit";
 import { eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { CLUSTERS, fairOpenLookupTableAddresses, seatAddress, Tier } from "@top-pad/chain";
+import { CLUSTERS, DEVNET_USDC, fairOpenLookupTableAddresses, quoteTokenAccount, seatAddress, Tier } from "@top-pad/chain";
 import { PreparedLaunch } from "@top-pad/contract";
 import { createDb, launches, metadataItems, protectedCoins, protectedImages, type Db } from "@top-pad/db";
 import { createTestDatabase } from "@top-pad/db/testing";
 import { config, type Bindings } from "./env";
 import { closeLaunchNonce, failAndRefund, finishTicker, pushSeats, readSchedule, sendOpen, SERVE_WITHIN_MS, uploadMetadata } from "./fairOpenKeeper";
 import { app } from "./index";
+import { findPotPda } from "@top-pad/clients/fair-open";
 import { decode, Fakes, fairOpenLaunch, fairOpenSeat, lookupTableAccount, MemoryBlobs, ORIGINS, testBindings, testContext, testKeypair } from "./test/fakes";
 
 vi.mock("@top-pad/chain", async (importOriginal) => {
@@ -274,6 +275,44 @@ describe("the keeper's steps, each run twice", { timeout: 30_000 }, () => {
     expect(await failAndRefund(cfg(), keeperKey, s.launch)).toEqual({ marked: false, refunded: 0, closed: false });
     expect(step).toBe(3);
     expect((await readSchedule(db, cfg(), s.launch)).status).toBe("gone");
+  });
+
+  it("refunds a failed launch in USDC into each wallet's account of it, making a missing one first", async () => {
+    const s = await scheduled();
+    const asks: [number, Tier][] = [[10, Tier.Unverified], [20, Tier.Scored]];
+    const quote = { mint: DEVNET_USDC, tokenProgram: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" as Address };
+    onChain(s, 700n, { minRaise: 1_000_000_000n, asks, quoteMint: quote.mint });
+    // Circle's devnet USDC, an SPL Token mint: what tells the keeper the quote's token program.
+    fakes.accounts.set(quote.mint, { owner: quote.tokenProgram, data: new Uint8Array(82) });
+    const wallets = await Promise.all([0, 1].map(async () => (await testKeypair()).signer.address));
+    const seats = await Promise.all(
+      wallets.map(async (wallet) => {
+        const person = crypto.getRandomValues(new Uint8Array(32));
+        const seat = await seatAddress(s.launch, person);
+        fakes.accounts.set(seat, fairOpenSeat({ launch: s.launch, wallet, person, tier: Tier.Scored, deposit: 100_000_000n }));
+        return seat;
+      }),
+    );
+    // The first wallet still holds the account of USDC it deposited from; the second has closed its.
+    const accounts = await Promise.all(wallets.map((wallet) => quoteTokenAccount(wallet, quote)));
+    fakes.accounts.set(accounts[0]!, { owner: quote.tokenProgram, data: new Uint8Array(165) });
+    const before = fakes.sent.length;
+    let step = 0;
+    fakes.onSend = () => {
+      step++;
+      if (step === 1) onChain(s, 700n, { minRaise: 1_000_000_000n, asks, quoteMint: quote.mint, failure: 1 });
+      if (step === 2) fakes.accounts.set(accounts[1]!, { owner: quote.tokenProgram, data: new Uint8Array(165) });
+      if (step === 3) for (const seat of seats) fakes.accounts.delete(seat);
+      if (step === 4) fakes.accounts.delete(s.launch);
+    };
+    expect(await failAndRefund(cfg(), keeperKey, s.launch)).toEqual({ marked: true, refunded: 2, closed: true });
+    const [, made, refunds, close] = fakes.sent.slice(before);
+    // The missing account of USDC made first, then both refunds paying into the wallets' accounts of it, out of the pot.
+    expect(containsAddress(made!, accounts[1]!) && !containsAddress(made!, accounts[0]!)).toBe(true);
+    const [pot] = await findPotPda({ launch: s.launch });
+    for (const address of [...accounts, pot]) expect(containsAddress(refunds!, address)).toBe(true);
+    expect(containsAddress(close!, pot)).toBe(true);
+    expect(step).toBe(4);
   });
 
   it("closes the nonce to the creator once, and releases a failed launch's ticker once", async () => {

@@ -32,6 +32,7 @@ import type { Context } from "hono";
 import {
   allocate,
   claimInstructions,
+  fetchQuoteToken,
   COIN_DECIMALS,
   dbcPoolAddress,
   depositInstructions,
@@ -394,6 +395,7 @@ export async function prepareDeposit(c: Context<AppEnv>) {
     admissionSigner: setup.admission,
     signature: admitted.signature,
     computeUnitPrice: cfg.computeUnitPrice,
+    quote: await fetchQuoteToken(rpc, launch.quoteMint),
   });
   return c.json(await prepared(rpc, wallet, instructions, { tier: admitted.tier, cap: `${admitted.admission.cap}` }));
 }
@@ -416,7 +418,8 @@ export async function prepareWithdrawal(c: Context<AppEnv>) {
   if (amount === null || amount > seat.seat.deposit) {
     return refuse(c, 400, { error: `You can take back up to ${sol(seat.seat.deposit)}, in steps of ${sol(launch.step)}.`, code: "invalid" });
   }
-  const instructions = await withdrawInstructions({ launch: address, seat: seat.address, wallet: createNoopSigner(wallet), amount, computeUnitPrice: cfg.computeUnitPrice });
+  const quote = await fetchQuoteToken(rpc, launch.quoteMint);
+  const instructions = await withdrawInstructions({ launch: address, seat: seat.address, wallet: createNoopSigner(wallet), amount, computeUnitPrice: cfg.computeUnitPrice, quote });
   return c.json(await prepared(rpc, wallet, instructions));
 }
 
@@ -445,7 +448,8 @@ export async function prepareMarkFailed(c: Context<AppEnv>) {
   const wallet = sender.data.wallet as KitAddress;
   const seat = await seatOfWallet(rpc, address, wallet);
   const refund = seat ? { seat: seat.address, wallet } : undefined;
-  return c.json(await prepared(rpc, wallet, await markFailedInstructions({ launch: address, refund, computeUnitPrice: cfg.computeUnitPrice })));
+  const quote = await fetchQuoteToken(rpc, launch.quoteMint);
+  return c.json(await prepared(rpc, wallet, await markFailedInstructions({ launch: address, refund, computeUnitPrice: cfg.computeUnitPrice, quote })));
 }
 
 /** `POST /fair-opens/:launch/refund`: a failed launch's deposit and both rents back to the wallet's seat's wallet. */
@@ -461,7 +465,8 @@ export async function prepareRefund(c: Context<AppEnv>) {
   const wallet = sender.data.wallet as KitAddress;
   const seat = await seatOfWallet(rpc, address, wallet);
   if (!seat) return refuse(c, 404, { error: "This wallet holds no seat in this Fair Open.", code: "no_seat" });
-  return c.json(await prepared(rpc, wallet, await withdrawFailedInstructions({ launch: address, seat: seat.address, wallet, computeUnitPrice: cfg.computeUnitPrice })));
+  const quote = await fetchQuoteToken(rpc, launch.quoteMint);
+  return c.json(await prepared(rpc, wallet, await withdrawFailedInstructions({ launch: address, seat: seat.address, wallet, computeUnitPrice: cfg.computeUnitPrice, quote })));
 }
 
 /**
@@ -483,7 +488,8 @@ export async function prepareFairOpenClaim(c: Context<AppEnv>) {
   const seat = await seatOfWallet(rpc, address, wallet);
   if (!seat) return refuse(c, 404, { error: "This wallet holds no seat in this Fair Open.", code: "no_seat" });
   if (seat.seat.delivered) return refuse(c, 409, { error: "Your coins and refund are in your wallet already.", code: "delivered" });
-  const instructions = await claimInstructions({ launch: address, mint: launch.mint, seat: seat.address, wallet: createNoopSigner(wallet), computeUnitPrice: cfg.computeUnitPrice });
+  const quote = await fetchQuoteToken(rpc, launch.quoteMint);
+  const instructions = await claimInstructions({ launch: address, mint: launch.mint, seat: seat.address, wallet: createNoopSigner(wallet), computeUnitPrice: cfg.computeUnitPrice, quote });
   return c.json(await prepared(rpc, wallet, instructions));
 }
 
