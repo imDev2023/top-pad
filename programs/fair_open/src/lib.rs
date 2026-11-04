@@ -42,6 +42,8 @@ pub const POT_SEED: &[u8] = b"pot";
 /// The seed of the coin registrar, the PDA whose signature tells the fee program a coin's registration comes from the
 /// open, and a window claim from the Tax Share's collection (`fee::COIN_REGISTRAR_SEED`).
 pub const COIN_REGISTRAR_SEED: &[u8] = b"coin_registrar";
+/// The seed of a quote's `QuoteSettings`, followed by the quote's mint (ADR 0007 decision 4).
+pub const QUOTE_SETTINGS_SEED: &[u8] = b"quote";
 /// The seed of a launch's creator locker, followed by the launch: a system account of this program's that funds the
 /// Creator lock's escrow and sends it the creator's coins, as the escrow's `base` and `sender` (`jupiter_lock`).
 pub const CREATOR_LOCK_SEED: &[u8] = b"creator_lock";
@@ -56,7 +58,8 @@ pub const LATE_OPEN_SECONDS: i64 = 900;
 /// How far ahead a window may start (spec 2.1 step 4): 7 days.
 #[constant]
 pub const MAX_SCHEDULE_SECONDS: i64 = 7 * 24 * 3600;
-/// The deposit step (spec 12): deposits, withdrawals and caps move in 0.01 SOL.
+/// SOL's deposit step (spec 12): deposits, withdrawals and caps move in 0.01 SOL. Each quote's step is in its
+/// `QuoteSettings`, 0.01 SOL's worth of the quote, and a launch keeps the one it was scheduled with.
 #[constant]
 pub const DEPOSIT_STEP: u64 = 10_000_000;
 /// Each Depositor tier's cap per Fair Open, in deposit steps (spec 2.1 step 9): Unverified 0.1 SOL, Scored 0.5 SOL,
@@ -83,6 +86,8 @@ pub const TOKEN_ACCOUNT_LEN: usize = 165;
 pub const NATIVE_MINT: Pubkey = pubkey!("So11111111111111111111111111111111111111112");
 /// SPL Token: Heat coins and wrapped SOL are classic SPL tokens (spec 3.1).
 pub const TOKEN_PROGRAM: Pubkey = pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+/// Token-2022, the program of every xStock (ADR 0007).
+pub const TOKEN_2022_PROGRAM: Pubkey = pubkey!("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
 
 /// What the open's accounts cost, which the creator prepays at scheduling (spec 2.1 step 7) and our keeper fronts at
 /// the open, paid back from the prepayment exactly what they cost it: DBC's mint, pool and two vaults, the coin's
@@ -203,6 +208,17 @@ pub mod dbc {
     /// `PoolConfig`: the discriminator, then `quote_mint`; the Graduation Target, `migration_quote_threshold`, further on.
     pub const CONFIG_QUOTE_MINT_OFFSET: usize = 8;
     pub const CONFIG_MIGRATION_QUOTE_THRESHOLD_OFFSET: usize = 264;
+    /// `PoolConfig`'s length, its discriminator included.
+    pub const CONFIG_LEN: usize = 1048;
+    /// The bytes of a `PoolConfig` that make a launch Heat's whatever its quote (ADR 0007 decision 4), which every
+    /// quote's Fair Open config must share with Heat's SOL one: from the fee claimer to the end of the flags (the
+    /// leftover receiver, the sniper tax, the dynamic fee, both LP vesting schedules, the base mint's transfer fee, the
+    /// collect fee mode, the migration option, the activation type, the coin's decimals and token type, every LP bucket,
+    /// the migration fees, the fixed supply flag, the creator fee and the update authority), and the migrated pool's fees
+    /// and the pool creation fee. Left out are what follows the quote: its mint, its token program flag (byte 238), and
+    /// the Graduation Target, curve and supplies solved for it; and DBC's own `version` (byte 236), which DBC sets for a
+    /// config when it is made.
+    pub const CONFIG_SHAPE: [core::ops::Range<usize>; 4] = [40..236, 237..238, 239..256, 360..392];
     pub const VIRTUAL_POOL_DISCRIMINATOR: [u8; 8] = [213, 224, 5, 209, 98, 69, 119, 92];
     /// `VirtualPool`: the discriminator, the 64-byte volatility tracker, then `config`, `creator` and `base_mint`; the
     /// partner's accrued quote fee further on.
@@ -266,10 +282,66 @@ pub mod fair_open {
     pub fn update_program_config(ctx: Context<UpdateProgramConfig>, settings: ProgramSettings) -> Result<()> {
         settings.check()?;
         let config = &mut ctx.accounts.program_config;
-        let bump = config.bump;
-        config.set_inner(ProgramConfig { bump, ..settings.into() });
+        let (bump, quote_manager) = (config.bump, config.quote_manager);
+        config.set_inner(ProgramConfig { bump, quote_manager, ..settings.into() });
         let changed = ProgramConfigChanged::from(&**config);
         emit_cpi!(changed);
+        Ok(())
+    }
+
+    /// Names the quote manager, again only by the upgrade authority. A `ProgramConfig` made before the quote manager
+    /// existed grows here to hold it, the payer paying the rent of its new bytes.
+    pub fn set_quote_manager(ctx: Context<SetQuoteManager>, quote_manager: Pubkey) -> Result<()> {
+        require_keys_neq!(quote_manager, Pubkey::default(), FairOpenError::MissingSetting);
+        let info = ctx.accounts.program_config.to_account_info();
+        require!(info.try_borrow_data()?.get(..8) == Some(ProgramConfig::DISCRIMINATOR), FairOpenError::MissingSetting);
+        let len = 8 + ProgramConfig::INIT_SPACE;
+        if info.data_len() < len {
+            let more = Rent::get()?.minimum_balance(len).saturating_sub(info.lamports());
+            if more > 0 {
+                let accounts =
+                    system_program::Transfer { from: ctx.accounts.payer.to_account_info(), to: info.clone() };
+                system_program::transfer(CpiContext::new(ctx.accounts.system_program.key(), accounts), more)?;
+            }
+            info.resize(len)?;
+        }
+        let mut config = ProgramConfig::try_deserialize(&mut &info.try_borrow_data()?[..])?;
+        config.quote_manager = quote_manager;
+        config.try_serialize(&mut &mut info.try_borrow_mut_data()?[..])?;
+        emit_cpi!(QuoteManagerSet { quote_manager });
+        Ok(())
+    }
+
+    /// Writes a quote's `QuoteSettings` (ADR 0007 decision 4), by the quote manager alone: its Fair Open and Instant
+    /// configs, each a DBC config in that quote, the Fair Open one shaped as Heat's SOL one in every byte that does not
+    /// follow the quote, and its deposit step. A leaked manager key can so point a quote at a wrong target or step, never
+    /// at a config that pays anyone else.
+    pub fn set_quote_settings(ctx: Context<SetQuoteSettings>, step: u64) -> Result<()> {
+        require_gt!(step, 0, FairOpenError::OffStep);
+        let quote_mint = ctx.accounts.quote_mint.key();
+        let reference = ctx.accounts.reference_config.try_borrow_data()?;
+        for config in [&ctx.accounts.fair_open_config, &ctx.accounts.instant_config] {
+            let data = config.try_borrow_data()?;
+            require!(data.get(..8) == Some(&dbc::POOL_CONFIG_DISCRIMINATOR[..]), FairOpenError::NotADbcConfig);
+            require!(address_at(&data, dbc::CONFIG_QUOTE_MINT_OFFSET) == Some(quote_mint), FairOpenError::NotThisQuote);
+        }
+        check_config_shape(&ctx.accounts.fair_open_config.try_borrow_data()?, &reference)?;
+        drop(reference);
+        let settings = &mut ctx.accounts.quote_settings;
+        settings.set_inner(QuoteSettings {
+            quote_mint,
+            fair_open_config: ctx.accounts.fair_open_config.key(),
+            instant_config: ctx.accounts.instant_config.key(),
+            step,
+            updated_at: Clock::get()?.unix_timestamp,
+            bump: ctx.bumps.quote_settings,
+        });
+        emit_cpi!(QuoteSettingsChanged {
+            quote_mint,
+            fair_open_config: settings.fair_open_config,
+            instant_config: settings.instant_config,
+            step,
+        });
         Ok(())
     }
 
@@ -284,12 +356,16 @@ pub mod fair_open {
         require_gte!(now + MAX_SCHEDULE_SECONDS, params.deposits_open_at, FairOpenError::TooFarAhead);
         require!(params.identity_hash != [0; 32], FairOpenError::NoIdentity);
 
+        // The quote's Fair Open config, by its `QuoteSettings`, shaped as Heat's SOL one (ADR 0007 decision 4).
         let config = ctx.accounts.dbc_config.try_borrow_data()?;
         require!(config.get(..8) == Some(&dbc::POOL_CONFIG_DISCRIMINATOR[..]), FairOpenError::NotADbcConfig);
         let quote_mint = address_at(&config, dbc::CONFIG_QUOTE_MINT_OFFSET).ok_or(FairOpenError::NotADbcConfig)?;
+        require_keys_eq!(quote_mint, ctx.accounts.quote_settings.quote_mint, FairOpenError::NotThisQuote);
+        check_config_shape(&config, &ctx.accounts.reference_config.try_borrow_data()?)?;
         let target =
             u64_at(&config, dbc::CONFIG_MIGRATION_QUOTE_THRESHOLD_OFFSET).ok_or(FairOpenError::NotADbcConfig)?;
         drop(config);
+        // Until a non-SOL quote's deposits are held in a token vault (#88).
         require_keys_eq!(quote_mint, NATIVE_MINT, FairOpenError::QuoteNotSupported);
         let pot_cap = (target as u128 * POT_CAP_PERCENT as u128 / 100) as u64;
         require_gt!(pot_cap, 0, FairOpenError::NotADbcConfig);
@@ -325,7 +401,7 @@ pub mod fair_open {
             min_raise: params.min_raise,
             pot_cap,
             lowest_rung: allocation::lowest_rung(pot_cap),
-            step: DEPOSIT_STEP,
+            step: ctx.accounts.quote_settings.step,
             status: LaunchStatus::Scheduled,
             failure: None,
             failed_at: 0,
@@ -1019,6 +1095,18 @@ fn u32_at(data: &[u8], offset: usize) -> Option<u32> {
     Some(u32::from_le_bytes(data.get(offset..offset + 4)?.try_into().ok()?))
 }
 
+/// A quote's Fair Open config must match Heat's SOL one in every byte that makes a launch Heat's (`dbc::CONFIG_SHAPE`).
+fn check_config_shape(config: &[u8], reference: &[u8]) -> Result<()> {
+    require!(
+        config.len() >= dbc::CONFIG_LEN
+            && reference.len() >= dbc::CONFIG_LEN
+            && reference.get(..8) == Some(&dbc::POOL_CONFIG_DISCRIMINATOR[..])
+            && dbc::CONFIG_SHAPE.iter().all(|range| config[range.clone()] == reference[range.clone()]),
+        FairOpenError::NotHeatsConfigShape
+    );
+    Ok(())
+}
+
 /// Moves `amount` of the depositor's SOL into the vault.
 fn transfer_in<'info>(
     from: &Signer<'info>,
@@ -1366,6 +1454,7 @@ impl From<ProgramSettings> for ProgramConfig {
             keeper: s.keeper,
             fee_program: s.fee_program,
             dbc_config: s.dbc_config,
+            quote_manager: Pubkey::default(),
             bump: 0,
         }
     }
@@ -1377,7 +1466,27 @@ pub struct ProgramConfig {
     pub admission_signer: Pubkey,
     pub keeper: Pubkey,
     pub fee_program: Pubkey,
+    /// Heat's SOL Fair Open config, which every quote's Fair Open config must match in shape (`dbc::CONFIG_SHAPE`).
     pub dbc_config: Pubkey,
+    pub bump: u8,
+    /// Writes each quote's `QuoteSettings`, so configs follow prices without the upgrade authority (ADR 0007 decision
+    /// 4); named by the upgrade authority with `set_quote_manager`, which also grows a `ProgramConfig` made before it.
+    pub quote_manager: Pubkey,
+}
+
+/// A quote Heat prices coins in (ADR 0007 decision 4), at the PDA of its mint: the DBC configs its launches are made on
+/// and its Fair Opens' deposit step, written by the quote manager as the quote's price moves.
+#[account]
+#[derive(InitSpace, Debug)]
+pub struct QuoteSettings {
+    pub quote_mint: Pubkey,
+    /// The Fair Open config every new Fair Open in this quote is scheduled on.
+    pub fair_open_config: Pubkey,
+    /// The Instant config every new Instant launch in this quote is made on, by Heat's launch service.
+    pub instant_config: Pubkey,
+    /// A Fair Open's deposit step in the quote's raw units: 0.01 SOL's worth at the latest price.
+    pub step: u64,
+    pub updated_at: i64,
     pub bump: u8,
 }
 
@@ -1663,22 +1772,87 @@ pub struct UpdateProgramConfig<'info> {
 
 #[event_cpi]
 #[derive(Accounts)]
+pub struct SetQuoteManager<'info> {
+    /// CHECK: the `ProgramConfig`, at its PDA and owned by this program; read and grown by hand in the handler, since one
+    /// made before the quote manager existed is too short to read as a `ProgramConfig`.
+    #[account(mut, seeds = [PROGRAM_CONFIG_SEED], bump, owner = crate::ID)]
+    pub program_config: UncheckedAccount<'info>,
+    pub authority: Signer<'info>,
+    /// This program's ProgramData, at the address the upgradeable loader derives from the program id.
+    #[account(
+        seeds = [crate::ID.as_ref()],
+        bump,
+        seeds::program = bpf_loader_upgradeable::ID,
+        constraint = program_data.upgrade_authority_address == Some(authority.key()) @ FairOpenError::NotUpgradeAuthority,
+    )]
+    pub program_data: Account<'info, ProgramData>,
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[event_cpi]
+#[derive(Accounts)]
+pub struct SetQuoteSettings<'info> {
+    #[account(
+        seeds = [PROGRAM_CONFIG_SEED],
+        bump = program_config.bump,
+        has_one = quote_manager @ FairOpenError::NotTheQuoteManager,
+    )]
+    pub program_config: Account<'info, ProgramConfig>,
+    pub quote_manager: Signer<'info>,
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    /// CHECK: the quote's mint, an SPL Token or Token-2022 mint; whether Heat takes it is read when a launch is scheduled.
+    #[account(constraint = [TOKEN_PROGRAM, TOKEN_2022_PROGRAM].contains(quote_mint.owner) @ FairOpenError::NotThisQuote)]
+    pub quote_mint: UncheckedAccount<'info>,
+    #[account(
+        init_if_needed,
+        payer = payer,
+        space = 8 + QuoteSettings::INIT_SPACE,
+        seeds = [QUOTE_SETTINGS_SEED, quote_mint.key().as_ref()],
+        bump,
+    )]
+    pub quote_settings: Account<'info, QuoteSettings>,
+    /// CHECK: owned by DBC; its quote and shape are checked in the handler.
+    #[account(owner = dbc::PROGRAM_ID @ FairOpenError::NotADbcConfig)]
+    pub fair_open_config: UncheckedAccount<'info>,
+    /// CHECK: owned by DBC; its quote is checked in the handler.
+    #[account(owner = dbc::PROGRAM_ID @ FairOpenError::NotADbcConfig)]
+    pub instant_config: UncheckedAccount<'info>,
+    /// CHECK: Heat's SOL Fair Open config, by the program config.
+    #[account(address = program_config.dbc_config @ FairOpenError::NotTheFairOpenConfig)]
+    pub reference_config: UncheckedAccount<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[event_cpi]
+#[derive(Accounts)]
 pub struct CreateLaunch<'info> {
     #[account(
         seeds = [PROGRAM_CONFIG_SEED],
         bump = program_config.bump,
         has_one = keeper @ FairOpenError::NotTheKeeper,
-        has_one = dbc_config @ FairOpenError::NotTheFairOpenConfig,
     )]
     pub program_config: Account<'info, ProgramConfig>,
     /// The Creator wallet, which pays the rent.
     #[account(mut)]
     pub creator: Signer<'info>,
     pub keeper: Signer<'info>,
-    /// CHECK: Heat's Fair Open config, by the program config; owned by DBC, its quote and Graduation Target read in the
-    /// handler.
-    #[account(owner = dbc::PROGRAM_ID @ FairOpenError::NotADbcConfig)]
+    /// CHECK: the quote's mint, which names its `QuoteSettings`.
+    pub quote_mint: UncheckedAccount<'info>,
+    #[account(seeds = [QUOTE_SETTINGS_SEED, quote_mint.key().as_ref()], bump = quote_settings.bump)]
+    pub quote_settings: Account<'info, QuoteSettings>,
+    /// CHECK: the quote's Fair Open config, by its `QuoteSettings`; owned by DBC, its quote, shape and Graduation Target
+    /// read in the handler.
+    #[account(
+        address = quote_settings.fair_open_config @ FairOpenError::NotTheFairOpenConfig,
+        owner = dbc::PROGRAM_ID @ FairOpenError::NotADbcConfig,
+    )]
     pub dbc_config: UncheckedAccount<'info>,
+    /// CHECK: Heat's SOL Fair Open config, by the program config, whose shape the quote's config must have.
+    #[account(address = program_config.dbc_config @ FairOpenError::NotTheFairOpenConfig)]
+    pub reference_config: UncheckedAccount<'info>,
     /// CHECK: the launch's durable nonce account, owned by the system program; its state and authority are checked in
     /// the handler.
     #[account(owner = system_program::ID @ FairOpenError::NotOurNonce)]
@@ -2060,6 +2234,21 @@ impl From<&ProgramConfig> for ProgramConfigChanged {
     }
 }
 
+/// The quote manager named by the upgrade authority.
+#[event]
+pub struct QuoteManagerSet {
+    pub quote_manager: Pubkey,
+}
+
+/// A quote's `QuoteSettings` written by the quote manager.
+#[event]
+pub struct QuoteSettingsChanged {
+    pub quote_mint: Pubkey,
+    pub fair_open_config: Pubkey,
+    pub instant_config: Pubkey,
+    pub step: u64,
+}
+
 /// A Fair Open scheduled: its terms, as the launch account holds them.
 #[event]
 pub struct LaunchCreated {
@@ -2361,4 +2550,10 @@ pub enum FairOpenError {
     NotDone,
     #[msg("The Creator lock did not take exactly the creator's coins")]
     CreatorCoinsNotLocked,
+    #[msg("Only the quote manager can write a quote's settings")]
+    NotTheQuoteManager,
+    #[msg("That config or mint is not this quote's")]
+    NotThisQuote,
+    #[msg("That config is not shaped as Heat's Fair Open config")]
+    NotHeatsConfigShape,
 }

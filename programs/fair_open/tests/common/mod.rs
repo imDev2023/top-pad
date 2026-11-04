@@ -34,6 +34,7 @@ const DBC_STAND_IN: &[u8] = include_bytes!(concat!(env!("CARGO_TARGET_TMPDIR"), 
 const LOCK_STAND_IN: &[u8] = include_bytes!(concat!(env!("CARGO_TARGET_TMPDIR"), "/../deploy/lock_stand_in.so"));
 
 pub const TOKEN_PROGRAM: Pubkey = fair_open::TOKEN_PROGRAM;
+pub const TOKEN_2022: Pubkey = fair_open::TOKEN_2022_PROGRAM;
 pub const ASSOCIATED_TOKEN_PROGRAM: Pubkey = fair_open::creation::ASSOCIATED_TOKEN_PROGRAM;
 pub const METADATA_PROGRAM: Pubkey = Pubkey::from_str_const("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
 
@@ -108,6 +109,9 @@ pub enum Code {
     NotTheTreasury,
     NotDone,
     CreatorCoinsNotLocked,
+    NotTheQuoteManager,
+    NotThisQuote,
+    NotHeatsConfigShape,
 }
 
 /// A launch's coin, as the creator seals it at scheduling.
@@ -196,14 +200,22 @@ pub struct Test {
     pub creator: Keypair,
     pub payer: Keypair,
     pub dbc_config: Pubkey,
+    /// Heat's SOL Instant config, which SOL's `QuoteSettings` names beside the Fair Open one.
+    pub instant_config: Pubkey,
+    pub quote_manager: Keypair,
 }
 
 impl Test {
-    /// The program deployed, its `ProgramConfig` set, and the clock at `WINDOW_OPENS`.
+    /// The program deployed, its `ProgramConfig` set with its quote manager, SOL's `QuoteSettings` written, and the
+    /// clock at `WINDOW_OPENS`.
     pub fn new() -> Self {
         let mut t = Test::deployed();
         let upgrade_authority = t.upgrade_authority.insecure_clone();
         t.initialize_as(&upgrade_authority, t.settings()).unwrap();
+        let manager = t.quote_manager.pubkey();
+        t.set_quote_manager_as(&upgrade_authority, manager).unwrap();
+        let (fair_open_config, instant_config) = (t.dbc_config, t.instant_config);
+        t.set_quote_settings(&fair_open::NATIVE_MINT, fair_open_config, instant_config, STEP).unwrap();
         t.at(0);
         t
     }
@@ -227,10 +239,13 @@ impl Test {
             creator,
             payer,
             dbc_config: Pubkey::new_unique(),
+            instant_config: Pubkey::new_unique(),
+            quote_manager: Keypair::new(),
         };
         t.set_upgrade_authority(Some(t.upgrade_authority.pubkey()));
         let config = dbc_config_data(&fair_open::NATIVE_MINT, GRADUATION_TARGET);
-        t.set_account(t.dbc_config, config, dbc::PROGRAM_ID);
+        t.set_account(t.dbc_config, config.clone(), dbc::PROGRAM_ID);
+        t.set_account(t.instant_config, config, dbc::PROGRAM_ID);
         t.set_account(fair_open::NATIVE_MINT, mint_data(9), TOKEN_PROGRAM);
         // The fee program's settings, as `fee-config` sets them: its Fair Open program is this one.
         let fee_config = fee::FeeConfig {
@@ -310,6 +325,61 @@ impl Test {
         self.send(&[instruction(accounts.to_account_metas(None), data)], &[authority])
     }
 
+    pub fn set_quote_manager_as(
+        &mut self,
+        authority: &Keypair,
+        quote_manager: Pubkey,
+    ) -> Result<TransactionMetadata, FailedTransactionMetadata> {
+        let accounts = fair_open::accounts::SetQuoteManager {
+            program_config: program_config_address(),
+            authority: authority.pubkey(),
+            program_data: program_data_address(),
+            payer: self.payer.pubkey(),
+            system_program: system_program::ID,
+            event_authority: event_authority(),
+            program: fair_open::id(),
+        };
+        let data = fair_open::instruction::SetQuoteManager { quote_manager }.data();
+        self.send(&[instruction(accounts.to_account_metas(None), data)], &[authority])
+    }
+
+    /// `set_quote_settings` signed by the test's quote manager.
+    pub fn set_quote_settings(
+        &mut self,
+        quote_mint: &Pubkey,
+        fair_open_config: Pubkey,
+        instant_config: Pubkey,
+        step: u64,
+    ) -> Result<TransactionMetadata, FailedTransactionMetadata> {
+        let manager = self.quote_manager.insecure_clone();
+        self.set_quote_settings_as(&manager, quote_mint, fair_open_config, instant_config, step)
+    }
+
+    pub fn set_quote_settings_as(
+        &mut self,
+        manager: &Keypair,
+        quote_mint: &Pubkey,
+        fair_open_config: Pubkey,
+        instant_config: Pubkey,
+        step: u64,
+    ) -> Result<TransactionMetadata, FailedTransactionMetadata> {
+        let accounts = fair_open::accounts::SetQuoteSettings {
+            program_config: program_config_address(),
+            quote_manager: manager.pubkey(),
+            payer: self.payer.pubkey(),
+            quote_mint: *quote_mint,
+            quote_settings: quote_settings_address(quote_mint),
+            fair_open_config,
+            instant_config,
+            reference_config: self.dbc_config,
+            system_program: system_program::ID,
+            event_authority: event_authority(),
+            program: fair_open::id(),
+        };
+        let data = fair_open::instruction::SetQuoteSettings { step }.data();
+        self.send(&[instruction(accounts.to_account_metas(None), data)], &[manager])
+    }
+
     /// A durable nonce account held by `authority`, as the system program leaves one it initialized.
     pub fn nonce_held_by(&mut self, authority: &Pubkey) -> Pubkey {
         let nonce = Pubkey::new_unique();
@@ -345,12 +415,28 @@ impl Test {
         dbc_config: Pubkey,
         params: LaunchParams,
     ) -> Result<TransactionMetadata, FailedTransactionMetadata> {
+        self.create_launch_in(&fair_open::NATIVE_MINT, creator, keeper, nonce, dbc_config, params)
+    }
+
+    /// `create_launch` in the quote of `quote_mint`, by its `QuoteSettings`.
+    pub fn create_launch_in(
+        &mut self,
+        quote_mint: &Pubkey,
+        creator: &Keypair,
+        keeper: &Keypair,
+        nonce: Pubkey,
+        dbc_config: Pubkey,
+        params: LaunchParams,
+    ) -> Result<TransactionMetadata, FailedTransactionMetadata> {
         let keys = launch_keys(nonce);
         let accounts = fair_open::accounts::CreateLaunch {
             program_config: program_config_address(),
             creator: creator.pubkey(),
             keeper: keeper.pubkey(),
+            quote_mint: *quote_mint,
+            quote_settings: quote_settings_address(quote_mint),
             dbc_config,
+            reference_config: self.dbc_config,
             nonce,
             launch: keys.launch,
             vault: keys.vault,
@@ -1068,6 +1154,10 @@ pub fn launch_keys(nonce: Pubkey) -> LaunchKeys {
 
 pub fn seat_address(launch: &Pubkey, person: &[u8; 32]) -> Pubkey {
     Pubkey::find_program_address(&[fair_open::SEAT_SEED, launch.as_ref(), person], &fair_open::id()).0
+}
+
+pub fn quote_settings_address(quote_mint: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(&[fair_open::QUOTE_SETTINGS_SEED, quote_mint.as_ref()], &fair_open::id()).0
 }
 
 pub fn program_config_address() -> Pubkey {

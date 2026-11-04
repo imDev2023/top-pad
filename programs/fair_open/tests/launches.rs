@@ -1,5 +1,6 @@
 //! Scheduling a Fair Open (spec 2.1 steps 4 to 7): `create_launch` keeps the window, the minimum raise, the identity
-//! hash and the nonce, takes the pot's cap from Heat's Fair Open config, and is refused anything else.
+//! hash and the nonce, takes the pot's cap from the quote's Fair Open config and its step from the quote's
+//! `QuoteSettings`, and is refused anything else.
 #![allow(clippy::result_large_err)]
 mod common;
 
@@ -81,12 +82,16 @@ fn runs_only_on_heats_fair_open_config() {
 
 #[test]
 fn takes_sol_only() {
-    // A config in another quote, even named by the program config, is refused until a non-SOL quote's deposits exist.
+    // A quote with its own settings and a config in it is refused until a non-SOL quote's deposits exist (#88).
     let mut t = Test::new();
-    t.set_account(t.dbc_config, dbc_config_data(&Pubkey::new_unique(), GRADUATION_TARGET), fair_open::dbc::PROGRAM_ID);
+    let quote = Pubkey::new_unique();
+    t.set_account(quote, mint_data(6), TOKEN_PROGRAM);
+    let config = Pubkey::new_unique();
+    t.set_account(config, dbc_config_data(&quote, GRADUATION_TARGET), fair_open::dbc::PROGRAM_ID);
+    t.set_quote_settings(&quote, config, config, 10_000).unwrap();
     let (creator, keeper) = (t.creator.insecure_clone(), t.keeper.insecure_clone());
     let nonce = t.nonce_held_by(&keeper.pubkey());
-    refused(t.create_launch(&creator, &keeper, nonce, t.dbc_config, params()), Code::QuoteNotSupported);
+    refused(t.create_launch_in(&quote, &creator, &keeper, nonce, config, params()), Code::QuoteNotSupported);
 }
 
 #[test]

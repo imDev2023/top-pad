@@ -17,6 +17,8 @@ export * from "./markFailed";
 export * from "./open";
 export * from "./push";
 export * from "./pushTaxShare";
+export * from "./setQuoteManager";
+export * from "./setQuoteSettings";
 export * from "./settle";
 export * from "./updateProgramConfig";
 export * from "./withdraw";

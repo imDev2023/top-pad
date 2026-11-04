@@ -15,6 +15,8 @@ export * from "./launchCreated";
 export * from "./launchFailed";
 export * from "./launchOpened";
 export * from "./programConfigChanged";
+export * from "./quoteManagerSet";
+export * from "./quoteSettingsChanged";
 export * from "./seatDelivered";
 export * from "./taxShareCollected";
 export * from "./taxSharePaid";
