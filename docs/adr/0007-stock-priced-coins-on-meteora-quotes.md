@@ -1,6 +1,6 @@
 # Stock-priced coins: SOL and every xStock DBC accepts as a quote
 
-Status: proposed by the owner on 2026-11-02, replacing "SOL only" in spec section 1; the open questions at the end are the owner's to settle before the build ticket starts.
+Status: accepted by the owner on 2026-11-04, proposed on 2026-11-02, replacing "SOL only" in spec section 1; the three questions it left open are settled at the end.
 
 Heat offers Stock-priced coins: a creator may price a coin in SOL or in any xStock that Meteora's DBC accepts as a quote, in both launch modes (owner, 2026-11-02).
 A reader would expect a SOL-only devnet build to stay SOL-only until mainnet; the owner chose otherwise because pricing coins in stocks is what Stoker is known for, and Heat is planned to become Stoker's launch engine, so the cohort should prove it.
@@ -49,8 +49,13 @@ The code was built quote-agnostic for this ([Stock-priced coins](https://github.
 - Devnet has no xStocks, so the tests run on a stand-in Token-2022 mint with the same extensions, which DBC accepts only with a devnet TokenBadge (open question 2).
 - Rent: one `QuoteSettings` account per quote and two configs per quote per band move, paid by the operations wallet.
 
-## Open questions for the owner
+## Settled questions
 
-1. The band: make a new config pair when the price has moved 10% from the target, as Stoker's 5%-move, 10%-band rule does, or a config pair per launch at its live price (Bags' pattern), which costs more rent but never drifts?
-2. Meteora, in ticket `devlaunch-6428`: who may create a TokenBadge, can one be made for a devnet stand-in mint, and may a new stock be badged on request?
-3. Which xStocks to offer first: every one DBC accepts, or a short list for the cohort?
+1. **The band (owner, 2026-11-04): Stoker's 10% band.**
+   A quote's config pair stands while its Graduation Target, valued in SOL at the quote's latest price, stays within 10% of 85 SOL's worth (8.5 on devnet); the job that watches prices makes a new pair at the live price and rewrites `QuoteSettings` once it drifts past that.
+   So a coin's target in SOL terms is within 10% of the SOL target when it launches, and two configs are made per quote per move, not two per launch.
+   EmberCurve's pattern, a config per launch (about four per coin at about 0.01 SOL each), was the alternative that never drifts.
+2. **Meteora on TokenBadges (2026-11-02, [#26](https://github.com/imDev2023/top-pad/issues/26#issuecomment-6585115722)):** only Meteora creates a TokenBadge; most xStocks hold the mainnet badge, and a launchpad can request one for a stock that lacks it; Meteora can badge our devnet stand-in mint on request.
+   The stand-in exists since 2026-11-03, `Wm7nXsHnoHJm3NemWaLbnxd7QkmeHLALucsFC4qTUNK` ([#84](https://github.com/imDev2023/top-pad/issues/84#issuecomment-6616824303)).
+3. **Which xStocks first (owner, 2026-11-04): the 22 liquid ones** for the cohort, those with more than $100K of liquidity by EmberCurve's figures on 2026-11-02: SPYx, CRCLx, NVDAx, QQQx, TSLAx, MSTRx, SPCXx, AAPLx, HOODx, MSFTx, COINx, MCDx, GLDx, GMEx, STRCx, METAx, KOx, GOOGLx, AMZNx, BRK.Bx, DFDVx, PLTRx.
+   All 1,476 xStocks DBC had badged on 2026-11-03 passed the quote rules, so the list is a product choice; the rules take any mint, and a quote is offered once it has a `QuoteSettings` account.

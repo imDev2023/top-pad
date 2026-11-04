@@ -46,6 +46,7 @@ The owner's standing preferences (2026-10-26), which every later choice follows:
 What this build is:
 - A **devnet prototype shaped like the eventual mainnet product**: real launches and trades on devnet, against Meteora's programs deployed there.
 - **SOL and every xStock DBC accepts** as the Quote asset, in both launch modes: Stock-priced coins, with every program, config and table taking the quote mint as a parameter ([Stock-priced coins](https://github.com/imDev2023/top-pad/issues/14), [ADR 0007](adr/0007-stock-priced-coins-on-meteora-quotes.md), owner, 2026-11-02).
+  The cohort offers SOL and the 22 xStocks with more than $100K of liquidity, listed in ADR 0007 (owner, 2026-11-04); any other xStock DBC accepts is one `QuoteSettings` account away.
 - A product separate from Stoker, the owner's LaunchLab launchpad, which is read-only reference material ([ADR 0001](adr/0001-separate-product-from-stoker.md)).
 - Done when the acceptance criteria in section 11 pass; mainnet is a separate, later effort (section 15).
 
@@ -299,7 +300,7 @@ On devnet (2026-10-29, [#40](https://github.com/imDev2023/top-pad/issues/40)): F
 
 Quotes with a non-zero Token-2022 transfer fee or a live fee authority are never accepted, now or later.
 Every other quote is one DBC accepts (permissionless, or with a live DBC TokenBadge), read from the chain; a quote whose transfer hook names a program, whose default account state is Frozen, or which is paused is refused ([ADR 0007](adr/0007-stock-priced-coins-on-meteora-quotes.md)).
-Each xStock gets its own pair of these configs, identical but for the quote mint and the Graduation Target, and a new pair when its price has moved past the band; the generator in `packages/meteora/src/configs.ts` makes both.
+Each xStock gets its own pair of these configs, identical but for the quote mint and the Graduation Target, and a new pair once the target, valued in SOL at the latest price, has drifted more than 10% from 85 SOL's worth (the band, owner 2026-11-04); the generator in `packages/meteora/src/configs.ts` makes both.
 
 The sniper tax's integers **(owner, 2026-10-27)**: DBC's fee denominator is 1,000,000,000 and a 99% cliff with a whole-number linear step cannot end at exactly 1.25% after 60 steps.
 Use cliff 989,999,960 (98.999996%) and reduction 16,291,666 per one-second period, so the ending fee is exactly 12,500,000 (1.25%), the curve fee every trader is told; the alternative (cliff 990,000,000) ends at 1.250004%.
