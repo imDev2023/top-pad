@@ -36,6 +36,13 @@ import {
   createLaunchInstructions,
   depositInstructions,
   FAIR_OPEN_PROGRAM_ADDRESS,
+  fetchQuoteToken,
+  inSol,
+  quoteTokenAccount,
+  refundsInstructions,
+  refundSeats,
+  taxShareSeats,
+  type QuoteToken,
   fairOpenAccounts,
   fairOpenPhase,
   identityHash,
@@ -46,7 +53,6 @@ import {
   pushInstructions,
   pushTaxShareInstructions,
   PUSH_SEATS,
-  TAX_SHARE_SEATS,
   SEAT_LAYOUT,
   swapInstructions,
   TOKEN_PROGRAM_ADDRESS,
@@ -65,7 +71,7 @@ import {
   type LookupTable,
   type SignedRung,
 } from "@top-pad/chain";
-import { fetchMaybeLaunch, getSeatDecoder, getSeatSize, LaunchStatus, type Seat } from "@top-pad/clients/fair-open";
+import { fetchMaybeLaunch, fetchQuoteSettings, findQuoteSettingsPda, getSeatDecoder, getSeatSize, LaunchStatus, type Seat } from "@top-pad/clients/fair-open";
 import { fetchVirtualPool } from "@top-pad/clients/dbc";
 import { bankFile, chainTime, coinBalance, devnet, rpc, send } from "./devnet";
 
@@ -81,10 +87,11 @@ export type ScheduledFairOpen = { launch: Address; vault: Address; nonce: Addres
 
 /**
  * Schedules a Fair Open whose window opens at `depositsOpenAt` (Unix seconds), signed by `creator` and our keeper, on
- * Heat's Fair Open config: the creator pays the rent of the launch, its vault and its nonce. Its coin is a made-up test
- * coin, sealed behind its hash and never revealed, since this slice never opens.
+ * Heat's Fair Open config, or in `quote` on the config its `QuoteSettings` names: the creator pays the rent of the
+ * launch, its vault, its nonce, and in a token quote its pot. Its coin is a made-up test coin, sealed behind its hash and
+ * never revealed, since this slice never opens.
  */
-export async function scheduleFairOpen(creator: KeyPairSigner, depositsOpenAt: bigint, minRaise = 0n): Promise<ScheduledFairOpen> {
+export async function scheduleFairOpen(creator: KeyPairSigner, depositsOpenAt: bigint, minRaise = 0n, quote?: QuoteToken): Promise<ScheduledFairOpen> {
   const nonce = await generateKeyPairSigner();
   const tag = Math.random().toString(36).slice(2, 8).toUpperCase();
   const coin = { name: `Sealed test ${tag}`, ticker: `S${tag}`, uri: `https://turbo-gateway.com/sealed-test-${tag.toLowerCase()}` };
@@ -96,8 +103,9 @@ export async function scheduleFairOpen(creator: KeyPairSigner, depositsOpenAt: b
       keeper: await keeper(),
       nonce,
       nonceRent,
-      dbcConfig: devnet.configs!.fairOpen,
-      quoteMint: devnet.quote.mint,
+      dbcConfig: quote && !inSol(quote) ? await quoteFairOpenConfig(quote) : devnet.configs!.fairOpen,
+      quoteMint: quote?.mint ?? devnet.quote.mint,
+      quoteTokenProgram: quote?.tokenProgram,
       referenceConfig: devnet.configs!.fairOpen,
       depositsOpenAt,
       minRaise,
@@ -106,6 +114,19 @@ export async function scheduleFairOpen(creator: KeyPairSigner, depositsOpenAt: b
     }),
   );
   return { ...(await fairOpenAccounts(nonce.address)), nonce: nonce.address, creator, coin };
+}
+
+/** The Fair Open config a quote's `QuoteSettings` names on devnet. */
+export async function quoteFairOpenConfig(quote: QuoteToken): Promise<Address> {
+  const [settings] = await findQuoteSettingsPda({ quoteMint: quote.mint });
+  return (await fetchQuoteSettings(rpc, settings, { commitment: "confirmed" })).data.fairOpenConfig;
+}
+
+/** What `owner`'s associated account of a token quote holds, in raw units; 0 if it has none. */
+export async function quoteHeld(owner: Address, quote: QuoteToken): Promise<bigint> {
+  const account = await quoteTokenAccount(owner, quote);
+  const balance = await rpc.getTokenAccountBalance(account, { commitment: "confirmed" }).send().catch(() => null);
+  return balance ? BigInt(balance.value.amount) : 0n;
 }
 
 /**
@@ -209,15 +230,15 @@ export async function sellAll(wallet: KeyPairSigner, mint: Address) {
 export const newPerson = () => crypto.getRandomValues(new Uint8Array(32));
 
 /** An admission for `wallet` in `launch`, signed with the devnet admission key: their tier's cap, for two minutes. */
-export async function admitted(launch: Address, wallet: Address, person: Uint8Array, tier: Tier, over: Partial<Admission> = {}) {
+export async function admitted(launch: Address, wallet: Address, person: Uint8Array, tier: Tier, over: Partial<Admission> = {}, step?: bigint) {
   const now = BigInt(Math.floor(Date.now() / 1000));
-  const admission: Admission = { person, tier, cap: tierCap(tier), expiresAt: now + 120n, ...over };
+  const admission: Admission = { person, tier, cap: tierCap(tier, step), expiresAt: now + 120n, ...over };
   const key = await admissionKey();
   return { admission, signature: await signAdmission(key.privateKey, admissionMessage(launch, wallet, admission)) };
 }
 
 /** A deposit straight to the program, with an admission signed by `signer` (the admission key unless a test says). */
-export async function deposit(launch: Address, wallet: KeyPairSigner, amount: bigint, admission: { admission: Admission; signature: Uint8Array }) {
+export async function deposit(launch: Address, wallet: KeyPairSigner, amount: bigint, admission: { admission: Admission; signature: Uint8Array }, quote?: QuoteToken) {
   const instructions = await depositInstructions({
     launch,
     wallet,
@@ -226,6 +247,7 @@ export async function deposit(launch: Address, wallet: KeyPairSigner, amount: bi
     admissionSigner: devnet.keys!.admission,
     signature: admission.signature,
     computeUnitPrice: 0n,
+    quote,
   });
   return send(wallet, instructions);
 }
@@ -249,20 +271,36 @@ export async function seatOf(launch: Address, wallet: Address): Promise<{ addres
   return { address: first.pubkey, seat: getSeatDecoder().decode(data), lamports: first.account.lamports };
 }
 
-export async function withdraw(launch: Address, wallet: KeyPairSigner, amount: bigint) {
+export async function withdraw(launch: Address, wallet: KeyPairSigner, amount: bigint, quote?: QuoteToken) {
   const found = await seatOf(launch, wallet.address);
   if (!found) throw new Error(`${wallet.address} holds no seat in ${launch}`);
-  return send(wallet, await withdrawInstructions({ launch, seat: found.address, wallet, amount, computeUnitPrice: 0n }));
+  return send(wallet, await withdrawInstructions({ launch, seat: found.address, wallet, amount, computeUnitPrice: 0n, quote }));
 }
 
 /** `mark_failed`, sent by anyone. */
 export const markFailed = async (launch: Address, sender: KeyPairSigner) => send(sender, await markFailedInstructions({ launch, computeUnitPrice: 0n }));
 
 /** A failed launch's seat returned to its wallet, built from the chain alone and sent by the wallet itself. */
-export async function refund(launch: Address, wallet: KeyPairSigner) {
+export async function refund(launch: Address, wallet: KeyPairSigner, quote?: QuoteToken) {
   const found = await seatOf(launch, wallet.address);
   if (!found) throw new Error(`${wallet.address} holds no seat in ${launch}`);
-  return send(wallet, await withdrawFailedInstructions({ launch, seat: found.address, wallet: wallet.address, computeUnitPrice: 0n }));
+  return send(wallet, await withdrawFailedInstructions({ launch, seat: found.address, wallet: wallet.address, computeUnitPrice: 0n, quote }));
+}
+
+/** Every seat of a failed launch returned at once, as Heat's keeper returns them, `sender` paying; the signatures. */
+export async function refundAll(launch: Address, sender: KeyPairSigner, quote?: QuoteToken): Promise<string[]> {
+  const seats = (await seatsOf(launch)).map((s) => ({ seat: s.address, wallet: s.seat.wallet }));
+  const signatures = [];
+  for (let i = 0; i < seats.length; i += refundSeats(quote)) {
+    signatures.push(await send(sender, await refundsInstructions({ launch, seats: seats.slice(i, i + refundSeats(quote)), computeUnitPrice: 0n, quote }), await tableLookups()));
+  }
+  return signatures;
+}
+
+/** Heat's shared lookup table, as `send` takes it. */
+async function tableLookups() {
+  const { address, addresses } = await lookupTable();
+  return { [address]: addresses };
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -292,10 +330,15 @@ export async function recoverDeposits(launch: Address, sender: KeyPairSigner, wa
     console.log(`waiting ${until - now} s to bring back the deposits left in ${launch}`);
     await sleep(Number(until - now) * 1_000 + 2_000);
   }
-  for (const wallet of seated) await refund(launch, wallet);
+  const launchQuote = async () => {
+    const found = await fetchMaybeLaunch(rpc, launch);
+    return found.exists ? fetchQuoteToken(rpc, found.data.quoteMint) : undefined;
+  };
+  const quote = await launchQuote();
+  for (const wallet of seated) await refund(launch, wallet, quote);
   const account = await fetchMaybeLaunch(rpc, launch);
   if (!account.exists || fairOpenPhase(account.data, await chainTime()).phase !== "failed") return;
-  if (account.data.seats === 0) await send(sender, await closeLaunchInstructions({ launch, creator: account.data.creator, computeUnitPrice: 0n }));
+  if (account.data.seats === 0) await send(sender, await closeLaunchInstructions({ launch, creator: account.data.creator, computeUnitPrice: 0n, quote }));
   await closeNonce(account.data.nonce, account.data.creator);
 }
 
@@ -317,25 +360,27 @@ export async function settleOpened(launch: Address): Promise<Settled> {
   if (!found.exists) return settled;
   if (found.data.status !== LaunchStatus.Opened) throw new Error(`${launch} has not opened`);
   const { creator, mint, dbcConfig, quoteMint } = found.data;
+  const quote = await fetchQuoteToken(rpc, quoteMint);
   const pool = await dbcPoolAddress(dbcConfig, mint, quoteMint);
   const seats = await seatsOf(launch);
   const creatorSeat = seats.find((s) => s.seat.wallet === creator && !s.seat.delivered);
-  if (creatorSeat) settled.lock = await send(payer, await lockCreatorInstructions({ launch, creator, seat: creatorSeat.address, mint, pool, computeUnitPrice: 0n }), table);
+  if (creatorSeat) settled.lock = await send(payer, await lockCreatorInstructions({ launch, creator, seat: creatorSeat.address, mint, pool, computeUnitPrice: 0n, quote }), table);
   if (!found.data.taxCollected) {
     const state = (await fetchVirtualPool(rpc, pool, { commitment: "confirmed" })).data.poolState;
-    const claimable = claimablePool(pool, state, devnet.quote.mint);
+    const claimable = claimablePool(pool, state, quoteMint);
     for (let now = await chainTime(); now < claimable.windowEndsAt; now = await chainTime()) {
       await new Promise((r) => setTimeout(r, Math.min(Number(claimable.windowEndsAt - now) * 1_000, 20_000) + 500));
     }
-    settled.collect = await send(payer, await collectTaxShareInstructions({ launch, pool: claimable, treasury: devnet.keys!.treasury, computeUnitPrice: 0n }), table);
+    const collect = await collectTaxShareInstructions({ launch, pool: claimable, treasury: devnet.keys!.treasury, computeUnitPrice: 0n, quote, payer });
+    settled.collect = await send(payer, collect, table);
   }
   const owed = (await seatsOf(launch)).filter((s) => s.seat.delivered && s.seat.wallet !== creator);
-  for (let i = 0; i < owed.length; i += TAX_SHARE_SEATS) {
-    const batch = owed.slice(i, i + TAX_SHARE_SEATS).map((s) => ({ seat: s.address, wallet: s.seat.wallet }));
-    settled.pushes.push(await send(payer, await pushTaxShareInstructions({ launch, seats: batch, computeUnitPrice: 0n }), table));
+  for (let i = 0; i < owed.length; i += taxShareSeats(quote)) {
+    const batch = owed.slice(i, i + taxShareSeats(quote)).map((s) => ({ seat: s.address, wallet: s.seat.wallet }));
+    settled.pushes.push(await send(payer, await pushTaxShareInstructions({ launch, seats: batch, computeUnitPrice: 0n, quote }), table));
   }
   found = await fetchMaybeLaunch(rpc, launch, { commitment: "confirmed" });
-  if (found.exists && found.data.seats === 0) settled.close = await send(payer, await closeLaunchInstructions({ launch, creator, computeUnitPrice: 0n }), table);
+  if (found.exists && found.data.seats === 0) settled.close = await send(payer, await closeLaunchInstructions({ launch, creator, computeUnitPrice: 0n, quote }), table);
   return settled;
 }
 

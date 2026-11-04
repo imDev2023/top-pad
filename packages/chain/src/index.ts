@@ -97,8 +97,9 @@ export const CLUSTERS: Record<Cluster, HeatCluster | null> = {
       // Made on 2026-11-04 (#84), in ~/.config/top-pad/devnet/quote-manager.json.
       quoteManager: address("639kdfnCQ762Rio8jdVXm66pqMx3uRHWeuiZpY5wwmWq"),
     },
-    // Made and frozen on 2026-10-31 (#46).
-    lookupTable: address("B2XYd5qp7wyT5Dnvg3CJh6aZxoiiAAX4QRvLLMsgxMHT"),
+    // Made and frozen on 2026-11-04 (#88), the table of 2026-10-31 (#46, B2XYd5qp7wyT5Dnvg3CJh6aZxoiiAAX4QRvLLMsgxMHT,
+    // which ladders signed before it still name) with Token-2022 and the listed quotes added.
+    lookupTable: address("CLBppnGVZCKyFNLudC6vebLVTXHxjUr6wcmxEJSnS4Y7"),
     // Created on 2026-11-02 (#51).
     rehearsal: address("FpBAjo24FLrxj69qfu92NodVvWJE8zSPPxPxmearft27"),
     tableQuotes: [

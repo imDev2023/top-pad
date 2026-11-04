@@ -3,12 +3,14 @@
 // authority (UPGRADE_AUTHORITY, or ~/.config/top-pad/<cluster>/upgrade-authority.json), which also grows a
 // `ProgramConfig` made before the quote manager existed; then the quote manager (QUOTE_MANAGER, or
 // ~/.config/top-pad/<cluster>/quote-manager.json) writes SOL's settings: Heat's two SOL configs and the 0.01 SOL step.
-// Other quotes' settings are the band job's (#89). Heat's bank pays (BANK_KEYPAIR, or ~/.config/top-pad/<cluster>/bank.json).
+// Other quotes' settings are the band job's (#89); until it runs, --quote <mint> --fair-open <config> --instant <config>
+// --step <raw units> writes one quote's by hand, its configs from `@top-pad/meteora`'s `configs --quote` (#88). Heat's bank pays (BANK_KEYPAIR, or ~/.config/top-pad/<cluster>/bank.json).
 // It simulates each step first and sends only with --send; the RPC is DEVNET_RPC_URL, or the public endpoint.
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
+  address,
   appendTransactionMessageInstruction,
   assertIsTransactionWithBlockhashLifetime,
   createKeyPairSignerFromBytes,
@@ -37,6 +39,11 @@ import { CLUSTERS, DEPOSIT_STEP, eventAuthorityAddress, FAIR_OPEN_PROGRAM_ADDRES
 
 const [cluster, ...flags] = process.argv.slice(2);
 const send = flags.includes("--send");
+const option = (name: string) => {
+  const at = flags.indexOf(name);
+  return at >= 0 ? flags[at + 1] : undefined;
+};
+const other = option("--quote");
 if (cluster !== "devnet") {
   console.error("Usage: pnpm --filter @top-pad/chain quote-settings devnet [--send] (mainnet's keys belong to the mainnet effort).");
   process.exit(1);
@@ -105,25 +112,34 @@ if (!managerNamed) {
   managerNamed = await run(`Name the quote manager ${quoteManager.address}`, ix);
 }
 
-const [quoteSettings] = await findQuoteSettingsPda({ quoteMint: heat.quote.mint });
+const quoteMint = other ? address(other) : heat.quote.mint;
+const name = other ? `${quoteMint}'s` : "SOL's";
+const [fairOpenArg, instantArg, stepArg] = [option("--fair-open"), option("--instant"), option("--step")];
+if (other && !(fairOpenArg && instantArg && stepArg)) {
+  console.error("--quote <mint> takes --fair-open <config> --instant <config> --step <raw units>.");
+  process.exit(1);
+}
+const [quoteSettings] = await findQuoteSettingsPda({ quoteMint });
 const current = await fetchMaybeQuoteSettings(rpc, quoteSettings, { commitment: "confirmed" });
-const wanted = { fairOpenConfig: heat.configs.fairOpen, instantConfig: heat.configs.instant, step: DEPOSIT_STEP };
+const wanted = other
+  ? { fairOpenConfig: address(fairOpenArg!), instantConfig: address(instantArg!), step: BigInt(stepArg!) }
+  : { fairOpenConfig: heat.configs.fairOpen, instantConfig: heat.configs.instant, step: DEPOSIT_STEP };
 if (current.exists) {
   const d = current.data;
-  console.log(`SOL's QuoteSettings ${quoteSettings}: Fair Open ${d.fairOpenConfig}, Instant ${d.instantConfig}, step ${d.step}.`);
+  console.log(`${name} QuoteSettings ${quoteSettings}: Fair Open ${d.fairOpenConfig}, Instant ${d.instantConfig}, step ${d.step}.`);
   if (d.fairOpenConfig === wanted.fairOpenConfig && d.instantConfig === wanted.instantConfig && d.step === wanted.step) {
     console.log("They already hold the recorded settings; nothing to do.");
     process.exit(0);
   }
 }
 if (!managerNamed) {
-  console.log(`Nothing was sent. Run again with --send to name the quote manager, then write SOL's QuoteSettings.`);
+  console.log(`Nothing was sent. Run again with --send to name the quote manager, then write ${name} QuoteSettings.`);
   process.exit(0);
 }
 const ix = await getSetQuoteSettingsInstructionAsync({
   quoteManager,
   payer,
-  quoteMint: heat.quote.mint,
+  quoteMint,
   fairOpenConfig: wanted.fairOpenConfig,
   instantConfig: wanted.instantConfig,
   referenceConfig: heat.configs.fairOpen,
@@ -131,5 +147,5 @@ const ix = await getSetQuoteSettingsInstructionAsync({
   program,
   step: wanted.step,
 });
-const written = await run(`Write SOL's QuoteSettings ${quoteSettings}`, ix);
+const written = await run(`Write ${name} QuoteSettings ${quoteSettings}`, ix);
 if (!written) console.log("Nothing was sent. Run again with --send to write them.");

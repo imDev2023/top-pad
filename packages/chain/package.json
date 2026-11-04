@@ -15,6 +15,7 @@
     "fair-open-open": "tsx scripts/fair-open-open.ts",
     "lookup-table": "tsx scripts/lookup-table.ts",
     "quote-check": "tsx scripts/quote-check.ts",
+    "devnet-usdc": "tsx scripts/devnet-usdc.ts",
     "quote-settings": "tsx scripts/quote-settings.ts",
     "xstock-stand-in": "tsx scripts/xstock-stand-in.ts"
   },
