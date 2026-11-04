@@ -55,6 +55,7 @@ test("a creator schedules a Fair Open from the site and signs once; the keeper o
   try {
     const wallet = await installTestWallet(page, creator);
     const ticker = newTicker();
+    const teaser = newTicker();
     await page.goto("/launch");
     await page.getByRole("link", { name: "Link X" }).click();
     await page.getByLabel("Handle").fill(newHandle());
@@ -80,7 +81,11 @@ test("a creator schedules a Fair Open from the site and signs once; the keeper o
     await snap(page, "fair-open-scheduled-2-schedule-later");
     await page.getByRole("radio", { name: /Now/ }).check();
     await page.getByLabel("Minimum raise (SOL, optional)").fill("0.2");
-    await page.getByLabel("Teaser for the calendar (optional)").fill("Ten minutes, one price, no snipers");
+    // A teaser's words are read as names and tickers against the live protected set, folded (a "10" reads as IO),
+    // and ordinary words keep being refused as coins join it (#93: "one" as $ONE and "10" as IO on 2026-11-04), so the
+    // teaser is one word drawn for the run, which no Protected coin has; never the coin's ticker, which the calendar
+    // would show before the open.
+    await page.getByLabel("Teaser for the calendar (optional)").fill(teaser);
     await expect(page.getByTestId("schedule-timeline")).toContainText("open now");
     await snap(page, "fair-open-scheduled-3-schedule-now");
     await page.getByRole("button", { name: "Continue" }).click();
@@ -100,7 +105,7 @@ test("a creator schedules a Fair Open from the site and signs once; the keeper o
     await page.getByRole("link", { name: "Open its page" }).click();
     await page.waitForURL(/\/fair-open\//);
     launch = page.url().split("/fair-open/")[1]!.split(/[?#]/)[0] as Address;
-    await expect(page.getByText("“Ten minutes, one price, no snipers”")).toBeVisible();
+    await expect(page.getByText(`\u{201C}${teaser}\u{201D}`)).toBeVisible();
     const account = (await fetchLaunch(rpc, launch)).data;
     expect(account.creator).toBe(creator.address);
     expect(account.minRaise).toBe(200_000_000n);
