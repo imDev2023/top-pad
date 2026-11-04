@@ -97,6 +97,8 @@ export async function scheduleFairOpen(creator: KeyPairSigner, depositsOpenAt: b
       nonce,
       nonceRent,
       dbcConfig: devnet.configs!.fairOpen,
+      quoteMint: devnet.quote.mint,
+      referenceConfig: devnet.configs!.fairOpen,
       depositsOpenAt,
       minRaise,
       identityHash: await identityHash(coin),

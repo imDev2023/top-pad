@@ -38,7 +38,7 @@ import {
   Tier,
   tierCap,
 } from "./fairOpen";
-import { FAIR_OPEN_PROGRAM_ADDRESS } from "./index";
+import { FAIR_OPEN_PROGRAM_ADDRESS, WSOL_MINT } from "./index";
 
 const SOL = 1_000_000_000n;
 const random = () => getAddressDecoder().decode(crypto.getRandomValues(new Uint8Array(32)));
@@ -202,6 +202,8 @@ describe("scheduling", () => {
       nonce,
       nonceRent: 1_447_680n,
       dbcConfig: random(),
+      quoteMint: WSOL_MINT,
+      referenceConfig: random(),
       depositsOpenAt: 1_800_000_000n,
       minRaise: 0n,
       identityHash: new Uint8Array(32).fill(1),
@@ -226,6 +228,8 @@ describe("scheduling on a nonce our keeper made", () => {
       nonce,
       nonceRent: 1_447_680n,
       dbcConfig: random(),
+      quoteMint: WSOL_MINT,
+      referenceConfig: random(),
       depositsOpenAt: 1_800_000_000n,
       minRaise: 0n,
       identityHash: new Uint8Array(32).fill(1),

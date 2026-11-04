@@ -176,14 +176,24 @@ export function instantLaunchSetup(cfg: Config, env: Bindings):
 
 /** What scheduling a Fair Open needs on this cluster, or why it cannot be scheduled here. */
 export function fairOpenLaunchSetup(cfg: Config, env: Bindings):
-  | { ok: true; config: Address; quoteMint: Address; lookupTable: Address; keeper: Address; keeperKey: SecretBinding; blobs: BlobStore }
+  | {
+      ok: true;
+      config: Address;
+      /** Heat's SOL Fair Open config, which the program config names and every quote's Fair Open config is shaped as. */
+      referenceConfig: Address;
+      quoteMint: Address;
+      lookupTable: Address;
+      keeper: Address;
+      keeperKey: SecretBinding;
+      blobs: BlobStore;
+    }
   | { ok: false; reason: string } {
   const instant = instantLaunchSetup(cfg, env);
   if (!instant.ok) return instant;
   const heat = cfg.heat!;
   if (!heat.lookupTable) return { ok: false, reason: `Heat has no shared lookup table on ${cfg.cluster}.` };
   if (!heat.keys?.admission || !env.ADMISSION_KEY) return { ok: false, reason: "Fair Open deposits are not taken on this deployment." };
-  return { ...instant, config: heat.configs!.fairOpen, lookupTable: heat.lookupTable };
+  return { ...instant, config: heat.configs!.fairOpen, referenceConfig: heat.configs!.fairOpen, lookupTable: heat.lookupTable };
 }
 
 /** What Fair Open deposits need on this cluster, or why they cannot be taken here. */
