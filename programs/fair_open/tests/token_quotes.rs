@@ -104,7 +104,8 @@ fn schedule(t: &mut Test) -> Result<litesvm::types::TransactionMetadata, litesvm
 #[test]
 fn refuses_a_quote_heat_does_not_take() {
     // As NVDAx is, every rule passes.
-    schedule(&mut xstock_edited(|_| {})).unwrap();
+    let done = schedule(&mut xstock_edited(|_| {})).unwrap();
+    println!("xStock create_launch: {} compute units", done.compute_units_consumed);
 
     // Paused by its issuer.
     let mut t = xstock_edited(|data| {
@@ -414,7 +415,8 @@ fn a_push_in_a_token_quote_runs_one_more_call_a_seat() {
     println!("a push of 6 runs {in_sol} instructions in SOL, {in_xstock} in an xStock, {in_usdc} in USDC");
     assert_eq!(in_xstock, in_sol + 6);
     assert_eq!(in_usdc, in_sol + 6);
-    // So 7 seats still fit in SOL, and in a token quote 6 do and 7 would not.
+    // So 7 seats still fit in SOL, and in a token quote 6 do and 7 would not; a transaction's bytes allow 5 in a token
+    // quote, `PUSH_SEATS_IN_TOKENS` in `@top-pad/chain`, each seat naming its wallet's account of the quote too.
     let per_seat_in_sol = (in_sol - 3) / 6;
     assert!(in_sol + per_seat_in_sol <= 64, "7 seats fit in SOL");
     assert!(in_xstock <= 64 && in_xstock + per_seat_in_sol + 1 > 64, "6 seats fit in a token quote, and only 6");
@@ -452,10 +454,12 @@ fn a_paused_quote_fails_the_open_and_holds_the_refunds_until_it_resumes() {
     t.pause_quote(false);
     for d in &people {
         let done = t.withdraw_failed(&launch, d, &sender).unwrap();
+        println!("xStock withdraw_failed: {} compute units", done.compute_units_consumed);
         assert_eq!(events::<FailedDepositReturned>(&done)[0].deposit, 100 * QUOTE_STEP);
         assert_eq!(t.quote_held(&d.wallet.pubkey()), QUOTE_FUNDS);
     }
-    t.close_launch(&launch).unwrap();
+    let done = t.close_launch(&launch).unwrap();
+    println!("xStock close_launch: {} compute units", done.compute_units_consumed);
     assert!(!t.exists(&pot_address(&launch.launch)));
 }
 
@@ -489,7 +493,8 @@ fn fails_in_usdc_with_every_deposit_refunded_in_usdc() {
         a
     };
     t.svm.set_account(pot_address(&launch.launch), pot_data).unwrap();
-    t.close_launch(&launch).unwrap();
+    let done = t.close_launch(&launch).unwrap();
+    println!("USDC close_launch with a stray balance: {} compute units", done.compute_units_consumed);
     assert_eq!(t.quote_held(&creator), 7);
     assert!(!t.exists(&pot_address(&launch.launch)));
 }
