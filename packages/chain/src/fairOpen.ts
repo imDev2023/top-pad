@@ -329,7 +329,12 @@ type LaunchTerms = {
   creator: TransactionSigner;
   /** Heat's keeper, which co-signs and holds the nonce. */
   keeper: TransactionSigner;
+  /** The quote's Fair Open config, as its `QuoteSettings` names it (ADR 0007 decision 4). */
   dbcConfig: Address;
+  /** The quote's mint, whose `QuoteSettings` the program reads the config and step from. */
+  quoteMint: Address;
+  /** Heat's SOL Fair Open config, which the program config names and every quote's config is shaped as. */
+  referenceConfig: Address;
   depositsOpenAt: bigint;
   minRaise: bigint;
   identityHash: ReadonlyUint8Array;
@@ -349,7 +354,9 @@ async function createLaunchInstruction(t: LaunchTerms, nonce: Address): Promise<
     programConfig: (await findProgramConfigPda())[0],
     creator: t.creator,
     keeper: t.keeper,
+    quoteMint: t.quoteMint,
     dbcConfig: t.dbcConfig,
+    referenceConfig: t.referenceConfig,
     nonce,
     launch,
     vault,

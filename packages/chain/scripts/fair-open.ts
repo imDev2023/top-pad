@@ -61,6 +61,8 @@ const instructions = await createLaunchInstructions({
   nonce,
   nonceRent: await rpc.getMinimumBalanceForRentExemption(NONCE_ACCOUNT_SPACE).send(),
   dbcConfig: heat.configs.fairOpen,
+  quoteMint: heat.quote.mint,
+  referenceConfig: heat.configs.fairOpen,
   depositsOpenAt,
   minRaise,
   identityHash: await identityHash(coin),

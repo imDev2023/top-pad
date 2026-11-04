@@ -42,7 +42,13 @@ export type HeatCluster = {
    * launches and registers coins; and who the Fair Open program's `ProgramConfig` names besides the keeper, set by
    * `fair-open-config`: the admission signer, which signs each deposit's admission and holds no funds.
    */
-  keys: { treasury: Address; keeper: Address; admission: Address } | null;
+  keys: {
+    treasury: Address;
+    keeper: Address;
+    admission: Address;
+    /** Writes each quote's `QuoteSettings` in the Fair Open program (ADR 0007 decision 4), and holds no funds. */
+    quoteManager: Address;
+  } | null;
   /**
    * Devnet's rehearsal config, made by `pnpm --filter @top-pad/meteora configs devnet --rehearsal --send`: the Instant
    * config's every value but its Graduation Target, `REHEARSAL_GRADUATION_TARGET`, so `tests/devnet` graduates a coin
@@ -77,6 +83,8 @@ export const CLUSTERS: Record<Cluster, HeatCluster | null> = {
       treasury: address("F7mn4DAccxre57wjoNoQzDgmk7H6mYG2NuWwG8Yt3oTG"),
       keeper: address("GpDvDUpEC9ynHTJBt3XaZcTvBUw1HaMnU9Wwox18xfNi"),
       admission: address("2LH1VzF3rbCKdfSZDBXkbbwXbZZsbYkP8qkVRP9rgzuJ"),
+      // Made on 2026-11-04 (#84), in ~/.config/top-pad/devnet/quote-manager.json.
+      quoteManager: address("639kdfnCQ762Rio8jdVXm66pqMx3uRHWeuiZpY5wwmWq"),
     },
     // Made and frozen on 2026-10-31 (#46).
     lookupTable: address("B2XYd5qp7wyT5Dnvg3CJh6aZxoiiAAX4QRvLLMsgxMHT"),
