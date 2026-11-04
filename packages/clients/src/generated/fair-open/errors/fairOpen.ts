@@ -131,6 +131,12 @@ export const FAIR_OPEN_ERROR__NOT_THE_TREASURY = 0x17a7; // 6055
 export const FAIR_OPEN_ERROR__NOT_DONE = 0x17a8; // 6056
 /** CreatorCoinsNotLocked: The Creator lock did not take exactly the creator's coins */
 export const FAIR_OPEN_ERROR__CREATOR_COINS_NOT_LOCKED = 0x17a9; // 6057
+/** NotTheQuoteManager: Only the quote manager can write a quote's settings */
+export const FAIR_OPEN_ERROR__NOT_THE_QUOTE_MANAGER = 0x17aa; // 6058
+/** NotThisQuote: That config or mint is not this quote's */
+export const FAIR_OPEN_ERROR__NOT_THIS_QUOTE = 0x17ab; // 6059
+/** NotHeatsConfigShape: That config is not shaped as Heat's Fair Open config */
+export const FAIR_OPEN_ERROR__NOT_HEATS_CONFIG_SHAPE = 0x17ac; // 6060
 
 export type FairOpenError =
   | typeof FAIR_OPEN_ERROR__ADMISSION_EXPIRED
@@ -151,6 +157,7 @@ export type FairOpenError =
   | typeof FAIR_OPEN_ERROR__NOT_A_TOKEN_ACCOUNT
   | typeof FAIR_OPEN_ERROR__NOT_DONE
   | typeof FAIR_OPEN_ERROR__NOT_FAILED
+  | typeof FAIR_OPEN_ERROR__NOT_HEATS_CONFIG_SHAPE
   | typeof FAIR_OPEN_ERROR__NOT_OPENED
   | typeof FAIR_OPEN_ERROR__NOT_OPENING
   | typeof FAIR_OPEN_ERROR__NOT_OUR_ADMISSION
@@ -165,9 +172,11 @@ export type FairOpenError =
   | typeof FAIR_OPEN_ERROR__NOT_THE_KEEPER
   | typeof FAIR_OPEN_ERROR__NOT_THE_POOL
   | typeof FAIR_OPEN_ERROR__NOT_THE_POTS_COINS
+  | typeof FAIR_OPEN_ERROR__NOT_THE_QUOTE_MANAGER
   | typeof FAIR_OPEN_ERROR__NOT_THE_TREASURY
   | typeof FAIR_OPEN_ERROR__NOT_THIS_ADMISSION
   | typeof FAIR_OPEN_ERROR__NOT_THIS_LAUNCHS_SEAT
+  | typeof FAIR_OPEN_ERROR__NOT_THIS_QUOTE
   | typeof FAIR_OPEN_ERROR__NOT_UPGRADE_AUTHORITY
   | typeof FAIR_OPEN_ERROR__NOT_YOUR_COIN_ACCOUNT
   | typeof FAIR_OPEN_ERROR__NOT_YOUR_SEAT
@@ -213,6 +222,7 @@ if (process.env["NODE_ENV"] !== "production") {
     [FAIR_OPEN_ERROR__NOT_A_TOKEN_ACCOUNT]: `That is not an SPL Token account`,
     [FAIR_OPEN_ERROR__NOT_DONE]: `The launch is neither failed nor opened`,
     [FAIR_OPEN_ERROR__NOT_FAILED]: `The launch has not failed`,
+    [FAIR_OPEN_ERROR__NOT_HEATS_CONFIG_SHAPE]: `That config is not shaped as Heat's Fair Open config`,
     [FAIR_OPEN_ERROR__NOT_OPENED]: `The launch has not opened`,
     [FAIR_OPEN_ERROR__NOT_OPENING]: `Settling runs only right after the open, in the creation transaction`,
     [FAIR_OPEN_ERROR__NOT_OUR_ADMISSION]: `The admission is not signed by our admission server`,
@@ -227,9 +237,11 @@ if (process.env["NODE_ENV"] !== "production") {
     [FAIR_OPEN_ERROR__NOT_THE_KEEPER]: `The keeper did not sign`,
     [FAIR_OPEN_ERROR__NOT_THE_POOL]: `That is not the coin's DBC pool`,
     [FAIR_OPEN_ERROR__NOT_THE_POTS_COINS]: `That is not the pot's coin account`,
+    [FAIR_OPEN_ERROR__NOT_THE_QUOTE_MANAGER]: `Only the quote manager can write a quote's settings`,
     [FAIR_OPEN_ERROR__NOT_THE_TREASURY]: `That is not Heat's treasury`,
     [FAIR_OPEN_ERROR__NOT_THIS_ADMISSION]: `The admission is for another wallet, launch, person, tier, cap or expiry`,
     [FAIR_OPEN_ERROR__NOT_THIS_LAUNCHS_SEAT]: `The seat is another launch's`,
+    [FAIR_OPEN_ERROR__NOT_THIS_QUOTE]: `That config or mint is not this quote's`,
     [FAIR_OPEN_ERROR__NOT_UPGRADE_AUTHORITY]: `Only the program's upgrade authority can change its settings`,
     [FAIR_OPEN_ERROR__NOT_YOUR_COIN_ACCOUNT]: `The coins go to an account of the coin the seat's wallet owns`,
     [FAIR_OPEN_ERROR__NOT_YOUR_SEAT]: `The seat is another wallet's`,

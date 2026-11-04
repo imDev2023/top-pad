@@ -492,13 +492,37 @@
           ]
         },
         {
+          "name": "quote_mint"
+        },
+        {
+          "name": "quote_settings",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  113,
+                  117,
+                  111,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "quote_mint"
+              }
+            ]
+          }
+        },
+        {
           "name": "dbc_config",
           "docs": [
-            "handler."
-          ],
-          "relations": [
-            "program_config"
+            "read in the handler."
           ]
+        },
+        {
+          "name": "reference_config"
         },
         {
           "name": "nonce",
@@ -1501,6 +1525,273 @@
       "args": []
     },
     {
+      "name": "set_quote_manager",
+      "docs": [
+        "Names the quote manager, again only by the upgrade authority. A `ProgramConfig` made before the quote manager",
+        "existed grows here to hold it, the payer paying the rent of its new bytes."
+      ],
+      "discriminator": [
+        244,
+        159,
+        176,
+        242,
+        76,
+        0,
+        87,
+        179
+      ],
+      "accounts": [
+        {
+          "name": "program_config",
+          "docs": [
+            "made before the quote manager existed is too short to read as a `ProgramConfig`."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  103,
+                  114,
+                  97,
+                  109,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "program_data",
+          "docs": [
+            "This program's ProgramData, at the address the upgradeable loader derives from the program id."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  247,
+                  91,
+                  203,
+                  188,
+                  194,
+                  53,
+                  30,
+                  48,
+                  176,
+                  138,
+                  243,
+                  133,
+                  128,
+                  16,
+                  130,
+                  127,
+                  81,
+                  54,
+                  155,
+                  38,
+                  214,
+                  187,
+                  208,
+                  159,
+                  245,
+                  87,
+                  192,
+                  4,
+                  139,
+                  216,
+                  147,
+                  78
+                ]
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                2,
+                168,
+                246,
+                145,
+                78,
+                136,
+                161,
+                176,
+                226,
+                16,
+                21,
+                62,
+                247,
+                99,
+                174,
+                43,
+                0,
+                194,
+                185,
+                61,
+                22,
+                193,
+                36,
+                210,
+                192,
+                83,
+                122,
+                16,
+                4,
+                128,
+                0,
+                0
+              ]
+            }
+          }
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "quote_manager",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "set_quote_settings",
+      "docs": [
+        "Writes a quote's `QuoteSettings` (ADR 0007 decision 4), by the quote manager alone: its Fair Open and Instant",
+        "configs, each a DBC config in that quote, the Fair Open one shaped as Heat's SOL one in every byte that does not",
+        "follow the quote, and its deposit step. A leaked manager key can so point a quote at a wrong target or step, never",
+        "at a config that pays anyone else."
+      ],
+      "discriminator": [
+        41,
+        120,
+        188,
+        230,
+        139,
+        51,
+        40,
+        160
+      ],
+      "accounts": [
+        {
+          "name": "program_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  103,
+                  114,
+                  97,
+                  109,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "quote_manager",
+          "signer": true,
+          "relations": [
+            "program_config"
+          ]
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "quote_mint"
+        },
+        {
+          "name": "quote_settings",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  113,
+                  117,
+                  111,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "quote_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "fair_open_config"
+        },
+        {
+          "name": "instant_config"
+        },
+        {
+          "name": "reference_config"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "step",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "settle",
       "docs": [
         "The last instruction of the creation transaction (spec 2.1 step 10). DBC's swap has spent exactly the rung, so the",
@@ -2096,6 +2387,19 @@
       ]
     },
     {
+      "name": "QuoteSettings",
+      "discriminator": [
+        196,
+        131,
+        221,
+        249,
+        186,
+        246,
+        3,
+        179
+      ]
+    },
+    {
       "name": "Seat",
       "discriminator": [
         90,
@@ -2238,6 +2542,32 @@
         234,
         162,
         103
+      ]
+    },
+    {
+      "name": "QuoteManagerSet",
+      "discriminator": [
+        239,
+        202,
+        14,
+        153,
+        160,
+        244,
+        9,
+        162
+      ]
+    },
+    {
+      "name": "QuoteSettingsChanged",
+      "discriminator": [
+        39,
+        42,
+        223,
+        58,
+        227,
+        148,
+        174,
+        159
       ]
     },
     {
@@ -2583,6 +2913,21 @@
       "code": 6057,
       "name": "CreatorCoinsNotLocked",
       "msg": "The Creator lock did not take exactly the creator's coins"
+    },
+    {
+      "code": 6058,
+      "name": "NotTheQuoteManager",
+      "msg": "Only the quote manager can write a quote's settings"
+    },
+    {
+      "code": 6059,
+      "name": "NotThisQuote",
+      "msg": "That config or mint is not this quote's"
+    },
+    {
+      "code": 6060,
+      "name": "NotHeatsConfigShape",
+      "msg": "That config is not shaped as Heat's Fair Open config"
     }
   ],
   "types": [
@@ -3418,11 +3763,22 @@
           },
           {
             "name": "dbc_config",
+            "docs": [
+              "Heat's SOL Fair Open config, which every quote's Fair Open config must match in shape (`dbc::CONFIG_SHAPE`)."
+            ],
             "type": "pubkey"
           },
           {
             "name": "bump",
             "type": "u8"
+          },
+          {
+            "name": "quote_manager",
+            "docs": [
+              "Writes each quote's `QuoteSettings`, so configs follow prices without the upgrade authority (ADR 0007 decision",
+              "4); named by the upgrade authority with `set_quote_manager`, which also grows a `ProgramConfig` made before it."
+            ],
+            "type": "pubkey"
           }
         ]
       }
@@ -3487,6 +3843,93 @@
               "Heat's Fair Open DBC config: every launch's coin is created on it."
             ],
             "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "QuoteManagerSet",
+      "docs": [
+        "The quote manager named by the upgrade authority."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "quote_manager",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "QuoteSettings",
+      "docs": [
+        "A quote Heat prices coins in (ADR 0007 decision 4), at the PDA of its mint: the DBC configs its launches are made on",
+        "and its Fair Opens' deposit step, written by the quote manager as the quote's price moves."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "quote_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "fair_open_config",
+            "docs": [
+              "The Fair Open config every new Fair Open in this quote is scheduled on."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "instant_config",
+            "docs": [
+              "The Instant config every new Instant launch in this quote is made on, by Heat's launch service."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "step",
+            "docs": [
+              "A Fair Open's deposit step in the quote's raw units: 0.01 SOL's worth at the latest price."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "updated_at",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "QuoteSettingsChanged",
+      "docs": [
+        "A quote's `QuoteSettings` written by the quote manager."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "quote_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "fair_open_config",
+            "type": "pubkey"
+          },
+          {
+            "name": "instant_config",
+            "type": "pubkey"
+          },
+          {
+            "name": "step",
+            "type": "u64"
           }
         ]
       }
@@ -3867,7 +4310,8 @@
     {
       "name": "DEPOSIT_STEP",
       "docs": [
-        "The deposit step (spec 12): deposits, withdrawals and caps move in 0.01 SOL."
+        "SOL's deposit step (spec 12): deposits, withdrawals and caps move in 0.01 SOL. Each quote's step is in its",
+        "`QuoteSettings`, 0.01 SOL's worth of the quote, and a launch keeps the one it was scheduled with."
       ],
       "type": "u64",
       "value": "10000000"

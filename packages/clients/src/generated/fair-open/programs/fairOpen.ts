@@ -38,12 +38,15 @@ import {
 import {
   getLaunchCodec,
   getProgramConfigCodec,
+  getQuoteSettingsCodec,
   getSeatCodec,
   getVaultCodec,
   type Launch,
   type LaunchArgs,
   type ProgramConfig,
   type ProgramConfigArgs,
+  type QuoteSettings,
+  type QuoteSettingsArgs,
   type Seat,
   type SeatArgs,
   type Vault,
@@ -61,6 +64,8 @@ import {
   getOpenInstructionAsync,
   getPushInstructionAsync,
   getPushTaxShareInstructionAsync,
+  getSetQuoteManagerInstructionAsync,
+  getSetQuoteSettingsInstructionAsync,
   getSettleInstructionAsync,
   getUpdateProgramConfigInstructionAsync,
   getWithdrawFailedInstructionAsync,
@@ -76,6 +81,8 @@ import {
   parseOpenInstruction,
   parsePushInstruction,
   parsePushTaxShareInstruction,
+  parseSetQuoteManagerInstruction,
+  parseSetQuoteSettingsInstruction,
   parseSettleInstruction,
   parseUpdateProgramConfigInstruction,
   parseWithdrawFailedInstruction,
@@ -100,12 +107,16 @@ import {
   type ParsedOpenInstruction,
   type ParsedPushInstruction,
   type ParsedPushTaxShareInstruction,
+  type ParsedSetQuoteManagerInstruction,
+  type ParsedSetQuoteSettingsInstruction,
   type ParsedSettleInstruction,
   type ParsedUpdateProgramConfigInstruction,
   type ParsedWithdrawFailedInstruction,
   type ParsedWithdrawInstruction,
   type PushAsyncInput,
   type PushTaxShareAsyncInput,
+  type SetQuoteManagerAsyncInput,
+  type SetQuoteSettingsAsyncInput,
   type SettleAsyncInput,
   type UpdateProgramConfigAsyncInput,
   type WithdrawAsyncInput,
@@ -117,6 +128,7 @@ import {
   findLockerPda,
   findPotPda,
   findProgramConfigPda,
+  findQuoteSettingsPda,
   findVaultPda,
 } from "../pdas";
 
@@ -126,6 +138,7 @@ export const FAIR_OPEN_PROGRAM_ADDRESS =
 export enum FairOpenAccount {
   Launch,
   ProgramConfig,
+  QuoteSettings,
   Seat,
   Vault,
 }
@@ -155,6 +168,17 @@ export function identifyFairOpenAccount(
     )
   ) {
     return FairOpenAccount.ProgramConfig;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([196, 131, 221, 249, 186, 246, 3, 179]),
+      ),
+      0,
+    )
+  ) {
+    return FairOpenAccount.QuoteSettings;
   }
   if (
     containsBytes(
@@ -194,6 +218,8 @@ export enum FairOpenEvent {
   LaunchFailed,
   LaunchOpened,
   ProgramConfigChanged,
+  QuoteManagerSet,
+  QuoteSettingsChanged,
   SeatDelivered,
   TaxShareCollected,
   TaxSharePaid,
@@ -307,6 +333,28 @@ export function identifyFairOpenEvent(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([239, 202, 14, 153, 160, 244, 9, 162]),
+      ),
+      0,
+    )
+  ) {
+    return FairOpenEvent.QuoteManagerSet;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([39, 42, 223, 58, 227, 148, 174, 159]),
+      ),
+      0,
+    )
+  ) {
+    return FairOpenEvent.QuoteSettingsChanged;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
         new Uint8Array([172, 192, 98, 20, 171, 107, 87, 50]),
       ),
       0,
@@ -364,6 +412,8 @@ export enum FairOpenInstruction {
   Open,
   Push,
   PushTaxShare,
+  SetQuoteManager,
+  SetQuoteSettings,
   Settle,
   UpdateProgramConfig,
   Withdraw,
@@ -499,6 +549,28 @@ export function identifyFairOpenInstruction(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([244, 159, 176, 242, 76, 0, 87, 179]),
+      ),
+      0,
+    )
+  ) {
+    return FairOpenInstruction.SetQuoteManager;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([41, 120, 188, 230, 139, 51, 40, 160]),
+      ),
+      0,
+    )
+  ) {
+    return FairOpenInstruction.SetQuoteSettings;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
         new Uint8Array([175, 42, 185, 87, 144, 131, 102, 212]),
       ),
       0,
@@ -581,6 +653,12 @@ export type ParsedFairOpenInstruction<
   | ({
       instructionType: FairOpenInstruction.PushTaxShare;
     } & ParsedPushTaxShareInstruction<TProgram>)
+  | ({
+      instructionType: FairOpenInstruction.SetQuoteManager;
+    } & ParsedSetQuoteManagerInstruction<TProgram>)
+  | ({
+      instructionType: FairOpenInstruction.SetQuoteSettings;
+    } & ParsedSetQuoteSettingsInstruction<TProgram>)
   | ({
       instructionType: FairOpenInstruction.Settle;
     } & ParsedSettleInstruction<TProgram>)
@@ -676,6 +754,20 @@ export function parseFairOpenInstruction<TProgram extends string>(
         ...parsePushTaxShareInstruction(instruction),
       };
     }
+    case FairOpenInstruction.SetQuoteManager: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: FairOpenInstruction.SetQuoteManager,
+        ...parseSetQuoteManagerInstruction(instruction),
+      };
+    }
+    case FairOpenInstruction.SetQuoteSettings: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: FairOpenInstruction.SetQuoteSettings,
+        ...parseSetQuoteSettingsInstruction(instruction),
+      };
+    }
     case FairOpenInstruction.Settle: {
       assertIsInstructionWithAccounts(instruction);
       return {
@@ -726,6 +818,8 @@ export type FairOpenPluginAccounts = {
     SelfFetchFunctions<LaunchArgs, Launch>;
   programConfig: ReturnType<typeof getProgramConfigCodec> &
     SelfFetchFunctions<ProgramConfigArgs, ProgramConfig>;
+  quoteSettings: ReturnType<typeof getQuoteSettingsCodec> &
+    SelfFetchFunctions<QuoteSettingsArgs, QuoteSettings>;
   seat: ReturnType<typeof getSeatCodec> & SelfFetchFunctions<SeatArgs, Seat>;
   vault: ReturnType<typeof getVaultCodec> &
     SelfFetchFunctions<VaultArgs, Vault>;
@@ -782,6 +876,16 @@ export type FairOpenPluginInstructions = {
     config?: { programAddress?: Address | HasAddress },
   ) => ReturnType<typeof getPushTaxShareInstructionAsync> &
     SelfPlanAndSendFunctions;
+  setQuoteManager: (
+    input: MakeOptional<SetQuoteManagerAsyncInput, "payer">,
+    config?: { programAddress?: Address | HasAddress },
+  ) => ReturnType<typeof getSetQuoteManagerInstructionAsync> &
+    SelfPlanAndSendFunctions;
+  setQuoteSettings: (
+    input: MakeOptional<SetQuoteSettingsAsyncInput, "payer">,
+    config?: { programAddress?: Address | HasAddress },
+  ) => ReturnType<typeof getSetQuoteSettingsInstructionAsync> &
+    SelfPlanAndSendFunctions;
   settle: (
     input: SettleAsyncInput,
     config?: { programAddress?: Address | HasAddress },
@@ -808,6 +912,7 @@ export type FairOpenPluginPdas = {
   programConfig: typeof findProgramConfigPda;
   pot: typeof findPotPda;
   coinRegistrar: typeof findCoinRegistrarPda;
+  quoteSettings: typeof findQuoteSettingsPda;
   launch: typeof findLaunchPda;
   locker: typeof findLockerPda;
 };
@@ -830,6 +935,7 @@ export function fairOpenProgram(
         accounts: {
           launch: addSelfFetchFunctions(client, getLaunchCodec()),
           programConfig: addSelfFetchFunctions(client, getProgramConfigCodec()),
+          quoteSettings: addSelfFetchFunctions(client, getQuoteSettingsCodec()),
           seat: addSelfFetchFunctions(client, getSeatCodec()),
           vault: addSelfFetchFunctions(client, getVaultCodec()),
         },
@@ -928,6 +1034,28 @@ export function fairOpenProgram(
                   instructionConfig?.programAddress ?? config.programAddress,
               }),
             ),
+          setQuoteManager: (input, instructionConfig) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getSetQuoteManagerInstructionAsync(
+                { ...input, payer: input.payer ?? client.payer },
+                {
+                  programAddress:
+                    instructionConfig?.programAddress ?? config.programAddress,
+                },
+              ),
+            ),
+          setQuoteSettings: (input, instructionConfig) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getSetQuoteSettingsInstructionAsync(
+                { ...input, payer: input.payer ?? client.payer },
+                {
+                  programAddress:
+                    instructionConfig?.programAddress ?? config.programAddress,
+                },
+              ),
+            ),
           settle: (input, instructionConfig) =>
             addSelfPlanAndSendFunctions(
               client,
@@ -979,6 +1107,11 @@ export function fairOpenProgram(
             }),
           coinRegistrar: (pdaConfig) =>
             findCoinRegistrarPda({
+              programAddress:
+                pdaConfig?.programAddress ?? config.programAddress,
+            }),
+          quoteSettings: (seeds, pdaConfig) =>
+            findQuoteSettingsPda(seeds, {
               programAddress:
                 pdaConfig?.programAddress ?? config.programAddress,
             }),

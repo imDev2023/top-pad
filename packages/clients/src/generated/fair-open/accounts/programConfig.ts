@@ -56,16 +56,28 @@ export type ProgramConfig = {
   admissionSigner: Address;
   keeper: Address;
   feeProgram: Address;
+  /** Heat's SOL Fair Open config, which every quote's Fair Open config must match in shape (`dbc::CONFIG_SHAPE`). */
   dbcConfig: Address;
   bump: number;
+  /**
+   * Writes each quote's `QuoteSettings`, so configs follow prices without the upgrade authority (ADR 0007 decision
+   * 4); named by the upgrade authority with `set_quote_manager`, which also grows a `ProgramConfig` made before it.
+   */
+  quoteManager: Address;
 };
 
 export type ProgramConfigArgs = {
   admissionSigner: Address | HasAddress;
   keeper: Address | HasAddress;
   feeProgram: Address | HasAddress;
+  /** Heat's SOL Fair Open config, which every quote's Fair Open config must match in shape (`dbc::CONFIG_SHAPE`). */
   dbcConfig: Address | HasAddress;
   bump: number;
+  /**
+   * Writes each quote's `QuoteSettings`, so configs follow prices without the upgrade authority (ADR 0007 decision
+   * 4); named by the upgrade authority with `set_quote_manager`, which also grows a `ProgramConfig` made before it.
+   */
+  quoteManager: Address | HasAddress;
 };
 
 /** Gets the encoder for {@link ProgramConfigArgs} account data. */
@@ -78,6 +90,7 @@ export function getProgramConfigEncoder(): FixedSizeEncoder<ProgramConfigArgs> {
       ["feeProgram", getAddressEncoder()],
       ["dbcConfig", getAddressEncoder()],
       ["bump", getU8Encoder()],
+      ["quoteManager", getAddressEncoder()],
     ]),
     (value) => ({ ...value, discriminator: PROGRAM_CONFIG_DISCRIMINATOR }),
   );
@@ -92,6 +105,7 @@ export function getProgramConfigDecoder(): FixedSizeDecoder<ProgramConfig> {
     ["feeProgram", getAddressDecoder()],
     ["dbcConfig", getAddressDecoder()],
     ["bump", getU8Decoder()],
+    ["quoteManager", getAddressDecoder()],
   ]);
 }
 
@@ -177,5 +191,5 @@ export async function fetchAllMaybeProgramConfig(
 }
 
 export function getProgramConfigSize(): number {
-  return 137;
+  return 169;
 }

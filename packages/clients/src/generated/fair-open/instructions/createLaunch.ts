@@ -45,7 +45,12 @@ import {
   type ResolvedInstructionAccount,
   type ResolvedInstructionAccountMeta,
 } from "@solana/kit/program-client-core";
-import { findLaunchPda, findProgramConfigPda, findVaultPda } from "../pdas";
+import {
+  findLaunchPda,
+  findProgramConfigPda,
+  findQuoteSettingsPda,
+  findVaultPda,
+} from "../pdas";
 import { FAIR_OPEN_PROGRAM_ADDRESS } from "../programs";
 
 export const CREATE_LAUNCH_DISCRIMINATOR: ReadonlyUint8Array = new Uint8Array([
@@ -63,7 +68,10 @@ export type CreateLaunchInstruction<
   TAccountProgramConfig extends string | AccountMeta<string> = string,
   TAccountCreator extends string | AccountMeta<string> = string,
   TAccountKeeper extends string | AccountMeta<string> = string,
+  TAccountQuoteMint extends string | AccountMeta<string> = string,
+  TAccountQuoteSettings extends string | AccountMeta<string> = string,
   TAccountDbcConfig extends string | AccountMeta<string> = string,
+  TAccountReferenceConfig extends string | AccountMeta<string> = string,
   TAccountNonce extends string | AccountMeta<string> = string,
   TAccountLaunch extends string | AccountMeta<string> = string,
   TAccountVault extends string | AccountMeta<string> = string,
@@ -87,9 +95,18 @@ export type CreateLaunchInstruction<
         ? ReadonlySignerAccount<TAccountKeeper> &
             AccountSignerMeta<TAccountKeeper>
         : TAccountKeeper,
+      TAccountQuoteMint extends string
+        ? ReadonlyAccount<TAccountQuoteMint>
+        : TAccountQuoteMint,
+      TAccountQuoteSettings extends string
+        ? ReadonlyAccount<TAccountQuoteSettings>
+        : TAccountQuoteSettings,
       TAccountDbcConfig extends string
         ? ReadonlyAccount<TAccountDbcConfig>
         : TAccountDbcConfig,
+      TAccountReferenceConfig extends string
+        ? ReadonlyAccount<TAccountReferenceConfig>
+        : TAccountReferenceConfig,
       TAccountNonce extends string
         ? ReadonlyAccount<TAccountNonce>
         : TAccountNonce,
@@ -173,7 +190,12 @@ export type CreateLaunchAsyncInput<
     InstructionAccountInput,
   TAccountCreator extends InstructionSignerInput = InstructionSignerInput,
   TAccountKeeper extends InstructionSignerInput = InstructionSignerInput,
+  TAccountQuoteMint extends InstructionAccountInput = InstructionAccountInput,
+  TAccountQuoteSettings extends InstructionAccountInput =
+    InstructionAccountInput,
   TAccountDbcConfig extends InstructionAccountInput = InstructionAccountInput,
+  TAccountReferenceConfig extends InstructionAccountInput =
+    InstructionAccountInput,
   TAccountNonce extends InstructionAccountInput = InstructionAccountInput,
   TAccountLaunch extends InstructionAccountInput = InstructionAccountInput,
   TAccountVault extends InstructionAccountInput = InstructionAccountInput,
@@ -187,8 +209,11 @@ export type CreateLaunchAsyncInput<
   /** The Creator wallet, which pays the rent. */
   creator: TAccountCreator;
   keeper: TAccountKeeper;
-  /** handler. */
+  quoteMint: TAccountQuoteMint;
+  quoteSettings?: TAccountQuoteSettings;
+  /** read in the handler. */
   dbcConfig: TAccountDbcConfig;
+  referenceConfig: TAccountReferenceConfig;
   /** the handler. */
   nonce: TAccountNonce;
   launch?: TAccountLaunch;
@@ -205,7 +230,10 @@ export async function getCreateLaunchInstructionAsync<
   TAccountProgramConfig extends InstructionAccountInput,
   TAccountCreator extends InstructionSignerInput,
   TAccountKeeper extends InstructionSignerInput,
+  TAccountQuoteMint extends InstructionAccountInput,
+  TAccountQuoteSettings extends InstructionAccountInput,
   TAccountDbcConfig extends InstructionAccountInput,
+  TAccountReferenceConfig extends InstructionAccountInput,
   TAccountNonce extends InstructionAccountInput,
   TAccountLaunch extends InstructionAccountInput,
   TAccountVault extends InstructionAccountInput,
@@ -218,7 +246,10 @@ export async function getCreateLaunchInstructionAsync<
     TAccountProgramConfig,
     TAccountCreator,
     TAccountKeeper,
+    TAccountQuoteMint,
+    TAccountQuoteSettings,
     TAccountDbcConfig,
+    TAccountReferenceConfig,
     TAccountNonce,
     TAccountLaunch,
     TAccountVault,
@@ -245,8 +276,20 @@ export async function getCreateLaunchInstructionAsync<
       InstructionAccountInputAddress<TAccountKeeper>
     >,
     ResolvedInstructionAccountMeta<
+      TAccountQuoteMint,
+      InstructionAccountInputAddress<TAccountQuoteMint>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountQuoteSettings,
+      InstructionAccountInputAddress<TAccountQuoteSettings>
+    >,
+    ResolvedInstructionAccountMeta<
       TAccountDbcConfig,
       InstructionAccountInputAddress<TAccountDbcConfig>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountReferenceConfig,
+      InstructionAccountInputAddress<TAccountReferenceConfig>
     >,
     ResolvedInstructionAccountMeta<
       TAccountNonce,
@@ -294,8 +337,23 @@ export async function getCreateLaunchInstructionAsync<
     },
     creator: { value: input.creator ?? null, isSigner: true, isWritable: true },
     keeper: { value: input.keeper ?? null, isSigner: true, isWritable: false },
+    quoteMint: {
+      value: input.quoteMint ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
+    quoteSettings: {
+      value: input.quoteSettings ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
     dbcConfig: {
       value: input.dbcConfig ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
+    referenceConfig: {
+      value: input.referenceConfig ?? null,
       isSigner: false,
       isWritable: false,
     },
@@ -332,6 +390,17 @@ export async function getCreateLaunchInstructionAsync<
       programAddress,
     });
   }
+  if (!accounts.quoteSettings.value) {
+    accounts.quoteSettings.value = await findQuoteSettingsPda(
+      {
+        quoteMint: getAddressFromResolvedInstructionAccount(
+          "quoteMint",
+          accounts.quoteMint.value,
+        ),
+      },
+      { programAddress },
+    );
+  }
   if (!accounts.launch.value) {
     accounts.launch.value = await findLaunchPda(
       {
@@ -364,7 +433,10 @@ export async function getCreateLaunchInstructionAsync<
       getAccountMeta("programConfig", accounts.programConfig),
       getAccountMeta("creator", accounts.creator),
       getAccountMeta("keeper", accounts.keeper),
+      getAccountMeta("quoteMint", accounts.quoteMint),
+      getAccountMeta("quoteSettings", accounts.quoteSettings),
       getAccountMeta("dbcConfig", accounts.dbcConfig),
+      getAccountMeta("referenceConfig", accounts.referenceConfig),
       getAccountMeta("nonce", accounts.nonce),
       getAccountMeta("launch", accounts.launch),
       getAccountMeta("vault", accounts.vault),
@@ -391,8 +463,20 @@ export async function getCreateLaunchInstructionAsync<
       InstructionAccountInputAddress<TAccountKeeper>
     >,
     ResolvedInstructionAccountMeta<
+      TAccountQuoteMint,
+      InstructionAccountInputAddress<TAccountQuoteMint>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountQuoteSettings,
+      InstructionAccountInputAddress<TAccountQuoteSettings>
+    >,
+    ResolvedInstructionAccountMeta<
       TAccountDbcConfig,
       InstructionAccountInputAddress<TAccountDbcConfig>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountReferenceConfig,
+      InstructionAccountInputAddress<TAccountReferenceConfig>
     >,
     ResolvedInstructionAccountMeta<
       TAccountNonce,
@@ -426,7 +510,12 @@ export type CreateLaunchInput<
     InstructionAccountInput,
   TAccountCreator extends InstructionSignerInput = InstructionSignerInput,
   TAccountKeeper extends InstructionSignerInput = InstructionSignerInput,
+  TAccountQuoteMint extends InstructionAccountInput = InstructionAccountInput,
+  TAccountQuoteSettings extends InstructionAccountInput =
+    InstructionAccountInput,
   TAccountDbcConfig extends InstructionAccountInput = InstructionAccountInput,
+  TAccountReferenceConfig extends InstructionAccountInput =
+    InstructionAccountInput,
   TAccountNonce extends InstructionAccountInput = InstructionAccountInput,
   TAccountLaunch extends InstructionAccountInput = InstructionAccountInput,
   TAccountVault extends InstructionAccountInput = InstructionAccountInput,
@@ -440,8 +529,11 @@ export type CreateLaunchInput<
   /** The Creator wallet, which pays the rent. */
   creator: TAccountCreator;
   keeper: TAccountKeeper;
-  /** handler. */
+  quoteMint: TAccountQuoteMint;
+  quoteSettings: TAccountQuoteSettings;
+  /** read in the handler. */
   dbcConfig: TAccountDbcConfig;
+  referenceConfig: TAccountReferenceConfig;
   /** the handler. */
   nonce: TAccountNonce;
   launch: TAccountLaunch;
@@ -458,7 +550,10 @@ export function getCreateLaunchInstruction<
   TAccountProgramConfig extends InstructionAccountInput,
   TAccountCreator extends InstructionSignerInput,
   TAccountKeeper extends InstructionSignerInput,
+  TAccountQuoteMint extends InstructionAccountInput,
+  TAccountQuoteSettings extends InstructionAccountInput,
   TAccountDbcConfig extends InstructionAccountInput,
+  TAccountReferenceConfig extends InstructionAccountInput,
   TAccountNonce extends InstructionAccountInput,
   TAccountLaunch extends InstructionAccountInput,
   TAccountVault extends InstructionAccountInput,
@@ -471,7 +566,10 @@ export function getCreateLaunchInstruction<
     TAccountProgramConfig,
     TAccountCreator,
     TAccountKeeper,
+    TAccountQuoteMint,
+    TAccountQuoteSettings,
     TAccountDbcConfig,
+    TAccountReferenceConfig,
     TAccountNonce,
     TAccountLaunch,
     TAccountVault,
@@ -497,8 +595,20 @@ export function getCreateLaunchInstruction<
     InstructionAccountInputAddress<TAccountKeeper>
   >,
   ResolvedInstructionAccountMeta<
+    TAccountQuoteMint,
+    InstructionAccountInputAddress<TAccountQuoteMint>
+  >,
+  ResolvedInstructionAccountMeta<
+    TAccountQuoteSettings,
+    InstructionAccountInputAddress<TAccountQuoteSettings>
+  >,
+  ResolvedInstructionAccountMeta<
     TAccountDbcConfig,
     InstructionAccountInputAddress<TAccountDbcConfig>
+  >,
+  ResolvedInstructionAccountMeta<
+    TAccountReferenceConfig,
+    InstructionAccountInputAddress<TAccountReferenceConfig>
   >,
   ResolvedInstructionAccountMeta<
     TAccountNonce,
@@ -545,8 +655,23 @@ export function getCreateLaunchInstruction<
     },
     creator: { value: input.creator ?? null, isSigner: true, isWritable: true },
     keeper: { value: input.keeper ?? null, isSigner: true, isWritable: false },
+    quoteMint: {
+      value: input.quoteMint ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
+    quoteSettings: {
+      value: input.quoteSettings ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
     dbcConfig: {
       value: input.dbcConfig ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
+    referenceConfig: {
+      value: input.referenceConfig ?? null,
       isSigner: false,
       isWritable: false,
     },
@@ -588,7 +713,10 @@ export function getCreateLaunchInstruction<
       getAccountMeta("programConfig", accounts.programConfig),
       getAccountMeta("creator", accounts.creator),
       getAccountMeta("keeper", accounts.keeper),
+      getAccountMeta("quoteMint", accounts.quoteMint),
+      getAccountMeta("quoteSettings", accounts.quoteSettings),
       getAccountMeta("dbcConfig", accounts.dbcConfig),
+      getAccountMeta("referenceConfig", accounts.referenceConfig),
       getAccountMeta("nonce", accounts.nonce),
       getAccountMeta("launch", accounts.launch),
       getAccountMeta("vault", accounts.vault),
@@ -615,8 +743,20 @@ export function getCreateLaunchInstruction<
       InstructionAccountInputAddress<TAccountKeeper>
     >,
     ResolvedInstructionAccountMeta<
+      TAccountQuoteMint,
+      InstructionAccountInputAddress<TAccountQuoteMint>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountQuoteSettings,
+      InstructionAccountInputAddress<TAccountQuoteSettings>
+    >,
+    ResolvedInstructionAccountMeta<
       TAccountDbcConfig,
       InstructionAccountInputAddress<TAccountDbcConfig>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountReferenceConfig,
+      InstructionAccountInputAddress<TAccountReferenceConfig>
     >,
     ResolvedInstructionAccountMeta<
       TAccountNonce,
@@ -655,15 +795,18 @@ export type ParsedCreateLaunchInstruction<
     /** The Creator wallet, which pays the rent. */
     creator: TAccountMetas[1];
     keeper: TAccountMetas[2];
-    /** handler. */
-    dbcConfig: TAccountMetas[3];
+    quoteMint: TAccountMetas[3];
+    quoteSettings: TAccountMetas[4];
+    /** read in the handler. */
+    dbcConfig: TAccountMetas[5];
+    referenceConfig: TAccountMetas[6];
     /** the handler. */
-    nonce: TAccountMetas[4];
-    launch: TAccountMetas[5];
-    vault: TAccountMetas[6];
-    systemProgram: TAccountMetas[7];
-    eventAuthority: TAccountMetas[8];
-    program: TAccountMetas[9];
+    nonce: TAccountMetas[7];
+    launch: TAccountMetas[8];
+    vault: TAccountMetas[9];
+    systemProgram: TAccountMetas[10];
+    eventAuthority: TAccountMetas[11];
+    program: TAccountMetas[12];
   };
   data: CreateLaunchInstructionData;
 };
@@ -676,12 +819,12 @@ export function parseCreateLaunchInstruction<
     InstructionWithAccounts<TAccountMetas> &
     InstructionWithData<ReadonlyUint8Array>,
 ): ParsedCreateLaunchInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 10) {
+  if (instruction.accounts.length < 13) {
     throw new SolanaError(
       SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS,
       {
         actualAccountMetas: instruction.accounts.length,
-        expectedAccountMetas: 10,
+        expectedAccountMetas: 13,
       },
     );
   }
@@ -697,7 +840,10 @@ export function parseCreateLaunchInstruction<
       programConfig: getNextAccount(),
       creator: getNextAccount(),
       keeper: getNextAccount(),
+      quoteMint: getNextAccount(),
+      quoteSettings: getNextAccount(),
       dbcConfig: getNextAccount(),
+      referenceConfig: getNextAccount(),
       nonce: getNextAccount(),
       launch: getNextAccount(),
       vault: getNextAccount(),

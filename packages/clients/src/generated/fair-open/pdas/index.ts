@@ -11,4 +11,5 @@ export * from "./launch";
 export * from "./locker";
 export * from "./pot";
 export * from "./programConfig";
+export * from "./quoteSettings";
 export * from "./vault";
