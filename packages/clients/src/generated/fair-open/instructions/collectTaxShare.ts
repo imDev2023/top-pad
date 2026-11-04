@@ -83,6 +83,7 @@ export type CollectTaxShareInstruction<
     "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
   TAccountSystemProgram extends string | AccountMeta<string> =
     "11111111111111111111111111111111",
+  TAccountTreasuryQuote extends string | AccountMeta<string> = string,
   TAccountEventAuthority extends string | AccountMeta<string> = string,
   TAccountProgram extends string | AccountMeta<string> = string,
   TRemainingAccounts extends readonly AccountMeta<string>[] = [],
@@ -160,6 +161,9 @@ export type CollectTaxShareInstruction<
       TAccountSystemProgram extends string
         ? ReadonlyAccount<TAccountSystemProgram>
         : TAccountSystemProgram,
+      TAccountTreasuryQuote extends string
+        ? WritableAccount<TAccountTreasuryQuote>
+        : TAccountTreasuryQuote,
       TAccountEventAuthority extends string
         ? ReadonlyAccount<TAccountEventAuthority>
         : TAccountEventAuthority,
@@ -233,6 +237,8 @@ export type CollectTaxShareAsyncInput<
     InstructionAccountInput,
   TAccountSystemProgram extends InstructionAccountInput =
     InstructionAccountInput,
+  TAccountTreasuryQuote extends InstructionAccountInput =
+    InstructionAccountInput,
   TAccountEventAuthority extends InstructionAccountInput =
     InstructionAccountInput,
   TAccountProgram extends InstructionAccountInput = InstructionAccountInput,
@@ -261,6 +267,8 @@ export type CollectTaxShareAsyncInput<
   feeProgram: TAccountFeeProgram;
   tokenProgram?: TAccountTokenProgram;
   systemProgram?: TAccountSystemProgram;
+  /** but the creator's may; checked in the handler. */
+  treasuryQuote?: TAccountTreasuryQuote;
   eventAuthority: TAccountEventAuthority;
   program: TAccountProgram;
 };
@@ -290,6 +298,7 @@ export async function getCollectTaxShareInstructionAsync<
   TAccountFeeProgram extends InstructionAccountInput,
   TAccountTokenProgram extends InstructionAccountInput,
   TAccountSystemProgram extends InstructionAccountInput,
+  TAccountTreasuryQuote extends InstructionAccountInput,
   TAccountEventAuthority extends InstructionAccountInput,
   TAccountProgram extends InstructionAccountInput,
   TProgramAddress extends Address = typeof FAIR_OPEN_PROGRAM_ADDRESS,
@@ -319,6 +328,7 @@ export async function getCollectTaxShareInstructionAsync<
     TAccountFeeProgram,
     TAccountTokenProgram,
     TAccountSystemProgram,
+    TAccountTreasuryQuote,
     TAccountEventAuthority,
     TAccountProgram
   >,
@@ -423,6 +433,10 @@ export async function getCollectTaxShareInstructionAsync<
     ResolvedInstructionAccountMeta<
       TAccountSystemProgram,
       InstructionAccountInputAddress<TAccountSystemProgram>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountTreasuryQuote,
+      InstructionAccountInputAddress<TAccountTreasuryQuote>
     >,
     ResolvedInstructionAccountMeta<
       TAccountEventAuthority,
@@ -547,6 +561,11 @@ export async function getCollectTaxShareInstructionAsync<
       isSigner: false,
       isWritable: false,
     },
+    treasuryQuote: {
+      value: input.treasuryQuote ?? null,
+      isSigner: false,
+      isWritable: true,
+    },
     eventAuthority: {
       value: input.eventAuthority ?? null,
       isSigner: false,
@@ -635,6 +654,7 @@ export async function getCollectTaxShareInstructionAsync<
       getAccountMeta("feeProgram", accounts.feeProgram),
       getAccountMeta("tokenProgram", accounts.tokenProgram),
       getAccountMeta("systemProgram", accounts.systemProgram),
+      getAccountMeta("treasuryQuote", accounts.treasuryQuote),
       getAccountMeta("eventAuthority", accounts.eventAuthority),
       getAccountMeta("program", accounts.program),
     ],
@@ -739,6 +759,10 @@ export async function getCollectTaxShareInstructionAsync<
       InstructionAccountInputAddress<TAccountSystemProgram>
     >,
     ResolvedInstructionAccountMeta<
+      TAccountTreasuryQuote,
+      InstructionAccountInputAddress<TAccountTreasuryQuote>
+    >,
+    ResolvedInstructionAccountMeta<
       TAccountEventAuthority,
       InstructionAccountInputAddress<TAccountEventAuthority>
     >,
@@ -783,6 +807,8 @@ export type CollectTaxShareInput<
     InstructionAccountInput,
   TAccountSystemProgram extends InstructionAccountInput =
     InstructionAccountInput,
+  TAccountTreasuryQuote extends InstructionAccountInput =
+    InstructionAccountInput,
   TAccountEventAuthority extends InstructionAccountInput =
     InstructionAccountInput,
   TAccountProgram extends InstructionAccountInput = InstructionAccountInput,
@@ -811,6 +837,8 @@ export type CollectTaxShareInput<
   feeProgram: TAccountFeeProgram;
   tokenProgram?: TAccountTokenProgram;
   systemProgram?: TAccountSystemProgram;
+  /** but the creator's may; checked in the handler. */
+  treasuryQuote?: TAccountTreasuryQuote;
   eventAuthority: TAccountEventAuthority;
   program: TAccountProgram;
 };
@@ -840,6 +868,7 @@ export function getCollectTaxShareInstruction<
   TAccountFeeProgram extends InstructionAccountInput,
   TAccountTokenProgram extends InstructionAccountInput,
   TAccountSystemProgram extends InstructionAccountInput,
+  TAccountTreasuryQuote extends InstructionAccountInput,
   TAccountEventAuthority extends InstructionAccountInput,
   TAccountProgram extends InstructionAccountInput,
   TProgramAddress extends Address = typeof FAIR_OPEN_PROGRAM_ADDRESS,
@@ -869,6 +898,7 @@ export function getCollectTaxShareInstruction<
     TAccountFeeProgram,
     TAccountTokenProgram,
     TAccountSystemProgram,
+    TAccountTreasuryQuote,
     TAccountEventAuthority,
     TAccountProgram
   >,
@@ -972,6 +1002,10 @@ export function getCollectTaxShareInstruction<
   ResolvedInstructionAccountMeta<
     TAccountSystemProgram,
     InstructionAccountInputAddress<TAccountSystemProgram>
+  >,
+  ResolvedInstructionAccountMeta<
+    TAccountTreasuryQuote,
+    InstructionAccountInputAddress<TAccountTreasuryQuote>
   >,
   ResolvedInstructionAccountMeta<
     TAccountEventAuthority,
@@ -1095,6 +1129,11 @@ export function getCollectTaxShareInstruction<
       isSigner: false,
       isWritable: false,
     },
+    treasuryQuote: {
+      value: input.treasuryQuote ?? null,
+      isSigner: false,
+      isWritable: true,
+    },
     eventAuthority: {
       value: input.eventAuthority ?? null,
       isSigner: false,
@@ -1151,6 +1190,7 @@ export function getCollectTaxShareInstruction<
       getAccountMeta("feeProgram", accounts.feeProgram),
       getAccountMeta("tokenProgram", accounts.tokenProgram),
       getAccountMeta("systemProgram", accounts.systemProgram),
+      getAccountMeta("treasuryQuote", accounts.treasuryQuote),
       getAccountMeta("eventAuthority", accounts.eventAuthority),
       getAccountMeta("program", accounts.program),
     ],
@@ -1255,6 +1295,10 @@ export function getCollectTaxShareInstruction<
       InstructionAccountInputAddress<TAccountSystemProgram>
     >,
     ResolvedInstructionAccountMeta<
+      TAccountTreasuryQuote,
+      InstructionAccountInputAddress<TAccountTreasuryQuote>
+    >,
+    ResolvedInstructionAccountMeta<
       TAccountEventAuthority,
       InstructionAccountInputAddress<TAccountEventAuthority>
     >,
@@ -1295,8 +1339,10 @@ export type ParsedCollectTaxShareInstruction<
     feeProgram: TAccountMetas[21];
     tokenProgram: TAccountMetas[22];
     systemProgram: TAccountMetas[23];
-    eventAuthority: TAccountMetas[24];
-    program: TAccountMetas[25];
+    /** but the creator's may; checked in the handler. */
+    treasuryQuote?: TAccountMetas[24] | undefined;
+    eventAuthority: TAccountMetas[25];
+    program: TAccountMetas[26];
   };
   data: CollectTaxShareInstructionData;
 };
@@ -1309,12 +1355,12 @@ export function parseCollectTaxShareInstruction<
     InstructionWithAccounts<TAccountMetas> &
     InstructionWithData<ReadonlyUint8Array>,
 ): ParsedCollectTaxShareInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 26) {
+  if (instruction.accounts.length < 27) {
     throw new SolanaError(
       SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS,
       {
         actualAccountMetas: instruction.accounts.length,
-        expectedAccountMetas: 26,
+        expectedAccountMetas: 27,
       },
     );
   }
@@ -1323,6 +1369,12 @@ export function parseCollectTaxShareInstruction<
     const accountMeta = (instruction.accounts as TAccountMetas)[accountIndex]!;
     accountIndex += 1;
     return accountMeta;
+  };
+  const getNextOptionalAccount = () => {
+    const accountMeta = getNextAccount();
+    return accountMeta.address === FAIR_OPEN_PROGRAM_ADDRESS
+      ? undefined
+      : accountMeta;
   };
   return {
     programAddress: instruction.programAddress,
@@ -1351,6 +1403,7 @@ export function parseCollectTaxShareInstruction<
       feeProgram: getNextAccount(),
       tokenProgram: getNextAccount(),
       systemProgram: getNextAccount(),
+      treasuryQuote: getNextOptionalAccount(),
       eventAuthority: getNextAccount(),
       program: getNextAccount(),
     },

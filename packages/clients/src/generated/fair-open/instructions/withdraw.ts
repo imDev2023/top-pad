@@ -59,6 +59,10 @@ export type WithdrawInstruction<
   TAccountVault extends string | AccountMeta<string> = string,
   TAccountSeat extends string | AccountMeta<string> = string,
   TAccountWallet extends string | AccountMeta<string> = string,
+  TAccountPot extends string | AccountMeta<string> = string,
+  TAccountQuoteMint extends string | AccountMeta<string> = string,
+  TAccountQuoteTokenProgram extends string | AccountMeta<string> = string,
+  TAccountWalletQuote extends string | AccountMeta<string> = string,
   TAccountEventAuthority extends string | AccountMeta<string> = string,
   TAccountProgram extends string | AccountMeta<string> = string,
   TRemainingAccounts extends readonly AccountMeta<string>[] = [],
@@ -79,6 +83,16 @@ export type WithdrawInstruction<
         ? WritableSignerAccount<TAccountWallet> &
             AccountSignerMeta<TAccountWallet>
         : TAccountWallet,
+      TAccountPot extends string ? WritableAccount<TAccountPot> : TAccountPot,
+      TAccountQuoteMint extends string
+        ? ReadonlyAccount<TAccountQuoteMint>
+        : TAccountQuoteMint,
+      TAccountQuoteTokenProgram extends string
+        ? ReadonlyAccount<TAccountQuoteTokenProgram>
+        : TAccountQuoteTokenProgram,
+      TAccountWalletQuote extends string
+        ? WritableAccount<TAccountWalletQuote>
+        : TAccountWalletQuote,
       TAccountEventAuthority extends string
         ? ReadonlyAccount<TAccountEventAuthority>
         : TAccountEventAuthority,
@@ -128,6 +142,11 @@ export type WithdrawAsyncInput<
   TAccountVault extends InstructionAccountInput = InstructionAccountInput,
   TAccountSeat extends InstructionAccountInput = InstructionAccountInput,
   TAccountWallet extends InstructionSignerInput = InstructionSignerInput,
+  TAccountPot extends InstructionAccountInput = InstructionAccountInput,
+  TAccountQuoteMint extends InstructionAccountInput = InstructionAccountInput,
+  TAccountQuoteTokenProgram extends InstructionAccountInput =
+    InstructionAccountInput,
+  TAccountWalletQuote extends InstructionAccountInput = InstructionAccountInput,
   TAccountEventAuthority extends InstructionAccountInput =
     InstructionAccountInput,
   TAccountProgram extends InstructionAccountInput = InstructionAccountInput,
@@ -136,6 +155,11 @@ export type WithdrawAsyncInput<
   vault?: TAccountVault;
   seat: TAccountSeat;
   wallet: TAccountWallet;
+  /** the handler. Left out in SOL. */
+  pot?: TAccountPot;
+  quoteMint?: TAccountQuoteMint;
+  quoteTokenProgram?: TAccountQuoteTokenProgram;
+  walletQuote?: TAccountWalletQuote;
   eventAuthority: TAccountEventAuthority;
   program: TAccountProgram;
   amount: WithdrawInstructionDataArgs["amount"];
@@ -146,6 +170,10 @@ export async function getWithdrawInstructionAsync<
   TAccountVault extends InstructionAccountInput,
   TAccountSeat extends InstructionAccountInput,
   TAccountWallet extends InstructionSignerInput,
+  TAccountPot extends InstructionAccountInput,
+  TAccountQuoteMint extends InstructionAccountInput,
+  TAccountQuoteTokenProgram extends InstructionAccountInput,
+  TAccountWalletQuote extends InstructionAccountInput,
   TAccountEventAuthority extends InstructionAccountInput,
   TAccountProgram extends InstructionAccountInput,
   TProgramAddress extends Address = typeof FAIR_OPEN_PROGRAM_ADDRESS,
@@ -155,6 +183,10 @@ export async function getWithdrawInstructionAsync<
     TAccountVault,
     TAccountSeat,
     TAccountWallet,
+    TAccountPot,
+    TAccountQuoteMint,
+    TAccountQuoteTokenProgram,
+    TAccountWalletQuote,
     TAccountEventAuthority,
     TAccountProgram
   >,
@@ -179,6 +211,22 @@ export async function getWithdrawInstructionAsync<
     ResolvedInstructionAccountMeta<
       TAccountWallet,
       InstructionAccountInputAddress<TAccountWallet>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountPot,
+      InstructionAccountInputAddress<TAccountPot>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountQuoteMint,
+      InstructionAccountInputAddress<TAccountQuoteMint>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountQuoteTokenProgram,
+      InstructionAccountInputAddress<TAccountQuoteTokenProgram>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountWalletQuote,
+      InstructionAccountInputAddress<TAccountWalletQuote>
     >,
     ResolvedInstructionAccountMeta<
       TAccountEventAuthority,
@@ -207,6 +255,22 @@ export async function getWithdrawInstructionAsync<
     vault: { value: input.vault ?? null, isSigner: false, isWritable: true },
     seat: { value: input.seat ?? null, isSigner: false, isWritable: true },
     wallet: { value: input.wallet ?? null, isSigner: true, isWritable: true },
+    pot: { value: input.pot ?? null, isSigner: false, isWritable: true },
+    quoteMint: {
+      value: input.quoteMint ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
+    quoteTokenProgram: {
+      value: input.quoteTokenProgram ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
+    walletQuote: {
+      value: input.walletQuote ?? null,
+      isSigner: false,
+      isWritable: true,
+    },
     eventAuthority: {
       value: input.eventAuthority ?? null,
       isSigner: false,
@@ -245,6 +309,10 @@ export async function getWithdrawInstructionAsync<
       getAccountMeta("vault", accounts.vault),
       getAccountMeta("seat", accounts.seat),
       getAccountMeta("wallet", accounts.wallet),
+      getAccountMeta("pot", accounts.pot),
+      getAccountMeta("quoteMint", accounts.quoteMint),
+      getAccountMeta("quoteTokenProgram", accounts.quoteTokenProgram),
+      getAccountMeta("walletQuote", accounts.walletQuote),
       getAccountMeta("eventAuthority", accounts.eventAuthority),
       getAccountMeta("program", accounts.program),
     ],
@@ -271,6 +339,22 @@ export async function getWithdrawInstructionAsync<
       InstructionAccountInputAddress<TAccountWallet>
     >,
     ResolvedInstructionAccountMeta<
+      TAccountPot,
+      InstructionAccountInputAddress<TAccountPot>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountQuoteMint,
+      InstructionAccountInputAddress<TAccountQuoteMint>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountQuoteTokenProgram,
+      InstructionAccountInputAddress<TAccountQuoteTokenProgram>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountWalletQuote,
+      InstructionAccountInputAddress<TAccountWalletQuote>
+    >,
+    ResolvedInstructionAccountMeta<
       TAccountEventAuthority,
       InstructionAccountInputAddress<TAccountEventAuthority>
     >,
@@ -286,6 +370,11 @@ export type WithdrawInput<
   TAccountVault extends InstructionAccountInput = InstructionAccountInput,
   TAccountSeat extends InstructionAccountInput = InstructionAccountInput,
   TAccountWallet extends InstructionSignerInput = InstructionSignerInput,
+  TAccountPot extends InstructionAccountInput = InstructionAccountInput,
+  TAccountQuoteMint extends InstructionAccountInput = InstructionAccountInput,
+  TAccountQuoteTokenProgram extends InstructionAccountInput =
+    InstructionAccountInput,
+  TAccountWalletQuote extends InstructionAccountInput = InstructionAccountInput,
   TAccountEventAuthority extends InstructionAccountInput =
     InstructionAccountInput,
   TAccountProgram extends InstructionAccountInput = InstructionAccountInput,
@@ -294,6 +383,11 @@ export type WithdrawInput<
   vault: TAccountVault;
   seat: TAccountSeat;
   wallet: TAccountWallet;
+  /** the handler. Left out in SOL. */
+  pot?: TAccountPot;
+  quoteMint?: TAccountQuoteMint;
+  quoteTokenProgram?: TAccountQuoteTokenProgram;
+  walletQuote?: TAccountWalletQuote;
   eventAuthority: TAccountEventAuthority;
   program: TAccountProgram;
   amount: WithdrawInstructionDataArgs["amount"];
@@ -304,6 +398,10 @@ export function getWithdrawInstruction<
   TAccountVault extends InstructionAccountInput,
   TAccountSeat extends InstructionAccountInput,
   TAccountWallet extends InstructionSignerInput,
+  TAccountPot extends InstructionAccountInput,
+  TAccountQuoteMint extends InstructionAccountInput,
+  TAccountQuoteTokenProgram extends InstructionAccountInput,
+  TAccountWalletQuote extends InstructionAccountInput,
   TAccountEventAuthority extends InstructionAccountInput,
   TAccountProgram extends InstructionAccountInput,
   TProgramAddress extends Address = typeof FAIR_OPEN_PROGRAM_ADDRESS,
@@ -313,6 +411,10 @@ export function getWithdrawInstruction<
     TAccountVault,
     TAccountSeat,
     TAccountWallet,
+    TAccountPot,
+    TAccountQuoteMint,
+    TAccountQuoteTokenProgram,
+    TAccountWalletQuote,
     TAccountEventAuthority,
     TAccountProgram
   >,
@@ -336,6 +438,22 @@ export function getWithdrawInstruction<
   ResolvedInstructionAccountMeta<
     TAccountWallet,
     InstructionAccountInputAddress<TAccountWallet>
+  >,
+  ResolvedInstructionAccountMeta<
+    TAccountPot,
+    InstructionAccountInputAddress<TAccountPot>
+  >,
+  ResolvedInstructionAccountMeta<
+    TAccountQuoteMint,
+    InstructionAccountInputAddress<TAccountQuoteMint>
+  >,
+  ResolvedInstructionAccountMeta<
+    TAccountQuoteTokenProgram,
+    InstructionAccountInputAddress<TAccountQuoteTokenProgram>
+  >,
+  ResolvedInstructionAccountMeta<
+    TAccountWalletQuote,
+    InstructionAccountInputAddress<TAccountWalletQuote>
   >,
   ResolvedInstructionAccountMeta<
     TAccountEventAuthority,
@@ -363,6 +481,22 @@ export function getWithdrawInstruction<
     vault: { value: input.vault ?? null, isSigner: false, isWritable: true },
     seat: { value: input.seat ?? null, isSigner: false, isWritable: true },
     wallet: { value: input.wallet ?? null, isSigner: true, isWritable: true },
+    pot: { value: input.pot ?? null, isSigner: false, isWritable: true },
+    quoteMint: {
+      value: input.quoteMint ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
+    quoteTokenProgram: {
+      value: input.quoteTokenProgram ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
+    walletQuote: {
+      value: input.walletQuote ?? null,
+      isSigner: false,
+      isWritable: true,
+    },
     eventAuthority: {
       value: input.eventAuthority ?? null,
       isSigner: false,
@@ -388,6 +522,10 @@ export function getWithdrawInstruction<
       getAccountMeta("vault", accounts.vault),
       getAccountMeta("seat", accounts.seat),
       getAccountMeta("wallet", accounts.wallet),
+      getAccountMeta("pot", accounts.pot),
+      getAccountMeta("quoteMint", accounts.quoteMint),
+      getAccountMeta("quoteTokenProgram", accounts.quoteTokenProgram),
+      getAccountMeta("walletQuote", accounts.walletQuote),
       getAccountMeta("eventAuthority", accounts.eventAuthority),
       getAccountMeta("program", accounts.program),
     ],
@@ -414,6 +552,22 @@ export function getWithdrawInstruction<
       InstructionAccountInputAddress<TAccountWallet>
     >,
     ResolvedInstructionAccountMeta<
+      TAccountPot,
+      InstructionAccountInputAddress<TAccountPot>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountQuoteMint,
+      InstructionAccountInputAddress<TAccountQuoteMint>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountQuoteTokenProgram,
+      InstructionAccountInputAddress<TAccountQuoteTokenProgram>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountWalletQuote,
+      InstructionAccountInputAddress<TAccountWalletQuote>
+    >,
+    ResolvedInstructionAccountMeta<
       TAccountEventAuthority,
       InstructionAccountInputAddress<TAccountEventAuthority>
     >,
@@ -434,8 +588,13 @@ export type ParsedWithdrawInstruction<
     vault: TAccountMetas[1];
     seat: TAccountMetas[2];
     wallet: TAccountMetas[3];
-    eventAuthority: TAccountMetas[4];
-    program: TAccountMetas[5];
+    /** the handler. Left out in SOL. */
+    pot?: TAccountMetas[4] | undefined;
+    quoteMint?: TAccountMetas[5] | undefined;
+    quoteTokenProgram?: TAccountMetas[6] | undefined;
+    walletQuote?: TAccountMetas[7] | undefined;
+    eventAuthority: TAccountMetas[8];
+    program: TAccountMetas[9];
   };
   data: WithdrawInstructionData;
 };
@@ -448,12 +607,12 @@ export function parseWithdrawInstruction<
     InstructionWithAccounts<TAccountMetas> &
     InstructionWithData<ReadonlyUint8Array>,
 ): ParsedWithdrawInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 6) {
+  if (instruction.accounts.length < 10) {
     throw new SolanaError(
       SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS,
       {
         actualAccountMetas: instruction.accounts.length,
-        expectedAccountMetas: 6,
+        expectedAccountMetas: 10,
       },
     );
   }
@@ -463,6 +622,12 @@ export function parseWithdrawInstruction<
     accountIndex += 1;
     return accountMeta;
   };
+  const getNextOptionalAccount = () => {
+    const accountMeta = getNextAccount();
+    return accountMeta.address === FAIR_OPEN_PROGRAM_ADDRESS
+      ? undefined
+      : accountMeta;
+  };
   return {
     programAddress: instruction.programAddress,
     accounts: {
@@ -470,6 +635,10 @@ export function parseWithdrawInstruction<
       vault: getNextAccount(),
       seat: getNextAccount(),
       wallet: getNextAccount(),
+      pot: getNextOptionalAccount(),
+      quoteMint: getNextOptionalAccount(),
+      quoteTokenProgram: getNextOptionalAccount(),
+      walletQuote: getNextOptionalAccount(),
       eventAuthority: getNextAccount(),
       program: getNextAccount(),
     },

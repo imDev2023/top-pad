@@ -74,6 +74,10 @@ export type LockCreatorInstruction<
     "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
   TAccountSystemProgram extends string | AccountMeta<string> =
     "11111111111111111111111111111111",
+  TAccountPot extends string | AccountMeta<string> = string,
+  TAccountQuoteMint extends string | AccountMeta<string> = string,
+  TAccountQuoteTokenProgram extends string | AccountMeta<string> = string,
+  TAccountCreatorQuote extends string | AccountMeta<string> = string,
   TAccountEventAuthority extends string | AccountMeta<string> = string,
   TAccountProgram extends string | AccountMeta<string> = string,
   TRemainingAccounts extends readonly AccountMeta<string>[] = [],
@@ -126,6 +130,16 @@ export type LockCreatorInstruction<
       TAccountSystemProgram extends string
         ? ReadonlyAccount<TAccountSystemProgram>
         : TAccountSystemProgram,
+      TAccountPot extends string ? WritableAccount<TAccountPot> : TAccountPot,
+      TAccountQuoteMint extends string
+        ? ReadonlyAccount<TAccountQuoteMint>
+        : TAccountQuoteMint,
+      TAccountQuoteTokenProgram extends string
+        ? ReadonlyAccount<TAccountQuoteTokenProgram>
+        : TAccountQuoteTokenProgram,
+      TAccountCreatorQuote extends string
+        ? WritableAccount<TAccountCreatorQuote>
+        : TAccountCreatorQuote,
       TAccountEventAuthority extends string
         ? ReadonlyAccount<TAccountEventAuthority>
         : TAccountEventAuthority,
@@ -183,6 +197,12 @@ export type LockCreatorAsyncInput<
     InstructionAccountInput,
   TAccountSystemProgram extends InstructionAccountInput =
     InstructionAccountInput,
+  TAccountPot extends InstructionAccountInput = InstructionAccountInput,
+  TAccountQuoteMint extends InstructionAccountInput = InstructionAccountInput,
+  TAccountQuoteTokenProgram extends InstructionAccountInput =
+    InstructionAccountInput,
+  TAccountCreatorQuote extends InstructionAccountInput =
+    InstructionAccountInput,
   TAccountEventAuthority extends InstructionAccountInput =
     InstructionAccountInput,
   TAccountProgram extends InstructionAccountInput = InstructionAccountInput,
@@ -204,6 +224,11 @@ export type LockCreatorAsyncInput<
   tokenProgram?: TAccountTokenProgram;
   associatedTokenProgram?: TAccountAssociatedTokenProgram;
   systemProgram?: TAccountSystemProgram;
+  /** the handler. Left out in SOL. */
+  pot?: TAccountPot;
+  quoteMint?: TAccountQuoteMint;
+  quoteTokenProgram?: TAccountQuoteTokenProgram;
+  creatorQuote?: TAccountCreatorQuote;
   eventAuthority: TAccountEventAuthority;
   program: TAccountProgram;
 };
@@ -224,6 +249,10 @@ export async function getLockCreatorInstructionAsync<
   TAccountTokenProgram extends InstructionAccountInput,
   TAccountAssociatedTokenProgram extends InstructionAccountInput,
   TAccountSystemProgram extends InstructionAccountInput,
+  TAccountPot extends InstructionAccountInput,
+  TAccountQuoteMint extends InstructionAccountInput,
+  TAccountQuoteTokenProgram extends InstructionAccountInput,
+  TAccountCreatorQuote extends InstructionAccountInput,
   TAccountEventAuthority extends InstructionAccountInput,
   TAccountProgram extends InstructionAccountInput,
   TProgramAddress extends Address = typeof FAIR_OPEN_PROGRAM_ADDRESS,
@@ -244,6 +273,10 @@ export async function getLockCreatorInstructionAsync<
     TAccountTokenProgram,
     TAccountAssociatedTokenProgram,
     TAccountSystemProgram,
+    TAccountPot,
+    TAccountQuoteMint,
+    TAccountQuoteTokenProgram,
+    TAccountCreatorQuote,
     TAccountEventAuthority,
     TAccountProgram
   >,
@@ -314,6 +347,22 @@ export async function getLockCreatorInstructionAsync<
       InstructionAccountInputAddress<TAccountSystemProgram>
     >,
     ResolvedInstructionAccountMeta<
+      TAccountPot,
+      InstructionAccountInputAddress<TAccountPot>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountQuoteMint,
+      InstructionAccountInputAddress<TAccountQuoteMint>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountQuoteTokenProgram,
+      InstructionAccountInputAddress<TAccountQuoteTokenProgram>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountCreatorQuote,
+      InstructionAccountInputAddress<TAccountCreatorQuote>
+    >,
+    ResolvedInstructionAccountMeta<
       TAccountEventAuthority,
       InstructionAccountInputAddress<TAccountEventAuthority>
     >,
@@ -382,6 +431,22 @@ export async function getLockCreatorInstructionAsync<
       value: input.systemProgram ?? null,
       isSigner: false,
       isWritable: false,
+    },
+    pot: { value: input.pot ?? null, isSigner: false, isWritable: true },
+    quoteMint: {
+      value: input.quoteMint ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
+    quoteTokenProgram: {
+      value: input.quoteTokenProgram ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
+    creatorQuote: {
+      value: input.creatorQuote ?? null,
+      isSigner: false,
+      isWritable: true,
     },
     eventAuthority: {
       value: input.eventAuthority ?? null,
@@ -475,6 +540,10 @@ export async function getLockCreatorInstructionAsync<
       getAccountMeta("tokenProgram", accounts.tokenProgram),
       getAccountMeta("associatedTokenProgram", accounts.associatedTokenProgram),
       getAccountMeta("systemProgram", accounts.systemProgram),
+      getAccountMeta("pot", accounts.pot),
+      getAccountMeta("quoteMint", accounts.quoteMint),
+      getAccountMeta("quoteTokenProgram", accounts.quoteTokenProgram),
+      getAccountMeta("creatorQuote", accounts.creatorQuote),
       getAccountMeta("eventAuthority", accounts.eventAuthority),
       getAccountMeta("program", accounts.program),
     ],
@@ -543,6 +612,22 @@ export async function getLockCreatorInstructionAsync<
       InstructionAccountInputAddress<TAccountSystemProgram>
     >,
     ResolvedInstructionAccountMeta<
+      TAccountPot,
+      InstructionAccountInputAddress<TAccountPot>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountQuoteMint,
+      InstructionAccountInputAddress<TAccountQuoteMint>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountQuoteTokenProgram,
+      InstructionAccountInputAddress<TAccountQuoteTokenProgram>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountCreatorQuote,
+      InstructionAccountInputAddress<TAccountCreatorQuote>
+    >,
+    ResolvedInstructionAccountMeta<
       TAccountEventAuthority,
       InstructionAccountInputAddress<TAccountEventAuthority>
     >,
@@ -573,6 +658,12 @@ export type LockCreatorInput<
     InstructionAccountInput,
   TAccountSystemProgram extends InstructionAccountInput =
     InstructionAccountInput,
+  TAccountPot extends InstructionAccountInput = InstructionAccountInput,
+  TAccountQuoteMint extends InstructionAccountInput = InstructionAccountInput,
+  TAccountQuoteTokenProgram extends InstructionAccountInput =
+    InstructionAccountInput,
+  TAccountCreatorQuote extends InstructionAccountInput =
+    InstructionAccountInput,
   TAccountEventAuthority extends InstructionAccountInput =
     InstructionAccountInput,
   TAccountProgram extends InstructionAccountInput = InstructionAccountInput,
@@ -594,6 +685,11 @@ export type LockCreatorInput<
   tokenProgram?: TAccountTokenProgram;
   associatedTokenProgram?: TAccountAssociatedTokenProgram;
   systemProgram?: TAccountSystemProgram;
+  /** the handler. Left out in SOL. */
+  pot?: TAccountPot;
+  quoteMint?: TAccountQuoteMint;
+  quoteTokenProgram?: TAccountQuoteTokenProgram;
+  creatorQuote?: TAccountCreatorQuote;
   eventAuthority: TAccountEventAuthority;
   program: TAccountProgram;
 };
@@ -614,6 +710,10 @@ export function getLockCreatorInstruction<
   TAccountTokenProgram extends InstructionAccountInput,
   TAccountAssociatedTokenProgram extends InstructionAccountInput,
   TAccountSystemProgram extends InstructionAccountInput,
+  TAccountPot extends InstructionAccountInput,
+  TAccountQuoteMint extends InstructionAccountInput,
+  TAccountQuoteTokenProgram extends InstructionAccountInput,
+  TAccountCreatorQuote extends InstructionAccountInput,
   TAccountEventAuthority extends InstructionAccountInput,
   TAccountProgram extends InstructionAccountInput,
   TProgramAddress extends Address = typeof FAIR_OPEN_PROGRAM_ADDRESS,
@@ -634,6 +734,10 @@ export function getLockCreatorInstruction<
     TAccountTokenProgram,
     TAccountAssociatedTokenProgram,
     TAccountSystemProgram,
+    TAccountPot,
+    TAccountQuoteMint,
+    TAccountQuoteTokenProgram,
+    TAccountCreatorQuote,
     TAccountEventAuthority,
     TAccountProgram
   >,
@@ -701,6 +805,22 @@ export function getLockCreatorInstruction<
   ResolvedInstructionAccountMeta<
     TAccountSystemProgram,
     InstructionAccountInputAddress<TAccountSystemProgram>
+  >,
+  ResolvedInstructionAccountMeta<
+    TAccountPot,
+    InstructionAccountInputAddress<TAccountPot>
+  >,
+  ResolvedInstructionAccountMeta<
+    TAccountQuoteMint,
+    InstructionAccountInputAddress<TAccountQuoteMint>
+  >,
+  ResolvedInstructionAccountMeta<
+    TAccountQuoteTokenProgram,
+    InstructionAccountInputAddress<TAccountQuoteTokenProgram>
+  >,
+  ResolvedInstructionAccountMeta<
+    TAccountCreatorQuote,
+    InstructionAccountInputAddress<TAccountCreatorQuote>
   >,
   ResolvedInstructionAccountMeta<
     TAccountEventAuthority,
@@ -771,6 +891,22 @@ export function getLockCreatorInstruction<
       isSigner: false,
       isWritable: false,
     },
+    pot: { value: input.pot ?? null, isSigner: false, isWritable: true },
+    quoteMint: {
+      value: input.quoteMint ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
+    quoteTokenProgram: {
+      value: input.quoteTokenProgram ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
+    creatorQuote: {
+      value: input.creatorQuote ?? null,
+      isSigner: false,
+      isWritable: true,
+    },
     eventAuthority: {
       value: input.eventAuthority ?? null,
       isSigner: false,
@@ -826,6 +962,10 @@ export function getLockCreatorInstruction<
       getAccountMeta("tokenProgram", accounts.tokenProgram),
       getAccountMeta("associatedTokenProgram", accounts.associatedTokenProgram),
       getAccountMeta("systemProgram", accounts.systemProgram),
+      getAccountMeta("pot", accounts.pot),
+      getAccountMeta("quoteMint", accounts.quoteMint),
+      getAccountMeta("quoteTokenProgram", accounts.quoteTokenProgram),
+      getAccountMeta("creatorQuote", accounts.creatorQuote),
       getAccountMeta("eventAuthority", accounts.eventAuthority),
       getAccountMeta("program", accounts.program),
     ],
@@ -894,6 +1034,22 @@ export function getLockCreatorInstruction<
       InstructionAccountInputAddress<TAccountSystemProgram>
     >,
     ResolvedInstructionAccountMeta<
+      TAccountPot,
+      InstructionAccountInputAddress<TAccountPot>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountQuoteMint,
+      InstructionAccountInputAddress<TAccountQuoteMint>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountQuoteTokenProgram,
+      InstructionAccountInputAddress<TAccountQuoteTokenProgram>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountCreatorQuote,
+      InstructionAccountInputAddress<TAccountCreatorQuote>
+    >,
+    ResolvedInstructionAccountMeta<
       TAccountEventAuthority,
       InstructionAccountInputAddress<TAccountEventAuthority>
     >,
@@ -927,8 +1083,13 @@ export type ParsedLockCreatorInstruction<
     tokenProgram: TAccountMetas[12];
     associatedTokenProgram: TAccountMetas[13];
     systemProgram: TAccountMetas[14];
-    eventAuthority: TAccountMetas[15];
-    program: TAccountMetas[16];
+    /** the handler. Left out in SOL. */
+    pot?: TAccountMetas[15] | undefined;
+    quoteMint?: TAccountMetas[16] | undefined;
+    quoteTokenProgram?: TAccountMetas[17] | undefined;
+    creatorQuote?: TAccountMetas[18] | undefined;
+    eventAuthority: TAccountMetas[19];
+    program: TAccountMetas[20];
   };
   data: LockCreatorInstructionData;
 };
@@ -941,12 +1102,12 @@ export function parseLockCreatorInstruction<
     InstructionWithAccounts<TAccountMetas> &
     InstructionWithData<ReadonlyUint8Array>,
 ): ParsedLockCreatorInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 17) {
+  if (instruction.accounts.length < 21) {
     throw new SolanaError(
       SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS,
       {
         actualAccountMetas: instruction.accounts.length,
-        expectedAccountMetas: 17,
+        expectedAccountMetas: 21,
       },
     );
   }
@@ -955,6 +1116,12 @@ export function parseLockCreatorInstruction<
     const accountMeta = (instruction.accounts as TAccountMetas)[accountIndex]!;
     accountIndex += 1;
     return accountMeta;
+  };
+  const getNextOptionalAccount = () => {
+    const accountMeta = getNextAccount();
+    return accountMeta.address === FAIR_OPEN_PROGRAM_ADDRESS
+      ? undefined
+      : accountMeta;
   };
   return {
     programAddress: instruction.programAddress,
@@ -974,6 +1141,10 @@ export function parseLockCreatorInstruction<
       tokenProgram: getNextAccount(),
       associatedTokenProgram: getNextAccount(),
       systemProgram: getNextAccount(),
+      pot: getNextOptionalAccount(),
+      quoteMint: getNextOptionalAccount(),
+      quoteTokenProgram: getNextOptionalAccount(),
+      creatorQuote: getNextOptionalAccount(),
       eventAuthority: getNextAccount(),
       program: getNextAccount(),
     },

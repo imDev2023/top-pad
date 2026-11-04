@@ -129,7 +129,7 @@ fn lets_anyone_send_a_depositor_their_refund_but_pays_only_them() {
     // A seat's refund sent anywhere but its wallet is refused.
     let (mut t, launch, depositors) = closed_window(SOL, &[(Tier::Scored, 20 * STEP)]);
     t.mark_failed(&launch).unwrap();
-    let ix = withdraw_failed_instruction(&launch, &depositors[0].seat(&launch), &stranger.pubkey());
+    let ix = t.withdraw_failed_instruction(&launch, &depositors[0].seat(&launch), &stranger.pubkey());
     t.svm.airdrop(&stranger.pubkey(), SOL).unwrap();
     refused(send_as(&mut t.svm, &[ix], &stranger, &[]), Code::NotYourSeat);
 }

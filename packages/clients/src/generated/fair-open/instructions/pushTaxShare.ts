@@ -54,6 +54,9 @@ export type PushTaxShareInstruction<
   TProgram extends string = typeof FAIR_OPEN_PROGRAM_ADDRESS,
   TAccountLaunch extends string | AccountMeta<string> = string,
   TAccountVault extends string | AccountMeta<string> = string,
+  TAccountPot extends string | AccountMeta<string> = string,
+  TAccountQuoteMint extends string | AccountMeta<string> = string,
+  TAccountQuoteTokenProgram extends string | AccountMeta<string> = string,
   TAccountEventAuthority extends string | AccountMeta<string> = string,
   TAccountProgram extends string | AccountMeta<string> = string,
   TRemainingAccounts extends readonly AccountMeta<string>[] = [],
@@ -67,6 +70,13 @@ export type PushTaxShareInstruction<
       TAccountVault extends string
         ? WritableAccount<TAccountVault>
         : TAccountVault,
+      TAccountPot extends string ? WritableAccount<TAccountPot> : TAccountPot,
+      TAccountQuoteMint extends string
+        ? ReadonlyAccount<TAccountQuoteMint>
+        : TAccountQuoteMint,
+      TAccountQuoteTokenProgram extends string
+        ? ReadonlyAccount<TAccountQuoteTokenProgram>
+        : TAccountQuoteTokenProgram,
       TAccountEventAuthority extends string
         ? ReadonlyAccount<TAccountEventAuthority>
         : TAccountEventAuthority,
@@ -107,12 +117,20 @@ export function getPushTaxShareInstructionDataCodec(): FixedSizeCodec<
 export type PushTaxShareAsyncInput<
   TAccountLaunch extends InstructionAccountInput = InstructionAccountInput,
   TAccountVault extends InstructionAccountInput = InstructionAccountInput,
+  TAccountPot extends InstructionAccountInput = InstructionAccountInput,
+  TAccountQuoteMint extends InstructionAccountInput = InstructionAccountInput,
+  TAccountQuoteTokenProgram extends InstructionAccountInput =
+    InstructionAccountInput,
   TAccountEventAuthority extends InstructionAccountInput =
     InstructionAccountInput,
   TAccountProgram extends InstructionAccountInput = InstructionAccountInput,
 > = {
   launch: TAccountLaunch;
   vault?: TAccountVault;
+  /** the handler. Left out in SOL. */
+  pot?: TAccountPot;
+  quoteMint?: TAccountQuoteMint;
+  quoteTokenProgram?: TAccountQuoteTokenProgram;
   eventAuthority: TAccountEventAuthority;
   program: TAccountProgram;
 };
@@ -120,6 +138,9 @@ export type PushTaxShareAsyncInput<
 export async function getPushTaxShareInstructionAsync<
   TAccountLaunch extends InstructionAccountInput,
   TAccountVault extends InstructionAccountInput,
+  TAccountPot extends InstructionAccountInput,
+  TAccountQuoteMint extends InstructionAccountInput,
+  TAccountQuoteTokenProgram extends InstructionAccountInput,
   TAccountEventAuthority extends InstructionAccountInput,
   TAccountProgram extends InstructionAccountInput,
   TProgramAddress extends Address = typeof FAIR_OPEN_PROGRAM_ADDRESS,
@@ -127,6 +148,9 @@ export async function getPushTaxShareInstructionAsync<
   input: PushTaxShareAsyncInput<
     TAccountLaunch,
     TAccountVault,
+    TAccountPot,
+    TAccountQuoteMint,
+    TAccountQuoteTokenProgram,
     TAccountEventAuthority,
     TAccountProgram
   >,
@@ -143,6 +167,18 @@ export async function getPushTaxShareInstructionAsync<
     ResolvedInstructionAccountMeta<
       TAccountVault,
       InstructionAccountInputAddress<TAccountVault>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountPot,
+      InstructionAccountInputAddress<TAccountPot>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountQuoteMint,
+      InstructionAccountInputAddress<TAccountQuoteMint>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountQuoteTokenProgram,
+      InstructionAccountInputAddress<TAccountQuoteTokenProgram>
     >,
     ResolvedInstructionAccountMeta<
       TAccountEventAuthority,
@@ -169,6 +205,17 @@ export async function getPushTaxShareInstructionAsync<
   const originalAccounts = {
     launch: { value: input.launch ?? null, isSigner: false, isWritable: true },
     vault: { value: input.vault ?? null, isSigner: false, isWritable: true },
+    pot: { value: input.pot ?? null, isSigner: false, isWritable: true },
+    quoteMint: {
+      value: input.quoteMint ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
+    quoteTokenProgram: {
+      value: input.quoteTokenProgram ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
     eventAuthority: {
       value: input.eventAuthority ?? null,
       isSigner: false,
@@ -202,6 +249,9 @@ export async function getPushTaxShareInstructionAsync<
     accounts: [
       getAccountMeta("launch", accounts.launch),
       getAccountMeta("vault", accounts.vault),
+      getAccountMeta("pot", accounts.pot),
+      getAccountMeta("quoteMint", accounts.quoteMint),
+      getAccountMeta("quoteTokenProgram", accounts.quoteTokenProgram),
       getAccountMeta("eventAuthority", accounts.eventAuthority),
       getAccountMeta("program", accounts.program),
     ],
@@ -218,6 +268,18 @@ export async function getPushTaxShareInstructionAsync<
       InstructionAccountInputAddress<TAccountVault>
     >,
     ResolvedInstructionAccountMeta<
+      TAccountPot,
+      InstructionAccountInputAddress<TAccountPot>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountQuoteMint,
+      InstructionAccountInputAddress<TAccountQuoteMint>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountQuoteTokenProgram,
+      InstructionAccountInputAddress<TAccountQuoteTokenProgram>
+    >,
+    ResolvedInstructionAccountMeta<
       TAccountEventAuthority,
       InstructionAccountInputAddress<TAccountEventAuthority>
     >,
@@ -231,12 +293,20 @@ export async function getPushTaxShareInstructionAsync<
 export type PushTaxShareInput<
   TAccountLaunch extends InstructionAccountInput = InstructionAccountInput,
   TAccountVault extends InstructionAccountInput = InstructionAccountInput,
+  TAccountPot extends InstructionAccountInput = InstructionAccountInput,
+  TAccountQuoteMint extends InstructionAccountInput = InstructionAccountInput,
+  TAccountQuoteTokenProgram extends InstructionAccountInput =
+    InstructionAccountInput,
   TAccountEventAuthority extends InstructionAccountInput =
     InstructionAccountInput,
   TAccountProgram extends InstructionAccountInput = InstructionAccountInput,
 > = {
   launch: TAccountLaunch;
   vault: TAccountVault;
+  /** the handler. Left out in SOL. */
+  pot?: TAccountPot;
+  quoteMint?: TAccountQuoteMint;
+  quoteTokenProgram?: TAccountQuoteTokenProgram;
   eventAuthority: TAccountEventAuthority;
   program: TAccountProgram;
 };
@@ -244,6 +314,9 @@ export type PushTaxShareInput<
 export function getPushTaxShareInstruction<
   TAccountLaunch extends InstructionAccountInput,
   TAccountVault extends InstructionAccountInput,
+  TAccountPot extends InstructionAccountInput,
+  TAccountQuoteMint extends InstructionAccountInput,
+  TAccountQuoteTokenProgram extends InstructionAccountInput,
   TAccountEventAuthority extends InstructionAccountInput,
   TAccountProgram extends InstructionAccountInput,
   TProgramAddress extends Address = typeof FAIR_OPEN_PROGRAM_ADDRESS,
@@ -251,6 +324,9 @@ export function getPushTaxShareInstruction<
   input: PushTaxShareInput<
     TAccountLaunch,
     TAccountVault,
+    TAccountPot,
+    TAccountQuoteMint,
+    TAccountQuoteTokenProgram,
     TAccountEventAuthority,
     TAccountProgram
   >,
@@ -266,6 +342,18 @@ export function getPushTaxShareInstruction<
   ResolvedInstructionAccountMeta<
     TAccountVault,
     InstructionAccountInputAddress<TAccountVault>
+  >,
+  ResolvedInstructionAccountMeta<
+    TAccountPot,
+    InstructionAccountInputAddress<TAccountPot>
+  >,
+  ResolvedInstructionAccountMeta<
+    TAccountQuoteMint,
+    InstructionAccountInputAddress<TAccountQuoteMint>
+  >,
+  ResolvedInstructionAccountMeta<
+    TAccountQuoteTokenProgram,
+    InstructionAccountInputAddress<TAccountQuoteTokenProgram>
   >,
   ResolvedInstructionAccountMeta<
     TAccountEventAuthority,
@@ -291,6 +379,17 @@ export function getPushTaxShareInstruction<
   const originalAccounts = {
     launch: { value: input.launch ?? null, isSigner: false, isWritable: true },
     vault: { value: input.vault ?? null, isSigner: false, isWritable: true },
+    pot: { value: input.pot ?? null, isSigner: false, isWritable: true },
+    quoteMint: {
+      value: input.quoteMint ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
+    quoteTokenProgram: {
+      value: input.quoteTokenProgram ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
     eventAuthority: {
       value: input.eventAuthority ?? null,
       isSigner: false,
@@ -311,6 +410,9 @@ export function getPushTaxShareInstruction<
     accounts: [
       getAccountMeta("launch", accounts.launch),
       getAccountMeta("vault", accounts.vault),
+      getAccountMeta("pot", accounts.pot),
+      getAccountMeta("quoteMint", accounts.quoteMint),
+      getAccountMeta("quoteTokenProgram", accounts.quoteTokenProgram),
       getAccountMeta("eventAuthority", accounts.eventAuthority),
       getAccountMeta("program", accounts.program),
     ],
@@ -325,6 +427,18 @@ export function getPushTaxShareInstruction<
     ResolvedInstructionAccountMeta<
       TAccountVault,
       InstructionAccountInputAddress<TAccountVault>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountPot,
+      InstructionAccountInputAddress<TAccountPot>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountQuoteMint,
+      InstructionAccountInputAddress<TAccountQuoteMint>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountQuoteTokenProgram,
+      InstructionAccountInputAddress<TAccountQuoteTokenProgram>
     >,
     ResolvedInstructionAccountMeta<
       TAccountEventAuthority,
@@ -345,8 +459,12 @@ export type ParsedPushTaxShareInstruction<
   accounts: {
     launch: TAccountMetas[0];
     vault: TAccountMetas[1];
-    eventAuthority: TAccountMetas[2];
-    program: TAccountMetas[3];
+    /** the handler. Left out in SOL. */
+    pot?: TAccountMetas[2] | undefined;
+    quoteMint?: TAccountMetas[3] | undefined;
+    quoteTokenProgram?: TAccountMetas[4] | undefined;
+    eventAuthority: TAccountMetas[5];
+    program: TAccountMetas[6];
   };
   data: PushTaxShareInstructionData;
 };
@@ -359,12 +477,12 @@ export function parsePushTaxShareInstruction<
     InstructionWithAccounts<TAccountMetas> &
     InstructionWithData<ReadonlyUint8Array>,
 ): ParsedPushTaxShareInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 4) {
+  if (instruction.accounts.length < 7) {
     throw new SolanaError(
       SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS,
       {
         actualAccountMetas: instruction.accounts.length,
-        expectedAccountMetas: 4,
+        expectedAccountMetas: 7,
       },
     );
   }
@@ -374,11 +492,20 @@ export function parsePushTaxShareInstruction<
     accountIndex += 1;
     return accountMeta;
   };
+  const getNextOptionalAccount = () => {
+    const accountMeta = getNextAccount();
+    return accountMeta.address === FAIR_OPEN_PROGRAM_ADDRESS
+      ? undefined
+      : accountMeta;
+  };
   return {
     programAddress: instruction.programAddress,
     accounts: {
       launch: getNextAccount(),
       vault: getNextAccount(),
+      pot: getNextOptionalAccount(),
+      quoteMint: getNextOptionalAccount(),
+      quoteTokenProgram: getNextOptionalAccount(),
       eventAuthority: getNextAccount(),
       program: getNextAccount(),
     },

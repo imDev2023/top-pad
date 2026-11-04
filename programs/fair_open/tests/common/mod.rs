@@ -3,7 +3,9 @@
 //! keeper, and admissions signed by a test admission key and verified by the real Ed25519 precompile. The open runs the
 //! fee program (target/deploy/fee.so) with its `FeeConfig`, and our stand-in for DBC's pool creation, swap and fee claim
 //! (tests/dbc-stand-in) at DBC's address; Meteora's own binary is never loaded (spec 5.1). The Creator lock runs our
-//! stand-in for Jupiter Lock's escrow (tests/lock-stand-in) at Lock's address.
+//! stand-in for Jupiter Lock's escrow (tests/lock-stand-in) at Lock's address. A test runs its launches in SOL, or with
+//! `Test::in_quote` in a Token-2022 quote with an xStock's extensions (mainnet NVDAx's own mint account, its authorities
+//! handed to a test issuer, its TokenBadge written in DBC's layout) or in an SPL Token quote shaped as Circle's USDC.
 // LiteSVM's failed-transaction metadata is large by design; the helpers here only hand it back to the test.
 #![allow(clippy::result_large_err, dead_code)]
 use {
@@ -45,6 +47,14 @@ pub const STEP: u64 = fair_open::DEPOSIT_STEP;
 pub const GRADUATION_TARGET: u64 = 8_500_000_000;
 /// When the tests' windows open, as a Unix timestamp.
 pub const WINDOW_OPENS: i64 = 1_800_000_000;
+/// A token quote's deposit step and Graduation Target in its raw units: the same 850 steps to the target as SOL's, so
+/// the allocation and the ladder have SOL's shape.
+pub const QUOTE_STEP: u64 = 1_000_000;
+pub const QUOTE_GRADUATION_TARGET: u64 = 850_000_000;
+/// What each depositor holds of a token quote when made: 1,000 steps.
+pub const QUOTE_FUNDS: u64 = 1_000 * QUOTE_STEP;
+/// Mainnet NVDAx's mint account, read on 2026-11-03 (`@top-pad/chain`'s fixture): the extensions every xStock carries.
+const NVDAX: &str = include_str!("../../../../packages/chain/src/fixtures/xstock-nvdax.json");
 
 /// The program's error codes, in declaration order from Anchor's 6000: clients match on these numbers, so a variant
 /// inserted anywhere but the end would show up here.
@@ -112,6 +122,37 @@ pub enum Code {
     NotTheQuoteManager,
     NotThisQuote,
     NotHeatsConfigShape,
+    QuoteAccountsMissing,
+    NotYourQuoteAccount,
+    NotThePot,
+    QuotePaused,
+    QuoteRefused,
+}
+
+/// Which quote `Test::in_quote` runs a test's launches in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum QuoteKind {
+    /// A Token-2022 mint with every extension an xStock carries, 8 decimals, DBC's TokenBadge written for it.
+    Xstock,
+    /// An SPL Token mint of 6 decimals with a freeze authority, as Circle's USDC is, which DBC takes with no badge.
+    Usdc,
+}
+
+/// The quote a test's launches are made in, and its configs and step.
+#[derive(Clone, Copy, Debug)]
+pub struct Quote {
+    pub mint: Pubkey,
+    /// SPL Token or Token-2022: the mint's owner.
+    pub program: Pubkey,
+    /// Its Fair Open config, which its `QuoteSettings` names; Heat's SOL one in SOL.
+    pub config: Pubkey,
+    pub step: u64,
+}
+
+impl Quote {
+    pub fn is_sol(&self) -> bool {
+        self.mint == fair_open::NATIVE_MINT
+    }
 }
 
 /// A launch's coin, as the creator seals it at scheduling.
@@ -158,7 +199,11 @@ pub struct CoinKeys {
 
 impl CoinKeys {
     pub fn of(config: &Pubkey, mint: &Pubkey) -> Self {
-        let quote = fair_open::NATIVE_MINT;
+        Self::in_quote(config, mint, &fair_open::NATIVE_MINT)
+    }
+
+    pub fn in_quote(config: &Pubkey, mint: &Pubkey, quote: &Pubkey) -> Self {
+        let quote = *quote;
         let (larger, smaller) = if mint > &quote { (*mint, quote) } else { (quote, *mint) };
         let dbc = |seeds: &[&[u8]]| Pubkey::find_program_address(seeds, &dbc::PROGRAM_ID).0;
         let pool = dbc(&[b"pool", config.as_ref(), larger.as_ref(), smaller.as_ref()]);
@@ -203,6 +248,10 @@ pub struct Test {
     /// Heat's SOL Instant config, which SOL's `QuoteSettings` names beside the Fair Open one.
     pub instant_config: Pubkey,
     pub quote_manager: Keypair,
+    /// The quote `launch` makes launches in: SOL unless `in_quote` chose another.
+    pub quote: Quote,
+    /// A token quote's issuer, holding every authority of its mint: it mints to depositors, and may pause it.
+    pub issuer: Keypair,
 }
 
 impl Test {
@@ -218,6 +267,101 @@ impl Test {
         t.set_quote_settings(&fair_open::NATIVE_MINT, fair_open_config, instant_config, STEP).unwrap();
         t.at(0);
         t
+    }
+
+    /// `Test::new` with its launches in a token quote of `kind`: the mint, its Fair Open and Instant configs shaped as
+    /// Heat's SOL ones, and its `QuoteSettings` at `QUOTE_STEP`.
+    pub fn in_quote(kind: QuoteKind) -> Self {
+        let mut t = Test::new();
+        let mint = Pubkey::new_unique();
+        let issuer = t.issuer.pubkey();
+        let (data, program) = match kind {
+            QuoteKind::Xstock => (xstock_mint_data(&issuer), TOKEN_2022),
+            QuoteKind::Usdc => (spl_mint_data(&issuer, 6), TOKEN_PROGRAM),
+        };
+        t.set_account(mint, data, program);
+        if kind == QuoteKind::Xstock {
+            let mut badge = vec![0u8; dbc_stand_in::TOKEN_BADGE_LEN];
+            badge[..8].copy_from_slice(&dbc_stand_in::TOKEN_BADGE_DISCRIMINATOR);
+            badge[8..40].copy_from_slice(mint.as_ref());
+            t.set_account(token_badge_address(&mint), badge, dbc::PROGRAM_ID);
+        }
+        let (config, instant) = (Pubkey::new_unique(), Pubkey::new_unique());
+        let data = dbc_config_data(&mint, QUOTE_GRADUATION_TARGET);
+        t.set_account(config, data.clone(), dbc::PROGRAM_ID);
+        t.set_account(instant, data, dbc::PROGRAM_ID);
+        t.set_quote_settings(&mint, config, instant, QUOTE_STEP).unwrap();
+        t.quote = Quote { mint, program, config, step: QUOTE_STEP };
+        t
+    }
+
+    /// The pot, the quote and its token program, which an instruction of a launch in a token quote takes; none in SOL.
+    pub fn quote_accounts(&self, launch: &LaunchKeys) -> (Option<Pubkey>, Option<Pubkey>, Option<Pubkey>) {
+        match self.quote.is_sol() {
+            true => (None, None, None),
+            false => (Some(pot_address(&launch.launch)), Some(self.quote.mint), Some(self.quote.program)),
+        }
+    }
+
+    /// `owner`'s associated account of the quote, in a token quote.
+    pub fn quote_account(&self, owner: &Pubkey) -> Option<Pubkey> {
+        (!self.quote.is_sol()).then(|| associated_address_in(owner, &self.quote.mint, &self.quote.program))
+    }
+
+    /// What `owner`'s associated account of the quote holds: its raw units in a token quote.
+    pub fn quote_held(&self, owner: &Pubkey) -> u64 {
+        self.quote_account(owner).and_then(|a| self.tokens(&a)).unwrap_or(0)
+    }
+
+    /// What a launch's pot holds of a token quote.
+    pub fn pot_holds(&self, launch: &LaunchKeys) -> u64 {
+        self.tokens(&pot_address(&launch.launch)).unwrap_or(0)
+    }
+
+    /// Gives `owner` an associated account of the token quote holding `amount` more, minted by the issuer.
+    pub fn fund_quote(&mut self, owner: &Pubkey, amount: u64) -> Pubkey {
+        let (mint, program) = (self.quote.mint, self.quote.program);
+        let account = associated_address_in(owner, &mint, &program);
+        let create = Instruction {
+            program_id: ASSOCIATED_TOKEN_PROGRAM,
+            accounts: vec![
+                AccountMeta::new(self.payer.pubkey(), true),
+                AccountMeta::new(account, false),
+                AccountMeta::new_readonly(*owner, false),
+                AccountMeta::new_readonly(mint, false),
+                AccountMeta::new_readonly(system_program::ID, false),
+                AccountMeta::new_readonly(program, false),
+            ],
+            data: vec![1],
+        };
+        let mut data = vec![7];
+        data.extend_from_slice(&amount.to_le_bytes());
+        let mint_to = Instruction {
+            program_id: program,
+            accounts: vec![
+                AccountMeta::new(mint, false),
+                AccountMeta::new(account, false),
+                AccountMeta::new_readonly(self.issuer.pubkey(), true),
+            ],
+            data,
+        };
+        let issuer = self.issuer.insecure_clone();
+        self.send(&[create, mint_to], &[&issuer]).unwrap();
+        account
+    }
+
+    /// The issuer pauses the xStock quote (Token-2022's `Pausable`), or resumes it.
+    pub fn pause_quote(&mut self, paused: bool) {
+        let ix = Instruction {
+            program_id: self.quote.program,
+            accounts: vec![
+                AccountMeta::new(self.quote.mint, false),
+                AccountMeta::new_readonly(self.issuer.pubkey(), true),
+            ],
+            data: vec![44, if paused { 1 } else { 2 }],
+        };
+        let issuer = self.issuer.insecure_clone();
+        self.send(&[ix], &[&issuer]).unwrap();
     }
 
     /// The program deployed with an upgrade authority, and Heat's Fair Open config on chain; no `ProgramConfig` yet.
@@ -241,7 +385,15 @@ impl Test {
             dbc_config: Pubkey::new_unique(),
             instant_config: Pubkey::new_unique(),
             quote_manager: Keypair::new(),
+            quote: Quote {
+                mint: fair_open::NATIVE_MINT,
+                program: TOKEN_PROGRAM,
+                config: Pubkey::default(),
+                step: STEP,
+            },
+            issuer: Keypair::new(),
         };
+        t.quote.config = t.dbc_config;
         t.set_upgrade_authority(Some(t.upgrade_authority.pubkey()));
         let config = dbc_config_data(&fair_open::NATIVE_MINT, GRADUATION_TARGET);
         t.set_account(t.dbc_config, config.clone(), dbc::PROGRAM_ID);
@@ -403,7 +555,7 @@ impl Test {
         let nonce = self.nonce_held_by(&keeper);
         let creator = self.creator.insecure_clone();
         let keeper = self.keeper.insecure_clone();
-        self.create_launch(&creator, &keeper, nonce, self.dbc_config, params).unwrap();
+        self.create_launch(&creator, &keeper, nonce, self.quote.config, params).unwrap();
         launch_keys(nonce)
     }
 
@@ -415,7 +567,8 @@ impl Test {
         dbc_config: Pubkey,
         params: LaunchParams,
     ) -> Result<TransactionMetadata, FailedTransactionMetadata> {
-        self.create_launch_in(&fair_open::NATIVE_MINT, creator, keeper, nonce, dbc_config, params)
+        let quote = self.quote.mint;
+        self.create_launch_in(&quote, creator, keeper, nonce, dbc_config, params)
     }
 
     /// `create_launch` in the quote of `quote_mint`, by its `QuoteSettings`.
@@ -441,6 +594,9 @@ impl Test {
             launch: keys.launch,
             vault: keys.vault,
             system_program: system_program::ID,
+            pot: (*quote_mint != fair_open::NATIVE_MINT).then(|| pot_address(&keys.launch)),
+            quote_token_program: (*quote_mint != fair_open::NATIVE_MINT)
+                .then(|| self.svm.get_account(quote_mint).map_or(TOKEN_PROGRAM, |a| a.owner)),
             event_authority: event_authority(),
             program: fair_open::id(),
         };
@@ -448,16 +604,19 @@ impl Test {
         send_as(&mut self.svm, &[ix], creator, &[keeper])
     }
 
-    /// A new wallet with 5 SOL, admitted as a new person of `tier`.
+    /// A new wallet with 5 SOL, and in a token quote `QUOTE_FUNDS` of it, admitted as a new person of `tier`.
     pub fn depositor(&mut self, tier: Tier) -> Depositor {
         let wallet = Keypair::new();
         self.svm.airdrop(&wallet.pubkey(), 5 * SOL).unwrap();
+        if !self.quote.is_sol() {
+            self.fund_quote(&wallet.pubkey(), QUOTE_FUNDS);
+        }
         Depositor { wallet, person: Pubkey::new_unique().to_bytes(), tier }
     }
 
     /// The admission our server would give the depositor in `launch`: their tier's full cap, for a minute.
     pub fn admission(&self, d: &Depositor) -> Admission {
-        Admission { person: d.person, tier: d.tier, cap: d.tier.cap(STEP), expires_at: self.now() + 60 }
+        Admission { person: d.person, tier: d.tier, cap: d.tier.cap(self.quote.step), expires_at: self.now() + 60 }
     }
 
     /// The Ed25519 precompile instruction verifying `signer`'s signature over the admission for `wallet`.
@@ -500,6 +659,7 @@ impl Test {
         amount: u64,
         admission: Admission,
     ) -> Instruction {
+        let (pot, quote_mint, quote_token_program) = self.quote_accounts(launch);
         let accounts = fair_open::accounts::Deposit {
             program_config: program_config_address(),
             launch: launch.launch,
@@ -508,6 +668,10 @@ impl Test {
             depositor: *wallet,
             instructions: solana_instructions_sysvar_id(),
             system_program: system_program::ID,
+            pot,
+            quote_mint,
+            quote_token_program,
+            depositor_quote: self.quote_account(wallet),
             event_authority: event_authority(),
             program: fair_open::id(),
         };
@@ -530,11 +694,16 @@ impl Test {
         wallet: &Keypair,
         amount: u64,
     ) -> Result<TransactionMetadata, FailedTransactionMetadata> {
+        let (pot, quote_mint, quote_token_program) = self.quote_accounts(launch);
         let accounts = fair_open::accounts::Withdraw {
             launch: launch.launch,
             vault: launch.vault,
             seat: *seat,
             wallet: wallet.pubkey(),
+            pot,
+            quote_mint,
+            quote_token_program,
+            wallet_quote: self.quote_account(&wallet.pubkey()),
             event_authority: event_authority(),
             program: fair_open::id(),
         };
@@ -560,15 +729,37 @@ impl Test {
         d: &Depositor,
         sender: &Keypair,
     ) -> Result<TransactionMetadata, FailedTransactionMetadata> {
-        let ix = withdraw_failed_instruction(launch, &d.seat(launch), &d.wallet.pubkey());
+        let ix = self.withdraw_failed_instruction(launch, &d.seat(launch), &d.wallet.pubkey());
         send_as(&mut self.svm, &[ix], sender, &[])
     }
 
+    pub fn withdraw_failed_instruction(&self, launch: &LaunchKeys, seat: &Pubkey, wallet: &Pubkey) -> Instruction {
+        let (pot, quote_mint, quote_token_program) = self.quote_accounts(launch);
+        let accounts = fair_open::accounts::WithdrawFailed {
+            launch: launch.launch,
+            vault: launch.vault,
+            seat: *seat,
+            wallet: *wallet,
+            pot,
+            quote_mint,
+            quote_token_program,
+            wallet_quote: self.quote_account(wallet),
+            event_authority: event_authority(),
+            program: fair_open::id(),
+        };
+        instruction(accounts.to_account_metas(None), fair_open::instruction::WithdrawFailed {}.data())
+    }
+
     pub fn close_launch(&mut self, launch: &LaunchKeys) -> Result<TransactionMetadata, FailedTransactionMetadata> {
+        let (pot, quote_mint, quote_token_program) = self.quote_accounts(launch);
         let accounts = fair_open::accounts::CloseLaunch {
             launch: launch.launch,
             vault: launch.vault,
             creator: self.creator.pubkey(),
+            pot,
+            quote_mint,
+            quote_token_program,
+            creator_quote: self.quote_account(&self.creator.pubkey()),
             event_authority: event_authority(),
             program: fair_open::id(),
         };
@@ -586,7 +777,8 @@ impl Test {
         coin: &Coin,
     ) -> Vec<Instruction> {
         let keeper = self.keeper.pubkey();
-        let c = CoinKeys::of(&self.dbc_config, mint);
+        let q = self.quote;
+        let c = CoinKeys::in_quote(&q.config, mint, &q.mint);
         let pot = pot_address(&launch.launch);
         let pot_coins = associated_address(&launch.launch, mint);
         let dbc_pda = |seed: &[u8]| Pubkey::find_program_address(&[seed], &dbc::PROGRAM_ID).0;
@@ -602,32 +794,37 @@ impl Test {
             vault: launch.vault,
             pot,
             keeper,
-            quote_mint: fair_open::NATIVE_MINT,
-            token_program: TOKEN_PROGRAM,
+            quote_mint: q.mint,
+            token_program: q.program,
             instructions: solana_instructions_sysvar_id(),
             system_program: system_program::ID,
         };
         let open = instruction(open.to_account_metas(None), fair_open::instruction::Open { rung }.data());
+        let mut init_accounts = vec![
+            ro(q.config, false),
+            ro(pool_authority, false),
+            ro(self.creator.pubkey(), true),
+            rw(*mint, true),
+            ro(q.mint, false),
+            rw(c.pool, false),
+            rw(c.base_vault, false),
+            rw(c.quote_vault, false),
+            rw(metadata, false),
+            ro(METADATA_PROGRAM, false),
+            rw(keeper, true),
+            ro(q.program, false),
+            ro(TOKEN_PROGRAM, false),
+            ro(system_program::ID, false),
+            ro(dbc_events, false),
+            ro(dbc::PROGRAM_ID, false),
+        ];
+        // DBC takes a quote it does not take permissionlessly only with its TokenBadge, its first remaining account.
+        if self.svm.get_account(&token_badge_address(&q.mint)).is_some() {
+            init_accounts.push(ro(token_badge_address(&q.mint), false));
+        }
         let init = Instruction {
             program_id: dbc::PROGRAM_ID,
-            accounts: vec![
-                ro(self.dbc_config, false),
-                ro(pool_authority, false),
-                ro(self.creator.pubkey(), true),
-                rw(*mint, true),
-                ro(fair_open::NATIVE_MINT, false),
-                rw(c.pool, false),
-                rw(c.base_vault, false),
-                rw(c.quote_vault, false),
-                rw(metadata, false),
-                ro(METADATA_PROGRAM, false),
-                rw(keeper, true),
-                ro(TOKEN_PROGRAM, false),
-                ro(TOKEN_PROGRAM, false),
-                ro(system_program::ID, false),
-                ro(dbc_events, false),
-                ro(dbc::PROGRAM_ID, false),
-            ],
+            accounts: init_accounts,
             data: [dbc::INITIALIZE_POOL_WITH_SPL_TOKEN.as_slice(), &coin.params()].concat(),
         };
         let coins = Instruction {
@@ -650,17 +847,17 @@ impl Test {
             program_id: dbc::PROGRAM_ID,
             accounts: vec![
                 ro(pool_authority, false),
-                ro(self.dbc_config, false),
+                ro(q.config, false),
                 rw(c.pool, false),
                 rw(pot, false),
                 rw(pot_coins, false),
                 rw(c.base_vault, false),
                 rw(c.quote_vault, false),
                 ro(*mint, false),
-                ro(fair_open::NATIVE_MINT, false),
+                ro(q.mint, false),
                 ro(keeper, true),
                 ro(TOKEN_PROGRAM, false),
-                ro(TOKEN_PROGRAM, false),
+                ro(q.program, false),
                 ro(dbc::PROGRAM_ID, false),
                 ro(dbc_events, false),
                 ro(dbc::PROGRAM_ID, false),
@@ -677,7 +874,7 @@ impl Test {
             keeper,
             mint: *mint,
             pool: c.pool,
-            dbc_config: self.dbc_config,
+            dbc_config: q.config,
             coin_record: coin_record_address(mint),
             coin_registrar: Pubkey::find_program_address(&[fair_open::COIN_REGISTRAR_SEED], &fair_open::id()).0,
             fee_config: fee_config_address(),
@@ -711,7 +908,7 @@ impl Test {
         let mint = Keypair::new();
         let ixs = self.creation_instructions(launch, rung, &mint.pubkey(), &Coin::new("TEST"));
         let done = self.send_creation(&ixs, &mint)?;
-        Ok((done, CoinKeys::of(&self.dbc_config, &mint.pubkey())))
+        Ok((done, CoinKeys::in_quote(&self.quote.config, &mint.pubkey(), &self.quote.mint)))
     }
 
     /// A push of `seats`, each the seat, its wallet and the wallet's associated account of the coin, sent by a stranger.
@@ -728,6 +925,7 @@ impl Test {
 
     /// A push of seats given as (seat, wallet) pairs.
     pub fn push_instruction(&self, launch: &LaunchKeys, mint: &Pubkey, seats: &[(Pubkey, Pubkey)]) -> Instruction {
+        let (pot, quote_mint, quote_token_program) = self.quote_accounts(launch);
         let accounts = fair_open::accounts::Push {
             launch: launch.launch,
             vault: launch.vault,
@@ -737,6 +935,9 @@ impl Test {
             token_program: TOKEN_PROGRAM,
             associated_token_program: ASSOCIATED_TOKEN_PROGRAM,
             system_program: system_program::ID,
+            pot,
+            quote_mint,
+            quote_token_program,
             event_authority: event_authority(),
             program: fair_open::id(),
         };
@@ -745,6 +946,9 @@ impl Test {
             metas.push(AccountMeta::new(*seat, false));
             metas.push(AccountMeta::new(*wallet, false));
             metas.push(AccountMeta::new(associated_address(wallet, mint), false));
+            if let Some(account) = self.quote_account(wallet) {
+                metas.push(AccountMeta::new(account, false));
+            }
         }
         instruction(metas, fair_open::instruction::Push {}.data())
     }
@@ -757,6 +961,7 @@ impl Test {
         d: &Depositor,
         coin_account: &Pubkey,
     ) -> Result<TransactionMetadata, FailedTransactionMetadata> {
+        let (pot, quote_mint, quote_token_program) = self.quote_accounts(launch);
         let accounts = fair_open::accounts::Claim {
             launch: launch.launch,
             vault: launch.vault,
@@ -766,6 +971,10 @@ impl Test {
             pot_coins: associated_address(&launch.launch, mint),
             mint: *mint,
             token_program: TOKEN_PROGRAM,
+            pot,
+            quote_mint,
+            quote_token_program,
+            wallet_quote: self.quote_account(&d.wallet.pubkey()),
             event_authority: event_authority(),
             program: fair_open::id(),
         };
@@ -787,6 +996,7 @@ impl Test {
     pub fn lock_creator_instruction(&self, launch: &LaunchKeys, coin: &CoinKeys, seat: &Pubkey) -> Instruction {
         let locker = locker_address(&launch.launch);
         let escrow = escrow_address(&locker);
+        let (pot, quote_mint, quote_token_program) = self.quote_accounts(launch);
         let accounts = fair_open::accounts::LockCreator {
             launch: launch.launch,
             vault: launch.vault,
@@ -803,6 +1013,10 @@ impl Test {
             token_program: TOKEN_PROGRAM,
             associated_token_program: ASSOCIATED_TOKEN_PROGRAM,
             system_program: system_program::ID,
+            pot,
+            quote_mint,
+            quote_token_program,
+            creator_quote: self.quote_account(&self.creator.pubkey()),
             event_authority: event_authority(),
             program: fair_open::id(),
         };
@@ -826,15 +1040,15 @@ impl Test {
             launch: launch.launch,
             vault: launch.vault,
             pot: pot_address(&launch.launch),
-            quote_mint: fair_open::NATIVE_MINT,
+            quote_mint: self.quote.mint,
             treasury: self.treasury(),
             coin_registrar: Pubkey::find_program_address(&[fair_open::COIN_REGISTRAR_SEED], &fair_open::id()).0,
             fee_config: fee_config_address(),
             coin_record: coin_record_address(&coin.mint),
             fee_claimer: fee::FEE_CLAIMER,
-            fee_claimer_token_account: associated_address(&fee::FEE_CLAIMER, &fair_open::NATIVE_MINT),
+            fee_claimer_token_account: associated_address_in(&fee::FEE_CLAIMER, &self.quote.mint, &self.quote.program),
             pool_authority: dbc_pda(b"pool_authority"),
-            dbc_config: self.dbc_config,
+            dbc_config: self.quote.config,
             pool: coin.pool,
             base_vault: coin.base_vault,
             quote_vault: coin.quote_vault,
@@ -844,8 +1058,9 @@ impl Test {
             dbc_program: dbc::PROGRAM_ID,
             fee_event_authority: Pubkey::find_program_address(&[b"__event_authority"], &fee::id()).0,
             fee_program: fee::id(),
-            token_program: TOKEN_PROGRAM,
+            token_program: self.quote.program,
             system_program: system_program::ID,
+            treasury_quote: self.quote_account(&self.treasury()),
             event_authority: event_authority(),
             program: fair_open::id(),
         };
@@ -858,9 +1073,13 @@ impl Test {
         launch: &LaunchKeys,
         seats: &[(Pubkey, Pubkey)],
     ) -> Result<TransactionMetadata, FailedTransactionMetadata> {
+        let (pot, quote_mint, quote_token_program) = self.quote_accounts(launch);
         let accounts = fair_open::accounts::PushTaxShare {
             launch: launch.launch,
             vault: launch.vault,
+            pot,
+            quote_mint,
+            quote_token_program,
             event_authority: event_authority(),
             program: fair_open::id(),
         };
@@ -868,6 +1087,9 @@ impl Test {
         for (seat, wallet) in seats {
             metas.push(AccountMeta::new(*seat, false));
             metas.push(AccountMeta::new(*wallet, false));
+            if let Some(account) = self.quote_account(wallet) {
+                metas.push(AccountMeta::new(account, false));
+            }
         }
         let ix = instruction(metas, fair_open::instruction::PushTaxShare {}.data());
         self.send(&[compute_unit_limit(1_400_000), ix], &[])
@@ -883,20 +1105,26 @@ impl Test {
     pub fn snipe(&mut self, coin: &CoinKeys, amount: u64) -> TransactionMetadata {
         let buyer = Keypair::new();
         self.svm.airdrop(&buyer.pubkey(), SOL).unwrap();
-        let wsol = Pubkey::new_unique();
-        let rent = self.rent(165);
-        let mut data = token_account_data(&fair_open::NATIVE_MINT, &buyer.pubkey(), amount);
-        // A wrapped-SOL account: `is_native`, its rent-exempt reserve.
-        data[109..113].copy_from_slice(&1u32.to_le_bytes());
-        data[113..121].copy_from_slice(&rent.to_le_bytes());
-        let account = solana_account::Account {
-            lamports: rent + amount,
-            data,
-            owner: TOKEN_PROGRAM,
-            executable: false,
-            rent_epoch: 0,
+        let q = self.quote;
+        let wsol = if q.is_sol() {
+            let wsol = Pubkey::new_unique();
+            let rent = self.rent(165);
+            let mut data = token_account_data(&fair_open::NATIVE_MINT, &buyer.pubkey(), amount);
+            // A wrapped-SOL account: `is_native`, its rent-exempt reserve.
+            data[109..113].copy_from_slice(&1u32.to_le_bytes());
+            data[113..121].copy_from_slice(&rent.to_le_bytes());
+            let account = solana_account::Account {
+                lamports: rent + amount,
+                data,
+                owner: TOKEN_PROGRAM,
+                executable: false,
+                rent_epoch: 0,
+            };
+            self.svm.set_account(wsol, account).unwrap();
+            wsol
+        } else {
+            self.fund_quote(&buyer.pubkey(), amount)
         };
-        self.svm.set_account(wsol, account).unwrap();
         let coins = Pubkey::new_unique();
         self.set_account(coins, token_account_data(&coin.mint, &buyer.pubkey(), 0), TOKEN_PROGRAM);
         let dbc_pda = |seed: &[u8]| Pubkey::find_program_address(&[seed], &dbc::PROGRAM_ID).0;
@@ -909,17 +1137,17 @@ impl Test {
             program_id: dbc::PROGRAM_ID,
             accounts: vec![
                 ro(dbc_pda(b"pool_authority"), false),
-                ro(self.dbc_config, false),
+                ro(q.config, false),
                 rw(coin.pool, false),
                 rw(wsol, false),
                 rw(coins, false),
                 rw(coin.base_vault, false),
                 rw(coin.quote_vault, false),
                 ro(coin.mint, false),
-                ro(fair_open::NATIVE_MINT, false),
+                ro(q.mint, false),
                 ro(buyer.pubkey(), true),
                 ro(TOKEN_PROGRAM, false),
-                ro(TOKEN_PROGRAM, false),
+                ro(q.program, false),
                 ro(dbc::PROGRAM_ID, false),
                 ro(dbc_pda(b"__event_authority"), false),
                 ro(dbc::PROGRAM_ID, false),
@@ -935,9 +1163,12 @@ impl Test {
         u64::from_le_bytes(pool.data[dbc::POOL_PARTNER_QUOTE_FEE_OFFSET..][..8].try_into().unwrap())
     }
 
-    /// The tokens a token account holds, or none if it does not exist.
+    /// The tokens an SPL Token or Token-2022 account holds, or none if it does not exist.
     pub fn tokens(&self, account: &Pubkey) -> Option<u64> {
-        let account = self.svm.get_account(account).filter(|a| a.owner == TOKEN_PROGRAM && a.data.len() == 165)?;
+        let account = self
+            .svm
+            .get_account(account)
+            .filter(|a| (a.owner == TOKEN_PROGRAM || a.owner == TOKEN_2022) && a.data.len() >= 165)?;
         Some(u64::from_le_bytes(account.data[64..72].try_into().unwrap()))
     }
 
@@ -1049,9 +1280,83 @@ pub fn mint_data(decimals: u8) -> Vec<u8> {
     data
 }
 
-/// A wallet's associated account of `mint`.
+/// A wallet's associated account of `mint`, an SPL Token mint.
 pub fn associated_address(owner: &Pubkey, mint: &Pubkey) -> Pubkey {
-    Pubkey::find_program_address(&[owner.as_ref(), TOKEN_PROGRAM.as_ref(), mint.as_ref()], &ASSOCIATED_TOKEN_PROGRAM).0
+    associated_address_in(owner, mint, &TOKEN_PROGRAM)
+}
+
+/// A wallet's associated account of `mint` under `program`, SPL Token or Token-2022.
+pub fn associated_address_in(owner: &Pubkey, mint: &Pubkey, program: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(&[owner.as_ref(), program.as_ref(), mint.as_ref()], &ASSOCIATED_TOKEN_PROGRAM).0
+}
+
+/// DBC's TokenBadge of a quote mint.
+pub fn token_badge_address(mint: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(&[dbc_stand_in::TOKEN_BADGE_SEED, mint.as_ref()], &dbc::PROGRAM_ID).0
+}
+
+/// An SPL Token mint of `decimals` whose mint and freeze authority is `authority`, as Circle's USDC is its issuer's.
+pub fn spl_mint_data(authority: &Pubkey, decimals: u8) -> Vec<u8> {
+    let mut data = mint_data(decimals);
+    data[..4].copy_from_slice(&1u32.to_le_bytes());
+    data[4..36].copy_from_slice(authority.as_ref());
+    data[46..50].copy_from_slice(&1u32.to_le_bytes());
+    data[50..82].copy_from_slice(authority.as_ref());
+    data
+}
+
+/// Token-2022's extensions on NVDAx whose first 32 bytes are an authority the issuer holds: the metadata pointer's,
+/// the permanent delegate, the confidential transfer mint's, the transfer hook's, the token metadata's update
+/// authority, the scaled UI amount's and the pause authority.
+const ISSUER_EXTENSIONS: [u16; 7] = [18, 12, 4, 14, 19, 25, 26];
+
+/// Mainnet NVDAx's mint account, every extension an xStock carries, with no supply and every authority handed to
+/// `issuer`.
+pub fn xstock_mint_data(issuer: &Pubkey) -> Vec<u8> {
+    let fixture: serde_json::Value = serde_json::from_str(NVDAX).unwrap();
+    let mut data = base64_decode(fixture["data"].as_str().unwrap());
+    data[4..36].copy_from_slice(issuer.as_ref());
+    data[36..44].fill(0);
+    data[50..82].copy_from_slice(issuer.as_ref());
+    for_each_extension(&mut data, |kind, value| {
+        if ISSUER_EXTENSIONS.contains(&kind) {
+            value[..32].copy_from_slice(issuer.as_ref());
+        }
+    });
+    data
+}
+
+/// Calls `f` with each Token-2022 extension of a mint's data, its type and its value.
+pub fn for_each_extension(data: &mut [u8], mut f: impl FnMut(u16, &mut [u8])) {
+    let mut at = 166;
+    while at + 4 <= data.len() {
+        let kind = u16::from_le_bytes([data[at], data[at + 1]]);
+        let len = u16::from_le_bytes([data[at + 2], data[at + 3]]) as usize;
+        if kind == 0 {
+            break;
+        }
+        f(kind, &mut data[at + 4..at + 4 + len]);
+        at += 4 + len;
+    }
+}
+
+/// Standard base64, so the tests need no crate for the fixture.
+pub fn base64_decode(text: &str) -> Vec<u8> {
+    let value = |c: u8| match c {
+        b'A'..=b'Z' => c - b'A',
+        b'a'..=b'z' => c - b'a' + 26,
+        b'0'..=b'9' => c - b'0' + 52,
+        b'+' => 62,
+        b'/' => 63,
+        _ => panic!("not base64: {c}"),
+    };
+    let digits: Vec<u8> = text.bytes().filter(|&c| c != b'=').map(value).collect();
+    let mut out = vec![];
+    for chunk in digits.chunks(4) {
+        let n = chunk.iter().enumerate().fold(0u32, |n, (i, &d)| n | (d as u32) << (18 - 6 * i));
+        out.extend_from_slice(&n.to_be_bytes()[1..chunk.len()]);
+    }
+    out
 }
 
 pub fn fee_config_address() -> Pubkey {
@@ -1079,18 +1384,6 @@ pub fn ed25519_instruction(signer: &Keypair, message: &[u8]) -> Instruction {
     data.extend_from_slice(signature.as_ref());
     data.extend_from_slice(message);
     Instruction { program_id: admission::ED25519_PROGRAM, accounts: vec![], data }
-}
-
-pub fn withdraw_failed_instruction(launch: &LaunchKeys, seat: &Pubkey, wallet: &Pubkey) -> Instruction {
-    let accounts = fair_open::accounts::WithdrawFailed {
-        launch: launch.launch,
-        vault: launch.vault,
-        seat: *seat,
-        wallet: *wallet,
-        event_authority: event_authority(),
-        program: fair_open::id(),
-    };
-    instruction(accounts.to_account_metas(None), fair_open::instruction::WithdrawFailed {}.data())
 }
 
 /// The compute budget program's `SetComputeUnitLimit`.

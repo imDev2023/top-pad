@@ -1,6 +1,8 @@
 //! The vault always holds at least what it owes (spec 5.3): after every instruction of a long, random window, and through
 //! the failure path to the last refund, it holds every seat's deposit and prepaid coin-account rent, counted from the
-//! seats themselves rather than from the launch's own totals, and the creator's prepaid rent for the open.
+//! seats themselves rather than from the launch's own totals, and the creator's prepaid rent for the open. In SOL, and in
+//! the quote's raw units in a token quote (ADR 0007): a Token-2022 quote with every extension an xStock carries, and an
+//! SPL Token quote shaped as Circle's USDC, whose pot holds the deposits while the vault holds the rents in SOL.
 #![allow(clippy::result_large_err)]
 mod common;
 
@@ -22,19 +24,30 @@ impl Rng {
     }
 }
 
-/// Checks the vault against the seats on chain, and the launch's counts against the same seats.
+/// Checks the vault, and in a token quote the pot, against the seats on chain, and the launch's counts against the same
+/// seats.
 fn check(t: &Test, launch: &LaunchKeys) {
     let seats: Vec<Seat> = t.seats_of(launch);
-    let owed: u64 = seats.iter().map(|s| s.deposit + s.coin_rent).sum::<u64>() + t.open_rent();
-    assert!(t.vault_holds(launch) >= owed, "the vault holds {} and owes {owed}", t.vault_holds(launch));
+    let deposits: u64 = seats.iter().map(|s| s.deposit).sum();
+    let rents: u64 = seats.iter().map(|s| s.coin_rent).sum::<u64>() + t.open_rent();
+    let (owed, held) = match t.quote.is_sol() {
+        true => (deposits + rents, t.vault_holds(launch)),
+        false => {
+            // Nothing else is ever paid in, so the pot holds exactly the deposits.
+            assert_eq!(t.pot_holds(launch), deposits, "the pot holds what the seats deposited");
+            (rents, t.vault_holds(launch))
+        }
+    };
+    assert!(held >= owed, "the vault holds {held} and owes {owed}");
     // Nothing else is ever paid in, so it holds exactly that.
-    assert_eq!(t.vault_holds(launch), owed);
+    assert_eq!(held, owed);
     let l: Launch = t.read(&launch.launch);
     assert_eq!(l.seats as usize, seats.len());
+    let step = t.quote.step;
     let mut counts = [0u32; 200];
     let mut unverified = [0u32; 10];
     for s in &seats {
-        let k = (s.deposit / STEP - 1) as usize;
+        let k = (s.deposit / step - 1) as usize;
         match s.tier {
             Tier::Unverified => unverified[k] += 1,
             _ => counts[k] += 1,
@@ -46,8 +59,22 @@ fn check(t: &Test, launch: &LaunchKeys) {
 
 #[test]
 fn holds_what_it_owes_after_every_instruction() {
-    let mut t = Test::new();
+    holds_what_it_owes(Test::new());
+}
+
+#[test]
+fn holds_what_it_owes_in_an_xstock_after_every_instruction() {
+    holds_what_it_owes(Test::in_quote(QuoteKind::Xstock));
+}
+
+#[test]
+fn holds_what_it_owes_in_usdc_after_every_instruction() {
+    holds_what_it_owes(Test::in_quote(QuoteKind::Usdc));
+}
+
+fn holds_what_it_owes(mut t: Test) {
     let launch = t.launch();
+    let step = t.quote.step;
     let tiers = [Tier::Unverified, Tier::Scored, Tier::Verified];
     let mut people: Vec<Depositor> = (0..24).map(|i| t.depositor(tiers[i % 3])).collect();
     let mut rng = Rng(0xfa1);
@@ -62,12 +89,12 @@ fn holds_what_it_owes_after_every_instruction() {
                 use anchor_lang::AccountDeserialize;
                 Seat::try_deserialize(&mut a.data.as_slice()).unwrap().deposit
             });
-            let cap_steps = d.tier.cap(STEP) / STEP;
+            let cap_steps = d.tier.cap(step) / step;
             let result = if held > 0 && rng.next(3) == 0 {
-                t.withdraw(&launch, d, (rng.next(held / STEP) + 1) * STEP)
+                t.withdraw(&launch, d, (rng.next(held / step) + 1) * step)
             } else {
                 // Sometimes over the cap, which is refused and changes nothing.
-                t.deposit(&launch, d, (rng.next(cap_steps + 2) + 1) * STEP)
+                t.deposit(&launch, d, (rng.next(cap_steps + 2) + 1) * step)
             };
             if result.is_ok() {
                 sent += 1;
@@ -92,6 +119,13 @@ fn holds_what_it_owes_after_every_instruction() {
             check(&t, &launch);
         }
     }
-    // What is left is the open's rent, which comes back to the creator with the launch's own.
+    // What is left is the open's rent, which comes back to the creator with the launch's own, and the pot is empty.
     assert_eq!(t.vault_holds(&launch), t.open_rent());
+    if !t.quote.is_sol() {
+        assert_eq!(t.pot_holds(&launch), 0);
+        // Every depositor has exactly what they started with.
+        for d in &people {
+            assert_eq!(t.quote_held(&d.wallet.pubkey()), QUOTE_FUNDS);
+        }
+    }
 }

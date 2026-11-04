@@ -55,6 +55,10 @@ export type CloseLaunchInstruction<
   TAccountLaunch extends string | AccountMeta<string> = string,
   TAccountVault extends string | AccountMeta<string> = string,
   TAccountCreator extends string | AccountMeta<string> = string,
+  TAccountPot extends string | AccountMeta<string> = string,
+  TAccountQuoteMint extends string | AccountMeta<string> = string,
+  TAccountQuoteTokenProgram extends string | AccountMeta<string> = string,
+  TAccountCreatorQuote extends string | AccountMeta<string> = string,
   TAccountEventAuthority extends string | AccountMeta<string> = string,
   TAccountProgram extends string | AccountMeta<string> = string,
   TRemainingAccounts extends readonly AccountMeta<string>[] = [],
@@ -71,6 +75,16 @@ export type CloseLaunchInstruction<
       TAccountCreator extends string
         ? WritableAccount<TAccountCreator>
         : TAccountCreator,
+      TAccountPot extends string ? WritableAccount<TAccountPot> : TAccountPot,
+      TAccountQuoteMint extends string
+        ? ReadonlyAccount<TAccountQuoteMint>
+        : TAccountQuoteMint,
+      TAccountQuoteTokenProgram extends string
+        ? ReadonlyAccount<TAccountQuoteTokenProgram>
+        : TAccountQuoteTokenProgram,
+      TAccountCreatorQuote extends string
+        ? WritableAccount<TAccountCreatorQuote>
+        : TAccountCreatorQuote,
       TAccountEventAuthority extends string
         ? ReadonlyAccount<TAccountEventAuthority>
         : TAccountEventAuthority,
@@ -112,6 +126,12 @@ export type CloseLaunchAsyncInput<
   TAccountLaunch extends InstructionAccountInput = InstructionAccountInput,
   TAccountVault extends InstructionAccountInput = InstructionAccountInput,
   TAccountCreator extends InstructionAccountInput = InstructionAccountInput,
+  TAccountPot extends InstructionAccountInput = InstructionAccountInput,
+  TAccountQuoteMint extends InstructionAccountInput = InstructionAccountInput,
+  TAccountQuoteTokenProgram extends InstructionAccountInput =
+    InstructionAccountInput,
+  TAccountCreatorQuote extends InstructionAccountInput =
+    InstructionAccountInput,
   TAccountEventAuthority extends InstructionAccountInput =
     InstructionAccountInput,
   TAccountProgram extends InstructionAccountInput = InstructionAccountInput,
@@ -119,6 +139,11 @@ export type CloseLaunchAsyncInput<
   launch: TAccountLaunch;
   vault?: TAccountVault;
   creator: TAccountCreator;
+  /** the handler. Left out in SOL. */
+  pot?: TAccountPot;
+  quoteMint?: TAccountQuoteMint;
+  quoteTokenProgram?: TAccountQuoteTokenProgram;
+  creatorQuote?: TAccountCreatorQuote;
   eventAuthority: TAccountEventAuthority;
   program: TAccountProgram;
 };
@@ -127,6 +152,10 @@ export async function getCloseLaunchInstructionAsync<
   TAccountLaunch extends InstructionAccountInput,
   TAccountVault extends InstructionAccountInput,
   TAccountCreator extends InstructionAccountInput,
+  TAccountPot extends InstructionAccountInput,
+  TAccountQuoteMint extends InstructionAccountInput,
+  TAccountQuoteTokenProgram extends InstructionAccountInput,
+  TAccountCreatorQuote extends InstructionAccountInput,
   TAccountEventAuthority extends InstructionAccountInput,
   TAccountProgram extends InstructionAccountInput,
   TProgramAddress extends Address = typeof FAIR_OPEN_PROGRAM_ADDRESS,
@@ -135,6 +164,10 @@ export async function getCloseLaunchInstructionAsync<
     TAccountLaunch,
     TAccountVault,
     TAccountCreator,
+    TAccountPot,
+    TAccountQuoteMint,
+    TAccountQuoteTokenProgram,
+    TAccountCreatorQuote,
     TAccountEventAuthority,
     TAccountProgram
   >,
@@ -155,6 +188,22 @@ export async function getCloseLaunchInstructionAsync<
     ResolvedInstructionAccountMeta<
       TAccountCreator,
       InstructionAccountInputAddress<TAccountCreator>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountPot,
+      InstructionAccountInputAddress<TAccountPot>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountQuoteMint,
+      InstructionAccountInputAddress<TAccountQuoteMint>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountQuoteTokenProgram,
+      InstructionAccountInputAddress<TAccountQuoteTokenProgram>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountCreatorQuote,
+      InstructionAccountInputAddress<TAccountCreatorQuote>
     >,
     ResolvedInstructionAccountMeta<
       TAccountEventAuthority,
@@ -183,6 +232,22 @@ export async function getCloseLaunchInstructionAsync<
     vault: { value: input.vault ?? null, isSigner: false, isWritable: true },
     creator: {
       value: input.creator ?? null,
+      isSigner: false,
+      isWritable: true,
+    },
+    pot: { value: input.pot ?? null, isSigner: false, isWritable: true },
+    quoteMint: {
+      value: input.quoteMint ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
+    quoteTokenProgram: {
+      value: input.quoteTokenProgram ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
+    creatorQuote: {
+      value: input.creatorQuote ?? null,
       isSigner: false,
       isWritable: true,
     },
@@ -220,6 +285,10 @@ export async function getCloseLaunchInstructionAsync<
       getAccountMeta("launch", accounts.launch),
       getAccountMeta("vault", accounts.vault),
       getAccountMeta("creator", accounts.creator),
+      getAccountMeta("pot", accounts.pot),
+      getAccountMeta("quoteMint", accounts.quoteMint),
+      getAccountMeta("quoteTokenProgram", accounts.quoteTokenProgram),
+      getAccountMeta("creatorQuote", accounts.creatorQuote),
       getAccountMeta("eventAuthority", accounts.eventAuthority),
       getAccountMeta("program", accounts.program),
     ],
@@ -240,6 +309,22 @@ export async function getCloseLaunchInstructionAsync<
       InstructionAccountInputAddress<TAccountCreator>
     >,
     ResolvedInstructionAccountMeta<
+      TAccountPot,
+      InstructionAccountInputAddress<TAccountPot>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountQuoteMint,
+      InstructionAccountInputAddress<TAccountQuoteMint>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountQuoteTokenProgram,
+      InstructionAccountInputAddress<TAccountQuoteTokenProgram>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountCreatorQuote,
+      InstructionAccountInputAddress<TAccountCreatorQuote>
+    >,
+    ResolvedInstructionAccountMeta<
       TAccountEventAuthority,
       InstructionAccountInputAddress<TAccountEventAuthority>
     >,
@@ -254,6 +339,12 @@ export type CloseLaunchInput<
   TAccountLaunch extends InstructionAccountInput = InstructionAccountInput,
   TAccountVault extends InstructionAccountInput = InstructionAccountInput,
   TAccountCreator extends InstructionAccountInput = InstructionAccountInput,
+  TAccountPot extends InstructionAccountInput = InstructionAccountInput,
+  TAccountQuoteMint extends InstructionAccountInput = InstructionAccountInput,
+  TAccountQuoteTokenProgram extends InstructionAccountInput =
+    InstructionAccountInput,
+  TAccountCreatorQuote extends InstructionAccountInput =
+    InstructionAccountInput,
   TAccountEventAuthority extends InstructionAccountInput =
     InstructionAccountInput,
   TAccountProgram extends InstructionAccountInput = InstructionAccountInput,
@@ -261,6 +352,11 @@ export type CloseLaunchInput<
   launch: TAccountLaunch;
   vault: TAccountVault;
   creator: TAccountCreator;
+  /** the handler. Left out in SOL. */
+  pot?: TAccountPot;
+  quoteMint?: TAccountQuoteMint;
+  quoteTokenProgram?: TAccountQuoteTokenProgram;
+  creatorQuote?: TAccountCreatorQuote;
   eventAuthority: TAccountEventAuthority;
   program: TAccountProgram;
 };
@@ -269,6 +365,10 @@ export function getCloseLaunchInstruction<
   TAccountLaunch extends InstructionAccountInput,
   TAccountVault extends InstructionAccountInput,
   TAccountCreator extends InstructionAccountInput,
+  TAccountPot extends InstructionAccountInput,
+  TAccountQuoteMint extends InstructionAccountInput,
+  TAccountQuoteTokenProgram extends InstructionAccountInput,
+  TAccountCreatorQuote extends InstructionAccountInput,
   TAccountEventAuthority extends InstructionAccountInput,
   TAccountProgram extends InstructionAccountInput,
   TProgramAddress extends Address = typeof FAIR_OPEN_PROGRAM_ADDRESS,
@@ -277,6 +377,10 @@ export function getCloseLaunchInstruction<
     TAccountLaunch,
     TAccountVault,
     TAccountCreator,
+    TAccountPot,
+    TAccountQuoteMint,
+    TAccountQuoteTokenProgram,
+    TAccountCreatorQuote,
     TAccountEventAuthority,
     TAccountProgram
   >,
@@ -296,6 +400,22 @@ export function getCloseLaunchInstruction<
   ResolvedInstructionAccountMeta<
     TAccountCreator,
     InstructionAccountInputAddress<TAccountCreator>
+  >,
+  ResolvedInstructionAccountMeta<
+    TAccountPot,
+    InstructionAccountInputAddress<TAccountPot>
+  >,
+  ResolvedInstructionAccountMeta<
+    TAccountQuoteMint,
+    InstructionAccountInputAddress<TAccountQuoteMint>
+  >,
+  ResolvedInstructionAccountMeta<
+    TAccountQuoteTokenProgram,
+    InstructionAccountInputAddress<TAccountQuoteTokenProgram>
+  >,
+  ResolvedInstructionAccountMeta<
+    TAccountCreatorQuote,
+    InstructionAccountInputAddress<TAccountCreatorQuote>
   >,
   ResolvedInstructionAccountMeta<
     TAccountEventAuthority,
@@ -326,6 +446,22 @@ export function getCloseLaunchInstruction<
       isSigner: false,
       isWritable: true,
     },
+    pot: { value: input.pot ?? null, isSigner: false, isWritable: true },
+    quoteMint: {
+      value: input.quoteMint ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
+    quoteTokenProgram: {
+      value: input.quoteTokenProgram ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
+    creatorQuote: {
+      value: input.creatorQuote ?? null,
+      isSigner: false,
+      isWritable: true,
+    },
     eventAuthority: {
       value: input.eventAuthority ?? null,
       isSigner: false,
@@ -347,6 +483,10 @@ export function getCloseLaunchInstruction<
       getAccountMeta("launch", accounts.launch),
       getAccountMeta("vault", accounts.vault),
       getAccountMeta("creator", accounts.creator),
+      getAccountMeta("pot", accounts.pot),
+      getAccountMeta("quoteMint", accounts.quoteMint),
+      getAccountMeta("quoteTokenProgram", accounts.quoteTokenProgram),
+      getAccountMeta("creatorQuote", accounts.creatorQuote),
       getAccountMeta("eventAuthority", accounts.eventAuthority),
       getAccountMeta("program", accounts.program),
     ],
@@ -365,6 +505,22 @@ export function getCloseLaunchInstruction<
     ResolvedInstructionAccountMeta<
       TAccountCreator,
       InstructionAccountInputAddress<TAccountCreator>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountPot,
+      InstructionAccountInputAddress<TAccountPot>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountQuoteMint,
+      InstructionAccountInputAddress<TAccountQuoteMint>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountQuoteTokenProgram,
+      InstructionAccountInputAddress<TAccountQuoteTokenProgram>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountCreatorQuote,
+      InstructionAccountInputAddress<TAccountCreatorQuote>
     >,
     ResolvedInstructionAccountMeta<
       TAccountEventAuthority,
@@ -386,8 +542,13 @@ export type ParsedCloseLaunchInstruction<
     launch: TAccountMetas[0];
     vault: TAccountMetas[1];
     creator: TAccountMetas[2];
-    eventAuthority: TAccountMetas[3];
-    program: TAccountMetas[4];
+    /** the handler. Left out in SOL. */
+    pot?: TAccountMetas[3] | undefined;
+    quoteMint?: TAccountMetas[4] | undefined;
+    quoteTokenProgram?: TAccountMetas[5] | undefined;
+    creatorQuote?: TAccountMetas[6] | undefined;
+    eventAuthority: TAccountMetas[7];
+    program: TAccountMetas[8];
   };
   data: CloseLaunchInstructionData;
 };
@@ -400,12 +561,12 @@ export function parseCloseLaunchInstruction<
     InstructionWithAccounts<TAccountMetas> &
     InstructionWithData<ReadonlyUint8Array>,
 ): ParsedCloseLaunchInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 5) {
+  if (instruction.accounts.length < 9) {
     throw new SolanaError(
       SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS,
       {
         actualAccountMetas: instruction.accounts.length,
-        expectedAccountMetas: 5,
+        expectedAccountMetas: 9,
       },
     );
   }
@@ -415,12 +576,22 @@ export function parseCloseLaunchInstruction<
     accountIndex += 1;
     return accountMeta;
   };
+  const getNextOptionalAccount = () => {
+    const accountMeta = getNextAccount();
+    return accountMeta.address === FAIR_OPEN_PROGRAM_ADDRESS
+      ? undefined
+      : accountMeta;
+  };
   return {
     programAddress: instruction.programAddress,
     accounts: {
       launch: getNextAccount(),
       vault: getNextAccount(),
       creator: getNextAccount(),
+      pot: getNextOptionalAccount(),
+      quoteMint: getNextOptionalAccount(),
+      quoteTokenProgram: getNextOptionalAccount(),
+      creatorQuote: getNextOptionalAccount(),
       eventAuthority: getNextAccount(),
       program: getNextAccount(),
     },

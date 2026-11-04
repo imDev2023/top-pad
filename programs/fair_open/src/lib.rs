@@ -1,5 +1,6 @@
-//! The Fair Open program (spec 5.3): holds a Fair Open's deposits as plain SOL through its 10-minute window, one seat per
-//! person admitted by our admission server; at the scheduled time opens it in the coin's creation transaction, where the
+//! The Fair Open program (spec 5.3): holds a Fair Open's deposits through its 10-minute window, as plain SOL in its vault
+//! or, in any other quote, in its pot, a token account of the quote (ADR 0007 decision 1), one seat per person admitted
+//! by our admission server; at the scheduled time opens it in the coin's creation transaction, where the
 //! pot's buy is the pool's first swap and every depositor buys at its one price; then delivers every seat its coins and
 //! refund. A launch that cannot open fails on chain, after which every depositor takes back their deposit and both rents
 //! with no Heat server running (spec 2.1 steps 7 and 9 to 12, and 15). After the open the creator's coins go into a
@@ -36,8 +37,10 @@ pub const LAUNCH_SEED: &[u8] = b"launch";
 pub const VAULT_SEED: &[u8] = b"vault";
 /// The seed of a `Seat`, followed by the launch and the person's pseudonym.
 pub const SEAT_SEED: &[u8] = b"seat";
-/// The seed of the pot's wrapped-SOL account, followed by the launch: made by the open holding exactly the buy, and
-/// closed once DBC's swap has spent it, in the same transaction.
+/// The seed of the pot, followed by the launch. In SOL, the pot's wrapped-SOL account, made by the open holding exactly
+/// the buy and closed once DBC's swap has spent it, in the same transaction, and made again to collect the Tax Share. In
+/// any other quote, a token account of the quote made at scheduling, which holds every deposit, refund and Tax Share
+/// until the launch closes (ADR 0007 decision 1); the fee program pays the window's fees to this address either way.
 pub const POT_SEED: &[u8] = b"pot";
 /// The seed of the coin registrar, the PDA whose signature tells the fee program a coin's registration comes from the
 /// open, and a window claim from the Tax Share's collection (`fee::COIN_REGISTRAR_SEED`).
@@ -82,8 +85,13 @@ pub const CREATOR_LOCK_CLIFF_SECONDS: i64 = 7 * 24 * 3600;
 pub const CREATOR_LOCK_END_SECONDS: i64 = 30 * 24 * 3600;
 /// A coin account (an SPL token account), whose rent each depositor prepays for the push to create (spec 2.1 step 9).
 pub const TOKEN_ACCOUNT_LEN: usize = 165;
-/// Wrapped SOL: the only quote a Fair Open takes until a non-SOL quote's deposits are built (spec 5.1, 11.2).
+/// An SPL mint, and the base of a Token-2022 mint before its extensions.
+pub const MINT_LEN: usize = 82;
+/// Wrapped SOL, SPL Token's: a launch in SOL holds its deposits in the vault as plain SOL; a launch in any other quote
+/// holds them in its pot, a token account of the quote (ADR 0007 decision 1).
 pub const NATIVE_MINT: Pubkey = pubkey!("So11111111111111111111111111111111111111112");
+/// Token-2022's own wrapped SOL, which DBC refuses as a quote.
+pub const TOKEN_2022_NATIVE_MINT: Pubkey = pubkey!("9pan9bMn5HatX4EJdBwg9VgCa7Uz5HL8N1m5D3NdXejP");
 /// SPL Token: Heat coins and wrapped SOL are classic SPL tokens (spec 3.1).
 pub const TOKEN_PROGRAM: Pubkey = pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 /// Token-2022, the program of every xStock (ADR 0007).
@@ -346,9 +354,10 @@ pub mod fair_open {
     }
 
     /// Schedules a Fair Open (spec 2.1 steps 4 to 7): its window, its optional minimum raise and the hash its coin's
-    /// identity is sealed behind, on Heat's Fair Open config and with the durable nonce its open will be signed on. The
-    /// Creator wallet signs and prepays the rent of the launch and its vault; our keeper co-signs, so every launch is
-    /// one Heat scheduled, as every Heat coin is one our launch key co-signed (spec 2.4).
+    /// identity is sealed behind, on its quote's Fair Open config and with the durable nonce its open will be signed on.
+    /// The Creator wallet signs and prepays the rent of the launch and its vault, and in a quote other than SOL of its pot,
+    /// the token account its deposits will be held in; our keeper co-signs, so every launch is one Heat scheduled, as
+    /// every Heat coin is one our launch key co-signed (spec 2.4). A quote Heat does not take is refused (ADR 0007).
     pub fn create_launch(ctx: Context<CreateLaunch>, params: LaunchParams) -> Result<()> {
         let now = Clock::get()?.unix_timestamp;
         let opens_at = params.deposits_open_at.checked_add(WINDOW_SECONDS).ok_or(FairOpenError::WindowOver)?;
@@ -365,8 +374,7 @@ pub mod fair_open {
         let target =
             u64_at(&config, dbc::CONFIG_MIGRATION_QUOTE_THRESHOLD_OFFSET).ok_or(FairOpenError::NotADbcConfig)?;
         drop(config);
-        // Until a non-SOL quote's deposits are held in a token vault (#88).
-        require_keys_eq!(quote_mint, NATIVE_MINT, FairOpenError::QuoteNotSupported);
+        token::check_quote(&ctx.accounts.quote_mint)?;
         let pot_cap = (target as u128 * POT_CAP_PERCENT as u128 / 100) as u64;
         require_gt!(pot_cap, 0, FairOpenError::NotADbcConfig);
         require_gte!(pot_cap, params.min_raise, FairOpenError::MinRaiseAboveCap);
@@ -389,6 +397,10 @@ pub mod fair_open {
         let open_rent = open_rent(&Rent::get()?);
         transfer_in(&ctx.accounts.creator, &ctx.accounts.vault, &ctx.accounts.system_program, open_rent)?;
         ctx.accounts.vault.set_inner(Vault { launch: ctx.accounts.launch.key() });
+        let pot_bump = match quote_mint {
+            NATIVE_MINT => 0,
+            _ => create_pot(ctx.accounts)?,
+        };
         let launch = &mut ctx.accounts.launch;
         launch.set_inner(Launch {
             creator: ctx.accounts.creator.key(),
@@ -427,7 +439,8 @@ pub mod fair_open {
             tax_collected: false,
             tax_share: 0,
             tax_fills_paid: 0,
-            reserved: [0; 2],
+            pot_bump,
+            reserved: [0; 1],
             bump: ctx.bumps.launch,
             vault_bump: ctx.bumps.vault,
         });
@@ -452,9 +465,12 @@ pub mod fair_open {
     /// Ed25519 precompile instruction right before this one. The first wallet of a person takes their seat and prepays
     /// its rent and their coin account's; a second wallet of the same person is refused, so one person holds one seat
     /// and one cap. The same wallet may add to its deposit, under the cap of its latest admission. Nothing is ever
-    /// revoked inside a window.
+    /// revoked inside a window. In a quote other than SOL the deposit moves from the depositor's account of the quote
+    /// into the pot, and the rents still in SOL into the vault.
     pub fn deposit(ctx: Context<Deposit>, amount: u64, admission: Admission) -> Result<()> {
         let now = Clock::get()?.unix_timestamp;
+        let a = &ctx.accounts;
+        let tokens = Tokens::of(&a.launch, &a.pot, &a.quote_mint, &a.quote_token_program)?;
         let launch = &mut ctx.accounts.launch;
         launch.check_window(now)?;
         require_gte!(now, launch.deposits_open_at, FairOpenError::WindowNotStarted);
@@ -505,14 +521,20 @@ pub mod fair_open {
         }
         let deposit = seat.deposit.checked_add(amount).ok_or(FairOpenError::OverCap)?;
         require_gte!(seat.cap, deposit, FairOpenError::OverCap);
-        transfer_in(depositor, &ctx.accounts.vault, &ctx.accounts.system_program, amount)?;
+        match &tokens {
+            None => transfer_in(depositor, &ctx.accounts.vault, &ctx.accounts.system_program, amount)?,
+            Some(t) => {
+                let from = ctx.accounts.depositor_quote.as_ref().ok_or(FairOpenError::QuoteAccountsMissing)?;
+                t.transfer_in(from, &depositor.to_account_info(), amount)?;
+            }
+        }
         seat.deposit = deposit;
         launch.count_in(seat.tier, deposit)?;
         if seat.wallet == launch.creator {
             launch.creator_deposit = deposit;
             launch.creator_tier = seat.tier;
         }
-        check_vault(&ctx.accounts.vault, launch)?;
+        check_vault(&ctx.accounts.vault, launch, tokens.as_ref())?;
         emit_cpi!(Deposited {
             launch: launch.key(),
             wallet: depositor.key(),
@@ -529,9 +551,12 @@ pub mod fair_open {
     }
 
     /// Takes back part or all of a deposit while the window is open (spec 2.1 step 9). Taking back everything closes
-    /// the seat and returns both rents.
+    /// the seat and returns both rents. In a quote other than SOL the deposit goes back to the wallet's account of the
+    /// quote.
     pub fn withdraw(ctx: Context<Withdraw>, amount: u64) -> Result<()> {
         let now = Clock::get()?.unix_timestamp;
+        let a = &ctx.accounts;
+        let tokens = Tokens::of(&a.launch, &a.pot, &a.quote_mint, &a.quote_token_program)?;
         let launch = &mut ctx.accounts.launch;
         launch.check_window(now)?;
         let seat = &mut ctx.accounts.seat;
@@ -541,7 +566,14 @@ pub mod fair_open {
         launch.count_out(seat.tier, seat.deposit)?;
         let deposit = seat.deposit - amount;
         seat.deposit = deposit;
-        let mut paid = amount;
+        let mut paid = match &tokens {
+            None => amount,
+            Some(t) => {
+                let to = t.account_of(ctx.accounts.wallet_quote.as_deref(), &seat.wallet)?;
+                t.pay(launch, &to, amount)?;
+                0
+            }
+        };
         if deposit > 0 {
             launch.count_in(seat.tier, deposit)?;
         } else {
@@ -552,8 +584,9 @@ pub mod fair_open {
         if seat.wallet == launch.creator {
             launch.creator_deposit = deposit;
         }
+        // After the last CPI.
         pay(&ctx.accounts.vault, &ctx.accounts.wallet, paid)?;
-        check_vault(&ctx.accounts.vault, launch)?;
+        check_vault(&ctx.accounts.vault, launch, tokens.as_ref())?;
         let closed = deposit == 0;
         if closed {
             seat.close(ctx.accounts.wallet.to_account_info())?;
@@ -574,8 +607,10 @@ pub mod fair_open {
     /// The open (spec 2.1 step 10): the first of this program's two instructions in the coin's creation transaction, the
     /// rung of the creator's ladder that our keeper sends at the scheduled time. It refuses before the scheduled time and
     /// from 15 minutes after it, a pot that cannot open, any rung but the largest at or below what the pot should spend,
-    /// and any transaction but the creation transaction (`creation`). It then wraps exactly the rung into the pot's
-    /// wrapped-SOL account and lets our keeper spend exactly that, as the pot's delegate, in DBC's swap.
+    /// and any transaction but the creation transaction (`creation`). In SOL it then wraps exactly the rung into the
+    /// pot's wrapped-SOL account; in any other quote the pot already holds every deposit. Either way our keeper may spend
+    /// exactly the rung, as the pot's delegate, in DBC's swap. A quote Heat would no longer take, a paused one above all,
+    /// is refused, so the launch fails late and every deposit comes back once its issuer lets it move (ADR 0007).
     pub fn open(ctx: Context<Open>, rung: u64) -> Result<()> {
         // Before anything costs our keeper, so `settle` pays it back exactly what the open's accounts cost it.
         let keeper_lamports = ctx.accounts.keeper.lamports();
@@ -609,22 +644,28 @@ pub mod fair_open {
             rung,
         };
         let found = creation::check_transaction(&instructions, open_at, &expect)?;
+        token::check_quote(&ctx.accounts.quote_mint)?;
+        let quote_program = ctx.accounts.token_program.key();
+        require_keys_eq!(quote_program, *ctx.accounts.quote_mint.owner, FairOpenError::NotATokenAccount);
 
-        // The pot's wrapped-SOL account, made at its PDA, which only this program can sign for, and funded from the vault
-        // with its rent and the rung, so it holds exactly the rung as wrapped SOL. The vault rides along in the system
-        // program's `Allocate`, which ignores it, so the runtime sees both sides of the transfer at the first CPI after it.
-        let rent = Rent::get()?.minimum_balance(TOKEN_ACCOUNT_LEN);
-        let vault = ctx.accounts.vault.to_account_info();
-        pay(&ctx.accounts.vault, &pot, rent.saturating_sub(pot.lamports()) + rung)?;
-        let pot_seeds: &[&[u8]] = &[POT_SEED, launch_key.as_ref(), &[ctx.bumps.pot]];
-        allocate_pot(&pot, &vault, pot_seeds)?;
-        let system = ctx.accounts.system_program.key();
-        let assign = system_program::Assign { account_to_assign: pot.clone() };
-        system_program::assign(CpiContext::new_with_signer(system, assign, &[pot_seeds]), &TOKEN_PROGRAM)?;
-        token::initialize_account(&pot, &ctx.accounts.quote_mint, &launch_key)?;
+        if launch.quote_mint == NATIVE_MINT {
+            // The pot's wrapped-SOL account, made at its PDA, which only this program can sign for, and funded from the
+            // vault with its rent and the rung, so it holds exactly the rung as wrapped SOL. The vault rides along in the
+            // system program's `Allocate`, which ignores it, so the runtime sees both sides of the transfer at the first
+            // CPI after it.
+            let rent = Rent::get()?.minimum_balance(TOKEN_ACCOUNT_LEN);
+            let vault = ctx.accounts.vault.to_account_info();
+            pay(&ctx.accounts.vault, &pot, rent.saturating_sub(pot.lamports()) + rung)?;
+            let pot_seeds: &[&[u8]] = &[POT_SEED, launch_key.as_ref(), &[ctx.bumps.pot]];
+            allocate(&pot, TOKEN_ACCOUNT_LEN, Some(&vault), pot_seeds)?;
+            let system = ctx.accounts.system_program.key();
+            let assign = system_program::Assign { account_to_assign: pot.clone() };
+            system_program::assign(CpiContext::new_with_signer(system, assign, &[pot_seeds]), &TOKEN_PROGRAM)?;
+            token::initialize_account(&TOKEN_PROGRAM, &pot, &ctx.accounts.quote_mint, &launch_key)?;
+        }
         let nonce = launch.nonce;
         let launch_seeds: &[&[u8]] = &[LAUNCH_SEED, nonce.as_ref(), &[launch.bump]];
-        token::approve(&pot, &ctx.accounts.keeper, &launch.to_account_info(), rung, launch_seeds)?;
+        token::approve(&quote_program, &pot, &ctx.accounts.keeper, &launch.to_account_info(), rung, launch_seeds)?;
 
         launch.status = LaunchStatus::Opening;
         launch.mint = found.mint;
@@ -636,8 +677,9 @@ pub mod fair_open {
         Ok(())
     }
 
-    /// The last instruction of the creation transaction (spec 2.1 step 10). DBC's swap has spent exactly the rung, so the
-    /// pot's wrapped-SOL account closes back into the vault; the coins it bought are recorded; the pool's partner fee,
+    /// The last instruction of the creation transaction (spec 2.1 step 10). DBC's swap has spent exactly the rung, so in
+    /// SOL the pot's wrapped-SOL account closes back into the vault, and in any other quote the pot keeps the deposits
+    /// left for the refunds; the coins it bought are recorded; the pool's partner fee,
     /// at this instant exactly the pot's own fee, is recorded with the coin's registration in the fee program; and our
     /// keeper is paid back what the open's accounts cost it, out of the rent the creator prepaid.
     pub fn settle(ctx: Context<Settle>) -> Result<()> {
@@ -653,12 +695,16 @@ pub mod fair_open {
         require_gt!(coins.amount, 0, FairOpenError::NotThePotsCoins);
         let nonce = launch.nonce;
         let launch_seeds: &[&[u8]] = &[LAUNCH_SEED, nonce.as_ref(), &[launch.bump]];
-        token::close(
-            &ctx.accounts.pot,
-            &ctx.accounts.vault.to_account_info(),
-            &launch.to_account_info(),
-            launch_seeds,
-        )?;
+        let in_sol = launch.quote_mint == NATIVE_MINT;
+        if in_sol {
+            token::close(
+                &TOKEN_PROGRAM,
+                &ctx.accounts.pot,
+                &ctx.accounts.vault.to_account_info(),
+                &launch.to_account_info(),
+                launch_seeds,
+            )?;
+        }
 
         let pool = ctx.accounts.pool.try_borrow_data()?;
         require!(pool.get(..8) == Some(&dbc::VIRTUAL_POOL_DISCRIMINATOR[..]), FairOpenError::NotThePool);
@@ -679,7 +725,8 @@ pub mod fair_open {
         launch.keeper_lamports = 0;
         launch.coins = coins.amount;
         launch.status = LaunchStatus::Opened;
-        check_vault(&ctx.accounts.vault, launch)?;
+        let pot = (!in_sol).then(|| ctx.accounts.pot.to_account_info());
+        check_vault_holding(&ctx.accounts.vault, launch, pot.as_ref())?;
         emit_cpi!(LaunchOpened {
             launch: launch_key,
             creator: launch.creator,
@@ -700,19 +747,25 @@ pub mod fair_open {
     /// Delivers seats their coins and refund once the launch has opened (spec 2.1 step 12): anyone may send it, and our
     /// keeper does at once. Each seat comes as three remaining accounts: the seat, its wallet, and the wallet's own
     /// account of the coin, which the push makes from the rent the seat prepaid, or, if it exists already, returns that
-    /// rent with the refund. A seat already delivered is passed over, and so is the creator's, whose coins leave the pot
-    /// only into the Creator lock (spec 2.1 step 13), so a push sent twice delivers nothing twice.
+    /// rent with the refund; in a quote other than SOL a fourth, the wallet's account of the quote, takes the refund. A
+    /// seat already delivered is passed over, and so is the creator's, whose coins leave the pot only into the Creator
+    /// lock (spec 2.1 step 13), so a push sent twice delivers nothing twice.
     pub fn push<'info>(ctx: Context<'info, Push<'info>>) -> Result<()> {
         require!(ctx.accounts.launch.status == LaunchStatus::Opened, FairOpenError::NotOpened);
         if ctx.accounts.launch.delivered == ctx.accounts.launch.seats {
             msg!("Every seat has its coins");
             return Ok(());
         }
+        let a = &ctx.accounts;
+        let tokens = Tokens::of(&a.launch, &a.pot, &a.quote_mint, &a.quote_token_program)?;
         let decimals = check_pot_coins(&ctx.accounts.launch, &ctx.accounts.pot_coins, &ctx.accounts.mint)?;
         // Lamports leave the vault by hand after the last CPI, so no CPI ever sees one side of a transfer and not the other.
         let mut payments: Vec<(&AccountInfo<'info>, u64)> = vec![];
-        for accounts in ctx.remaining_accounts.chunks(3) {
-            let [seat, wallet, coin_account] = accounts else { return err!(FairOpenError::SeatAccounts) };
+        let per_seat = if tokens.is_some() { 4 } else { 3 };
+        for accounts in ctx.remaining_accounts.chunks(per_seat) {
+            let ([seat, wallet, coin_account] | [seat, wallet, coin_account, _]) = accounts else {
+                return err!(FairOpenError::SeatAccounts);
+            };
             let mut seat: Account<'info, Seat> = Account::try_from(seat)?;
             require_keys_eq!(seat.launch, ctx.accounts.launch.key(), FairOpenError::NotThisLaunchsSeat);
             require_keys_eq!(seat.wallet, wallet.key(), FairOpenError::NotYourSeat);
@@ -737,7 +790,15 @@ pub mod fair_open {
                 coin_rent_back,
                 true,
             )?;
-            payments.push((wallet, delivered.refund + delivered.coin_rent));
+            let lamports = match &tokens {
+                None => delivered.refund + delivered.coin_rent,
+                Some(t) => {
+                    let to = t.account_of(accounts.get(3), &seat.wallet)?;
+                    t.pay(&ctx.accounts.launch, &to, delivered.refund)?;
+                    delivered.coin_rent
+                }
+            };
+            payments.push((wallet, lamports));
             seat.exit(&crate::ID)?;
             emit_cpi!(delivered);
         }
@@ -748,13 +809,15 @@ pub mod fair_open {
         for (wallet, amount) in payments {
             pay(&ctx.accounts.vault, wallet, amount)?;
         }
-        check_vault(&ctx.accounts.vault, &ctx.accounts.launch)
+        check_vault(&ctx.accounts.vault, &ctx.accounts.launch, tokens.as_ref())
     }
 
     /// A depositor takes their seat's coins and refund themselves, if no push has (spec 2.1 step 12), into any account of
-    /// the coin they own; the coin account's prepaid rent comes back with the refund. The creator's seat is the Creator
-    /// lock's alone.
+    /// the coin they own; the coin account's prepaid rent comes back with the refund, which in a quote other than SOL
+    /// goes to an account of the quote they own. The creator's seat is the Creator lock's alone.
     pub fn claim(ctx: Context<Claim>) -> Result<()> {
+        let a = &ctx.accounts;
+        let tokens = Tokens::of(&a.launch, &a.pot, &a.quote_mint, &a.quote_token_program)?;
         let launch = &ctx.accounts.launch;
         require!(launch.status == LaunchStatus::Opened, FairOpenError::NotOpened);
         let seat = &ctx.accounts.seat;
@@ -777,7 +840,14 @@ pub mod fair_open {
             coin_rent_back,
             false,
         )?;
-        let paid = delivered.refund + delivered.coin_rent;
+        let paid = match &tokens {
+            None => delivered.refund + delivered.coin_rent,
+            Some(t) => {
+                let to = t.account_of(ctx.accounts.wallet_quote.as_deref(), &delivered.wallet)?;
+                t.pay(&ctx.accounts.launch, &to, delivered.refund)?;
+                delivered.coin_rent
+            }
+        };
         emit_cpi!(delivered);
         let burnt = finish(&mut ctx.accounts.launch, &ctx.accounts.vault, &ctx.accounts.pot_coins, &ctx.accounts.mint)?;
         if let Some(event) = burnt {
@@ -785,7 +855,7 @@ pub mod fair_open {
         }
         // After the last CPI, as in a push.
         pay(&ctx.accounts.vault, &ctx.accounts.wallet, paid)?;
-        check_vault(&ctx.accounts.vault, &ctx.accounts.launch)
+        check_vault(&ctx.accounts.vault, &ctx.accounts.launch, tokens.as_ref())
     }
 
     /// The Creator lock (spec 2.1 step 13, ADR 0004): anyone may send it once the launch has opened, and our keeper does at
@@ -795,8 +865,11 @@ pub mod fair_open {
     /// them, so they can leave the pot for the escrow alone. The escrow's rent comes out of the creator's prepaid rent,
     /// or, for a launch scheduled before the prepayment covered it, out of the seat's refund; the rest of the seat's
     /// refund, its prepaid coin-account rent and the seat's own rent go back to the Creator wallet, and the seat closes:
-    /// it gets no Tax Share.
+    /// it gets no Tax Share. In a quote other than SOL the refund goes to the Creator wallet's account of the quote, and
+    /// only the seat's SOL can make up the escrow's rent, every launch in such a quote prepaying it.
     pub fn lock_creator(ctx: Context<LockCreator>) -> Result<()> {
+        let a = &ctx.accounts;
+        let tokens = Tokens::of(&a.launch, &a.pot, &a.quote_mint, &a.quote_token_program)?;
         let launch = &mut ctx.accounts.launch;
         require!(launch.status == LaunchStatus::Opened, FairOpenError::NotOpened);
         let seat = &ctx.accounts.seat;
@@ -823,7 +896,8 @@ pub mod fair_open {
             let funded = lock_rent(&Rent::get()?).saturating_sub(locker.lamports());
             pay(&a.vault, &locker, funded)?;
             create_escrow_coins(a, locker_seeds)?;
-            token::approve(&a.pot_coins, &locker, &a.launch.to_account_info(), outcome.coins, launch_seeds)?;
+            let launch_info = a.launch.to_account_info();
+            token::approve(&TOKEN_PROGRAM, &a.pot_coins, &locker, &launch_info, outcome.coins, launch_seeds)?;
             create_vesting_escrow(a, &schedule, locker_seeds)?;
             // The locker sent exactly the creator's coins: SPL Token clears a delegate once its allowance is spent.
             require!(!TokenAccount::read(&a.pot_coins)?.delegated, FairOpenError::CreatorCoinsNotLocked);
@@ -845,7 +919,10 @@ pub mod fair_open {
         let seat = &mut ctx.accounts.seat;
         let from_prepaid = rent.min(launch.open_rent);
         let from_seat = rent - from_prepaid;
-        let owed_to_seat = outcome.refund + seat.coin_rent;
+        let owed_to_seat = match tokens {
+            None => outcome.refund + seat.coin_rent,
+            Some(_) => seat.coin_rent,
+        };
         require_gte!(owed_to_seat, from_seat, FairOpenError::LockNotFunded);
         launch.open_rent -= from_prepaid;
         launch.refunded += outcome.refund;
@@ -859,6 +936,13 @@ pub mod fair_open {
         let burnt = finish(launch, &ctx.accounts.vault, &ctx.accounts.pot_coins, &ctx.accounts.mint)?;
         if let Some(event) = burnt {
             emit_cpi!(event);
+        }
+        if let Some(t) = &tokens {
+            let creator = ctx.accounts.creator.key();
+            if outcome.refund > 0 {
+                let to = t.account_of(ctx.accounts.creator_quote.as_deref(), &creator)?;
+                t.pay(&ctx.accounts.launch, &to, outcome.refund)?;
+            }
         }
         // The seat closes as the instruction ends, its rent going to the Creator wallet.
         let launch = &mut ctx.accounts.launch;
@@ -886,15 +970,16 @@ pub mod fair_open {
         });
         // After the last CPI, as in a push.
         pay(&ctx.accounts.vault, &ctx.accounts.creator, paid)?;
-        check_vault(&ctx.accounts.vault, &ctx.accounts.launch)
+        check_vault(&ctx.accounts.vault, &ctx.accounts.launch, tokens.as_ref())
     }
 
     /// The Tax Share's collection (spec 2.1 step 14, 4): anyone may send it once the coin's Tax window has ended, and our
-    /// keeper does at 60 s. It opens the launch's pot again, has the fee program's window claim pay the window's fees,
-    /// less the pot's own fee, into it, and unwraps them into the vault, all in this instruction. The Tax Share is those
-    /// fees and the lamport dust the open's rounding gathered, paid to every seat but the creator's in proportion to its
-    /// fill, which is in proportion to the SOL it spent. With no seat but the creator's, nobody may take it, so it goes
-    /// to Heat's treasury, as an Instant launch's window fees do.
+    /// keeper does at 60 s. It has the fee program's window claim pay the window's fees, less the pot's own fee, into
+    /// the launch's pot, all in this instruction: in SOL it opens the pot's wrapped-SOL account again and unwraps the
+    /// fees into the vault; in any other quote the pot holds them. The Tax Share is those fees and the dust the open's
+    /// rounding gathered, paid to every seat but the creator's in proportion to its fill, which is in proportion to what
+    /// it spent. With no seat but the creator's, nobody may take it, so it goes to Heat's treasury, as an Instant launch's
+    /// window fees do.
     pub fn collect_tax_share(ctx: Context<CollectTaxShare>) -> Result<()> {
         let launch = &ctx.accounts.launch;
         require!(launch.status == LaunchStatus::Opened, FairOpenError::NotOpened);
@@ -902,22 +987,31 @@ pub mod fair_open {
         let launch_key = launch.key();
         let nonce = launch.nonce;
         let launch_seeds: &[&[u8]] = &[LAUNCH_SEED, nonce.as_ref(), &[launch.bump]];
+        let quote_program = ctx.accounts.token_program.key();
+        require_keys_eq!(quote_program, *ctx.accounts.quote_mint.owner, FairOpenError::NotATokenAccount);
+        let in_sol = launch.quote_mint == NATIVE_MINT;
 
-        // The pot's wrapped-SOL account again, made as the open makes it, holding nothing but its rent.
         let pot = ctx.accounts.pot.to_account_info();
         let vault = ctx.accounts.vault.to_account_info();
-        let rent = Rent::get()?.minimum_balance(TOKEN_ACCOUNT_LEN);
-        pay(&ctx.accounts.vault, &pot, rent.saturating_sub(pot.lamports()))?;
-        let pot_seeds: &[&[u8]] = &[POT_SEED, launch_key.as_ref(), &[ctx.bumps.pot]];
-        allocate_pot(&pot, &vault, pot_seeds)?;
-        let system = ctx.accounts.system_program.key();
-        let assign = system_program::Assign { account_to_assign: pot.clone() };
-        system_program::assign(CpiContext::new_with_signer(system, assign, &[pot_seeds]), &TOKEN_PROGRAM)?;
-        token::initialize_account(&pot, &ctx.accounts.quote_mint, &launch_key)?;
-
-        claim_window_fees(ctx.accounts, ctx.bumps.coin_registrar)?;
-        let fees = TokenAccount::read(&pot)?.amount;
-        token::close(&pot, &vault, &ctx.accounts.launch.to_account_info(), launch_seeds)?;
+        let fees = if in_sol {
+            // The pot's wrapped-SOL account again, made as the open makes it, holding nothing but its rent.
+            let rent = Rent::get()?.minimum_balance(TOKEN_ACCOUNT_LEN);
+            pay(&ctx.accounts.vault, &pot, rent.saturating_sub(pot.lamports()))?;
+            let pot_seeds: &[&[u8]] = &[POT_SEED, launch_key.as_ref(), &[ctx.bumps.pot]];
+            allocate(&pot, TOKEN_ACCOUNT_LEN, Some(&vault), pot_seeds)?;
+            let system = ctx.accounts.system_program.key();
+            let assign = system_program::Assign { account_to_assign: pot.clone() };
+            system_program::assign(CpiContext::new_with_signer(system, assign, &[pot_seeds]), &TOKEN_PROGRAM)?;
+            token::initialize_account(&TOKEN_PROGRAM, &pot, &ctx.accounts.quote_mint, &launch_key)?;
+            claim_window_fees(ctx.accounts, ctx.bumps.coin_registrar)?;
+            let fees = TokenAccount::read(&pot)?.amount;
+            token::close(&TOKEN_PROGRAM, &pot, &vault, &ctx.accounts.launch.to_account_info(), launch_seeds)?;
+            fees
+        } else {
+            let before = TokenAccount::read(&pot)?.amount;
+            claim_window_fees(ctx.accounts, ctx.bumps.coin_registrar)?;
+            TokenAccount::read(&pot)?.amount - before
+        };
 
         let launch = &mut ctx.accounts.launch;
         let levels = (launch.others_level, launch.unverified_level);
@@ -954,21 +1048,39 @@ pub mod fair_open {
             basis,
             treasury,
         });
+        let tokens = match in_sol {
+            true => None,
+            false => Some(Tokens {
+                pot: pot.clone(),
+                mint: ctx.accounts.quote_mint.to_account_info(),
+                program: quote_program,
+                decimals: token::decimals(&ctx.accounts.quote_mint)?,
+            }),
+        };
         if to_treasury {
-            // After the last CPI.
             let amount = launch.tax_share;
             launch.tax_fills_paid = basis;
             launch.tax_share = 0;
-            pay(&ctx.accounts.vault, &ctx.accounts.treasury, amount)?;
+            match (&tokens, treasury) {
+                (Some(t), Some(treasury)) => {
+                    let to = t.account_of(ctx.accounts.treasury_quote.as_deref(), &treasury)?;
+                    t.pay(&ctx.accounts.launch, &to, amount)?;
+                }
+                // After the last CPI.
+                _ => pay(&ctx.accounts.vault, &ctx.accounts.treasury, amount)?,
+            }
         }
-        check_vault(&ctx.accounts.vault, &ctx.accounts.launch)
+        check_vault(&ctx.accounts.vault, &ctx.accounts.launch, tokens.as_ref())
     }
 
     /// Pays seats their Tax Share and closes them, returning each seat's rent (spec 2.1 step 14): anyone may send it once
     /// the Tax Share is collected, and our keeper does at once. Each seat comes as two remaining accounts, the seat and
-    /// its wallet; a seat whose coins and refund have not been delivered yet waits, since closing it would lose them, and
-    /// the creator's seat, which gets no Tax Share, closes with the Creator lock.
+    /// its wallet, and in a quote other than SOL a third, the wallet's account of the quote, which the share is paid to; a
+    /// seat whose coins and refund have not been delivered yet waits, since closing it would lose them, and the creator's
+    /// seat, which gets no Tax Share, closes with the Creator lock.
     pub fn push_tax_share<'info>(ctx: Context<'info, PushTaxShare<'info>>) -> Result<()> {
+        let a = &ctx.accounts;
+        let tokens = Tokens::of(&a.launch, &a.pot, &a.quote_mint, &a.quote_token_program)?;
         let launch = &mut ctx.accounts.launch;
         require!(launch.status == LaunchStatus::Opened, FairOpenError::NotOpened);
         require!(launch.tax_collected, FairOpenError::TaxShareNotCollected);
@@ -976,8 +1088,9 @@ pub mod fair_open {
         let launch_key = launch.key();
         // Lamports leave the vault and the seats by hand after the events, the instruction's last CPIs.
         let mut payments: Vec<(Account<'info, Seat>, &AccountInfo<'info>, u64)> = vec![];
-        for accounts in ctx.remaining_accounts.chunks(2) {
-            let [seat, wallet] = accounts else { return err!(FairOpenError::SeatAccounts) };
+        let per_seat = if tokens.is_some() { 3 } else { 2 };
+        for accounts in ctx.remaining_accounts.chunks(per_seat) {
+            let ([seat, wallet] | [seat, wallet, _]) = accounts else { return err!(FairOpenError::SeatAccounts) };
             let seat: Account<'info, Seat> = Account::try_from(seat)?;
             require_keys_eq!(seat.launch, launch_key, FairOpenError::NotThisLaunchsSeat);
             require_keys_eq!(seat.wallet, wallet.key(), FairOpenError::NotYourSeat);
@@ -1002,13 +1115,17 @@ pub mod fair_open {
                 seat_rent: seat.to_account_info().lamports(),
                 seats: launch.seats,
             });
-            payments.push((seat, wallet, amount));
+            if let Some(t) = &tokens {
+                let to = t.account_of(accounts.get(2), &seat.wallet)?;
+                t.pay(launch, &to, amount)?;
+            }
+            payments.push((seat, wallet, if tokens.is_some() { 0 } else { amount }));
         }
         for (seat, wallet, amount) in payments {
             pay(&ctx.accounts.vault, wallet, amount)?;
             seat.close(wallet.clone())?;
         }
-        check_vault(&ctx.accounts.vault, &ctx.accounts.launch)
+        check_vault(&ctx.accounts.vault, &ctx.accounts.launch, tokens.as_ref())
     }
 
     /// Marks a launch that cannot open as failed, so no coin is ever created and every deposit comes back (spec 2.1
@@ -1037,8 +1154,12 @@ pub mod fair_open {
     }
 
     /// Returns a failed launch's deposit and both rents to its depositor's wallet (spec 2.1 step 15). The depositor can
-    /// send it alone, with no Heat server running; anyone else may send it too, since it pays only that wallet.
+    /// send it alone, with no Heat server running; anyone else may send it too, since it pays only that wallet, and in a
+    /// quote other than SOL only the wallet's own account of the quote. While the quote's issuer has paused it, the
+    /// deposit cannot move and the refund waits.
     pub fn withdraw_failed(ctx: Context<WithdrawFailed>) -> Result<()> {
+        let a = &ctx.accounts;
+        let tokens = Tokens::of(&a.launch, &a.pot, &a.quote_mint, &a.quote_token_program)?;
         let launch = &mut ctx.accounts.launch;
         require!(launch.status == LaunchStatus::Failed, FairOpenError::NotFailed);
         let seat = &ctx.accounts.seat;
@@ -1046,8 +1167,16 @@ pub mod fair_open {
         launch.count_out(seat.tier, deposit)?;
         launch.coin_rent -= coin_rent;
         launch.seats -= 1;
-        pay(&ctx.accounts.vault, &ctx.accounts.wallet, deposit + coin_rent)?;
-        check_vault(&ctx.accounts.vault, launch)?;
+        let lamports = match &tokens {
+            None => deposit + coin_rent,
+            Some(t) => {
+                let to = t.account_of(ctx.accounts.wallet_quote.as_deref(), &seat.wallet)?;
+                t.pay(launch, &to, deposit)?;
+                coin_rent
+            }
+        };
+        pay(&ctx.accounts.vault, &ctx.accounts.wallet, lamports)?;
+        check_vault(&ctx.accounts.vault, launch, tokens.as_ref())?;
         // The seat's own rent comes back as it closes, when the instruction ends.
         emit_cpi!(FailedDepositReturned {
             launch: launch.key(),
@@ -1064,8 +1193,12 @@ pub mod fair_open {
     /// Closes a launch once it is done, giving the creator back the rent of the launch and its vault, with what is left of
     /// the rent they prepaid (spec 2.1 step 7): a failed launch once every seat has been returned, an opened one once its
     /// Tax Share is collected and every seat, the creator's with the Creator lock, has closed. Anyone may send it; it pays
-    /// only the creator.
+    /// only the creator. In a quote other than SOL the pot closes too, its rent the creator's: by then it owes nothing,
+    /// and anything sent to it besides goes to the Creator wallet's account of the quote, as lamports sent to a vault go
+    /// to the Creator wallet.
     pub fn close_launch(ctx: Context<CloseLaunch>) -> Result<()> {
+        let a = &ctx.accounts;
+        let tokens = Tokens::of(&a.launch, &a.pot, &a.quote_mint, &a.quote_token_program)?;
         let launch = &ctx.accounts.launch;
         match launch.status {
             LaunchStatus::Failed => {}
@@ -1073,11 +1206,18 @@ pub mod fair_open {
             _ => return err!(FairOpenError::NotDone),
         }
         require_eq!(launch.seats, 0, FairOpenError::SeatsLeft);
-        emit_cpi!(LaunchClosed {
-            launch: launch.key(),
-            creator: launch.creator,
-            rent: launch.to_account_info().lamports() + ctx.accounts.vault.to_account_info().lamports(),
-        });
+        let mut rent = launch.to_account_info().lamports() + ctx.accounts.vault.to_account_info().lamports();
+        if let Some(t) = &tokens {
+            let left = t.held()?;
+            if left > 0 {
+                let to = t.account_of(ctx.accounts.creator_quote.as_deref(), &launch.creator)?;
+                t.pay(launch, &to, left)?;
+            }
+            rent += t.pot.lamports();
+            let seeds: &[&[u8]] = &[LAUNCH_SEED, launch.nonce.as_ref(), &[launch.bump]];
+            token::close(&t.program, &t.pot, &ctx.accounts.creator, &launch.to_account_info(), seeds)?;
+        }
+        emit_cpi!(LaunchClosed { launch: launch.key(), creator: launch.creator, rent });
         Ok(())
     }
 }
@@ -1126,12 +1266,133 @@ fn pay(vault: &Account<Vault>, to: &AccountInfo, amount: u64) -> Result<()> {
 }
 
 /// The vault always holds at least what it owes (spec 5.3): every deposit and the coin-account rent prepaid, on top of
-/// its own rent.
-fn check_vault(vault: &Account<Vault>, launch: &Launch) -> Result<()> {
+/// its own rent. In a quote other than SOL the deposits are owed in the quote's raw units out of the pot, and the rents
+/// in SOL out of the vault (ADR 0007).
+fn check_vault(vault: &Account<Vault>, launch: &Launch, tokens: Option<&Tokens>) -> Result<()> {
+    check_vault_holding(vault, launch, tokens.map(|t| &t.pot))
+}
+
+/// `check_vault`, the pot given for a launch in a quote other than SOL.
+fn check_vault_holding(vault: &Account<Vault>, launch: &Launch, pot: Option<&AccountInfo>) -> Result<()> {
     let own_rent = Rent::get()?.minimum_balance(8 + Vault::INIT_SPACE);
     let held = vault.to_account_info().lamports().saturating_sub(own_rent);
-    require_gte!(held, launch.owed(), FairOpenError::VaultShort);
+    match pot {
+        None => require_gte!(held, launch.owed(), FairOpenError::VaultShort),
+        Some(pot) => {
+            require_gte!(held, launch.owed_rent(), FairOpenError::VaultShort);
+            require_gte!(TokenAccount::read(pot)?.amount, launch.owed_deposits(), FairOpenError::VaultShort);
+        }
+    }
     Ok(())
+}
+
+/// A launch's deposits in a quote other than SOL (ADR 0007 decision 1): its pot, a token account of the quote owned by
+/// the launch, the quote's mint and its token program, SPL Token or Token-2022. Its tokens move by `TransferChecked`.
+pub struct Tokens<'info> {
+    pub pot: AccountInfo<'info>,
+    pub mint: AccountInfo<'info>,
+    pub program: Pubkey,
+    pub decimals: u8,
+}
+
+impl<'info> Tokens<'info> {
+    /// None for a launch in SOL. For any other quote, the accounts its deposits move through, which must all be given:
+    /// the pot at its address, the launch's quote and that quote's own token program.
+    pub fn of(
+        launch: &Account<'info, Launch>,
+        pot: &Option<UncheckedAccount<'info>>,
+        mint: &Option<UncheckedAccount<'info>>,
+        program: &Option<UncheckedAccount<'info>>,
+    ) -> Result<Option<Self>> {
+        if launch.quote_mint == NATIVE_MINT {
+            return Ok(None);
+        }
+        let (Some(pot), Some(mint), Some(program)) = (pot, mint, program) else {
+            return err!(FairOpenError::QuoteAccountsMissing);
+        };
+        require_keys_eq!(mint.key(), launch.quote_mint, FairOpenError::NotThisQuote);
+        require_keys_eq!(program.key(), *mint.owner, FairOpenError::NotATokenAccount);
+        let launch_key = launch.key();
+        let seeds: &[&[u8]] = &[POT_SEED, launch_key.as_ref(), &[launch.pot_bump]];
+        let address = Pubkey::create_program_address(seeds, &crate::ID).map_err(|_| FairOpenError::NotThePot)?;
+        require_keys_eq!(pot.key(), address, FairOpenError::NotThePot);
+        Ok(Some(Tokens {
+            pot: pot.to_account_info(),
+            mint: mint.to_account_info(),
+            program: program.key(),
+            decimals: token::decimals(mint)?,
+        }))
+    }
+
+    /// What the pot holds, in the quote's raw units.
+    pub fn held(&self) -> Result<u64> {
+        Ok(TokenAccount::read(&self.pot)?.amount)
+    }
+
+    /// `account`, which must be an account of the quote that `owner` owns: where the pot pays a wallet.
+    pub fn account_of(&self, account: Option<&AccountInfo<'info>>, owner: &Pubkey) -> Result<AccountInfo<'info>> {
+        let account = account.ok_or(FairOpenError::QuoteAccountsMissing)?;
+        let read = TokenAccount::read(account)?;
+        require!(
+            read.owner == *owner && read.mint == self.mint.key() && *account.owner == self.program,
+            FairOpenError::NotYourQuoteAccount
+        );
+        Ok(account.clone())
+    }
+
+    /// Moves `amount` into the pot from `from`, which `authority` signs for.
+    pub fn transfer_in(&self, from: &AccountInfo<'info>, authority: &AccountInfo<'info>, amount: u64) -> Result<()> {
+        token::transfer(&self.program, from, &self.mint, &self.pot, authority, amount, self.decimals, &[])
+    }
+
+    /// Pays `amount` out of the pot to `to`, signed by the launch, which owns the pot.
+    pub fn pay(&self, launch: &Account<'info, Launch>, to: &AccountInfo<'info>, amount: u64) -> Result<()> {
+        if amount == 0 {
+            return Ok(());
+        }
+        let seeds: &[&[u8]] = &[LAUNCH_SEED, launch.nonce.as_ref(), &[launch.bump]];
+        token::transfer(
+            &self.program,
+            &self.pot,
+            &self.mint,
+            to,
+            &launch.to_account_info(),
+            amount,
+            self.decimals,
+            seeds,
+        )
+    }
+}
+
+/// Makes a launch's pot in a quote other than SOL at scheduling (ADR 0007 decision 1): a token account of the quote at
+/// the pot's PDA, owned by the launch, as large as the quote's token program says its accounts must be, its rent paid
+/// by the creator. Lamports already sent to the address count toward the rent, so nobody can stop a launch by sending
+/// some first. Returns the pot's bump.
+fn create_pot(a: &CreateLaunch) -> Result<u8> {
+    let (Some(pot), Some(program)) = (&a.pot, &a.quote_token_program) else {
+        return err!(FairOpenError::QuoteAccountsMissing);
+    };
+    let program = program.key();
+    require_keys_eq!(program, *a.quote_mint.owner, FairOpenError::NotATokenAccount);
+    let launch = a.launch.key();
+    let (address, bump) = Pubkey::find_program_address(&[POT_SEED, launch.as_ref()], &crate::ID);
+    require_keys_eq!(pot.key(), address, FairOpenError::NotThePot);
+    let size = match program {
+        TOKEN_PROGRAM => TOKEN_ACCOUNT_LEN,
+        _ => token::account_size(&program, &a.quote_mint)?,
+    };
+    let pot = pot.to_account_info();
+    let more = Rent::get()?.minimum_balance(size).saturating_sub(pot.lamports());
+    if more > 0 {
+        let accounts = system_program::Transfer { from: a.creator.to_account_info(), to: pot.clone() };
+        system_program::transfer(CpiContext::new(a.system_program.key(), accounts), more)?;
+    }
+    let seeds: &[&[u8]] = &[POT_SEED, launch.as_ref(), &[bump]];
+    allocate(&pot, size, None, seeds)?;
+    let assign = system_program::Assign { account_to_assign: pot.clone() };
+    system_program::assign(CpiContext::new_with_signer(a.system_program.key(), assign, &[seeds]), &program)?;
+    token::initialize_account(&program, &pot, &a.quote_mint, &launch)?;
+    Ok(bump)
 }
 
 /// Registers the coin with the fee program, signed by the coin registrar: its record names the launch and the pot's own
@@ -1203,17 +1464,24 @@ fn claim_window_fees(a: &CollectTaxShare, registrar_bump: u8) -> Result<()> {
     Ok(())
 }
 
-/// The system program's `Allocate` of a token account's bytes for the pot, signed by its PDA. The vault rides along,
-/// ignored by the system program, so the runtime sees both sides of the rent the vault has just moved to the pot by hand.
-fn allocate_pot<'info>(pot: &AccountInfo<'info>, vault: &AccountInfo<'info>, pot_seeds: &[&[u8]]) -> Result<()> {
+/// The system program's `Allocate` of `space` bytes for the pot, signed by its PDA. The vault may ride along, ignored by
+/// the system program, so the runtime sees both sides of the rent the vault has just moved to the pot by hand.
+fn allocate<'info>(
+    pot: &AccountInfo<'info>,
+    space: usize,
+    rider: Option<&AccountInfo<'info>>,
+    pot_seeds: &[&[u8]],
+) -> Result<()> {
     let mut data = 8u32.to_le_bytes().to_vec();
-    data.extend_from_slice(&(TOKEN_ACCOUNT_LEN as u64).to_le_bytes());
-    let allocate = Instruction {
-        program_id: system_program::ID,
-        accounts: vec![AccountMeta::new(pot.key(), true), AccountMeta::new(vault.key(), false)],
-        data,
-    };
-    invoke_signed(&allocate, &[pot.clone(), vault.clone()], &[pot_seeds])?;
+    data.extend_from_slice(&(space as u64).to_le_bytes());
+    let mut accounts = vec![AccountMeta::new(pot.key(), true)];
+    let mut infos = vec![pot.clone()];
+    if let Some(rider) = rider {
+        accounts.push(AccountMeta::new(rider.key(), false));
+        infos.push(rider.clone());
+    }
+    let allocate = Instruction { program_id: system_program::ID, accounts, data };
+    invoke_signed(&allocate, &infos, &[pot_seeds])?;
     Ok(())
 }
 
@@ -1358,7 +1626,8 @@ fn deliver<'info>(
     if outcome.coins > 0 {
         let nonce = launch.nonce;
         let seeds: &[&[u8]] = &[LAUNCH_SEED, nonce.as_ref(), &[launch.bump]];
-        token::transfer(pot_coins, mint, coin_account, &launch.to_account_info(), outcome.coins, decimals, seeds)?;
+        let launch_info = launch.to_account_info();
+        token::transfer(&TOKEN_PROGRAM, pot_coins, mint, coin_account, &launch_info, outcome.coins, decimals, seeds)?;
     }
     launch.refunded += outcome.refund;
     launch.coin_rent -= seat.coin_rent;
@@ -1401,7 +1670,7 @@ fn finish<'info>(
     if dust > 0 {
         token::burn(pot_coins, mint, &launch.to_account_info(), dust, seeds)?;
     }
-    token::close(pot_coins, &vault.to_account_info(), &launch.to_account_info(), seeds)?;
+    token::close(&TOKEN_PROGRAM, pot_coins, &vault.to_account_info(), &launch.to_account_info(), seeds)?;
     Ok(Some(CoinDustBurnt { launch: launch.key(), mint: launch.mint, amount: dust }))
 }
 
@@ -1568,8 +1837,10 @@ pub struct Launch {
     pub tax_share: u64,
     /// The fills of the seats paid their Tax Share so far, from which each next seat's share is found to the lamport.
     pub tax_fills_paid: u64,
+    /// In a quote other than SOL, the bump of the pot, the token account holding the deposits (ADR 0007 decision 1).
+    pub pot_bump: u8,
     /// Room kept, so the account keeps its size.
-    pub reserved: [u8; 2],
+    pub reserved: [u8; 1],
     pub bump: u8,
     pub vault_bump: u8,
 }
@@ -1626,11 +1897,20 @@ impl Launch {
     /// every refund not yet paid and the lamports the rounding gathered for the Tax Share, and from the Tax Share's
     /// collection on, the Tax Share not yet paid.
     pub fn owed(&self) -> u64 {
-        let deposits = match self.status {
+        self.owed_deposits() + self.owed_rent()
+    }
+
+    /// What the deposits are owed, in the quote's raw units: the pot's part of `owed`.
+    pub fn owed_deposits(&self) -> u64 {
+        match self.status {
             LaunchStatus::Opened => self.pot() - self.spent - self.refunded + self.tax_unpaid(),
             _ => self.pot(),
-        };
-        deposits + self.coin_rent + self.open_rent
+        }
+    }
+
+    /// The rents owed, always in SOL: the coin-account rent the seats prepaid and what is left of the open's.
+    pub fn owed_rent(&self) -> u64 {
+        self.coin_rent + self.open_rent
     }
 
     /// The fill of the Creator wallet's own seat, if it holds one.
@@ -1701,7 +1981,8 @@ pub enum Failure {
     Late,
 }
 
-/// Holds a launch's deposits as plain SOL (spec 5.3), at the PDA of its launch.
+/// Holds a launch's deposits as plain SOL (spec 5.3), at the PDA of its launch; in any other quote, only the rents, the
+/// deposits being in the pot (ADR 0007 decision 1).
 #[account]
 #[derive(InitSpace, Debug)]
 pub struct Vault {
@@ -1862,6 +2143,12 @@ pub struct CreateLaunch<'info> {
     #[account(init, payer = creator, space = 8 + Vault::INIT_SPACE, seeds = [VAULT_SEED, launch.key().as_ref()], bump)]
     pub vault: Account<'info, Vault>,
     pub system_program: Program<'info, System>,
+    /// CHECK: in a quote other than SOL, the launch's pot at its PDA, made here as a token account of the quote; checked
+    /// in the handler. Left out in SOL.
+    #[account(mut)]
+    pub pot: Option<UncheckedAccount<'info>>,
+    /// CHECK: in a quote other than SOL, the quote's own token program, SPL Token or Token-2022; checked in the handler.
+    pub quote_token_program: Option<UncheckedAccount<'info>>,
 }
 
 #[event_cpi]
@@ -1888,6 +2175,17 @@ pub struct Deposit<'info> {
     #[account(address = solana_instructions_sysvar::ID)]
     pub instructions: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
+    /// CHECK: in a quote other than SOL, the launch's pot, the token account holding its deposits, at its PDA; checked in
+    /// the handler. Left out in SOL.
+    #[account(mut)]
+    pub pot: Option<UncheckedAccount<'info>>,
+    /// CHECK: in a quote other than SOL, the launch's quote; checked in the handler.
+    pub quote_mint: Option<UncheckedAccount<'info>>,
+    /// CHECK: in a quote other than SOL, the quote's own token program, SPL Token or Token-2022; checked in the handler.
+    pub quote_token_program: Option<UncheckedAccount<'info>>,
+    /// CHECK: in a quote other than SOL, the depositor's account of the quote the deposit comes from, which they sign for; checked in the handler.
+    #[account(mut)]
+    pub depositor_quote: Option<UncheckedAccount<'info>>,
 }
 
 #[event_cpi]
@@ -1907,6 +2205,17 @@ pub struct Withdraw<'info> {
     pub seat: Account<'info, Seat>,
     #[account(mut)]
     pub wallet: Signer<'info>,
+    /// CHECK: in a quote other than SOL, the launch's pot, the token account holding its deposits, at its PDA; checked in
+    /// the handler. Left out in SOL.
+    #[account(mut)]
+    pub pot: Option<UncheckedAccount<'info>>,
+    /// CHECK: in a quote other than SOL, the launch's quote; checked in the handler.
+    pub quote_mint: Option<UncheckedAccount<'info>>,
+    /// CHECK: in a quote other than SOL, the quote's own token program, SPL Token or Token-2022; checked in the handler.
+    pub quote_token_program: Option<UncheckedAccount<'info>>,
+    /// CHECK: in a quote other than SOL, the wallet's account of the quote the deposit goes back to; checked in the handler.
+    #[account(mut)]
+    pub wallet_quote: Option<UncheckedAccount<'info>>,
 }
 
 #[derive(Accounts)]
@@ -1925,8 +2234,7 @@ pub struct Open<'info> {
     /// CHECK: the launch's quote.
     #[account(address = launch.quote_mint @ FairOpenError::QuoteNotSupported)]
     pub quote_mint: UncheckedAccount<'info>,
-    /// CHECK: SPL Token.
-    #[account(address = TOKEN_PROGRAM)]
+    /// CHECK: the quote's own token program, SPL Token for SOL; checked in the handler.
     pub token_program: UncheckedAccount<'info>,
     /// CHECK: the instructions sysvar, from which the transaction's shape is read.
     #[account(address = solana_instructions_sysvar::ID)]
@@ -2005,6 +2313,14 @@ pub struct Push<'info> {
     #[account(address = creation::ASSOCIATED_TOKEN_PROGRAM)]
     pub associated_token_program: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
+    /// CHECK: in a quote other than SOL, the launch's pot, the token account holding its deposits, at its PDA; checked in
+    /// the handler. Left out in SOL.
+    #[account(mut)]
+    pub pot: Option<UncheckedAccount<'info>>,
+    /// CHECK: in a quote other than SOL, the launch's quote; checked in the handler.
+    pub quote_mint: Option<UncheckedAccount<'info>>,
+    /// CHECK: in a quote other than SOL, the quote's own token program, SPL Token or Token-2022; checked in the handler.
+    pub quote_token_program: Option<UncheckedAccount<'info>>,
 }
 
 #[event_cpi]
@@ -2036,6 +2352,17 @@ pub struct Claim<'info> {
     /// CHECK: SPL Token.
     #[account(address = TOKEN_PROGRAM)]
     pub token_program: UncheckedAccount<'info>,
+    /// CHECK: in a quote other than SOL, the launch's pot, the token account holding its deposits, at its PDA; checked in
+    /// the handler. Left out in SOL.
+    #[account(mut)]
+    pub pot: Option<UncheckedAccount<'info>>,
+    /// CHECK: in a quote other than SOL, the launch's quote; checked in the handler.
+    pub quote_mint: Option<UncheckedAccount<'info>>,
+    /// CHECK: in a quote other than SOL, the quote's own token program, SPL Token or Token-2022; checked in the handler.
+    pub quote_token_program: Option<UncheckedAccount<'info>>,
+    /// CHECK: in a quote other than SOL, the wallet's account of the quote its refund goes to; checked in the handler.
+    #[account(mut)]
+    pub wallet_quote: Option<UncheckedAccount<'info>>,
 }
 
 #[event_cpi]
@@ -2094,6 +2421,17 @@ pub struct LockCreator<'info> {
     #[account(address = creation::ASSOCIATED_TOKEN_PROGRAM)]
     pub associated_token_program: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
+    /// CHECK: in a quote other than SOL, the launch's pot, the token account holding its deposits, at its PDA; checked in
+    /// the handler. Left out in SOL.
+    #[account(mut)]
+    pub pot: Option<UncheckedAccount<'info>>,
+    /// CHECK: in a quote other than SOL, the launch's quote; checked in the handler.
+    pub quote_mint: Option<UncheckedAccount<'info>>,
+    /// CHECK: in a quote other than SOL, the quote's own token program, SPL Token or Token-2022; checked in the handler.
+    pub quote_token_program: Option<UncheckedAccount<'info>>,
+    /// CHECK: in a quote other than SOL, the Creator wallet's account of the quote its seat's refund goes to; checked in the handler.
+    #[account(mut)]
+    pub creator_quote: Option<UncheckedAccount<'info>>,
 }
 
 #[event_cpi]
@@ -2155,10 +2493,13 @@ pub struct CollectTaxShare<'info> {
     pub fee_event_authority: UncheckedAccount<'info>,
     /// CHECK: the fee program, by the program config.
     pub fee_program: UncheckedAccount<'info>,
-    /// CHECK: SPL Token, the quote's token program.
-    #[account(address = TOKEN_PROGRAM)]
+    /// CHECK: the quote's own token program, SPL Token for SOL; checked in the handler.
     pub token_program: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
+    /// CHECK: in a quote other than SOL, the treasury's account of the quote, which takes the Tax Share only when no seat
+    /// but the creator's may; checked in the handler.
+    #[account(mut)]
+    pub treasury_quote: Option<UncheckedAccount<'info>>,
 }
 
 #[event_cpi]
@@ -2168,6 +2509,14 @@ pub struct PushTaxShare<'info> {
     pub launch: Box<Account<'info, Launch>>,
     #[account(mut, seeds = [VAULT_SEED, launch.key().as_ref()], bump = launch.vault_bump)]
     pub vault: Account<'info, Vault>,
+    /// CHECK: in a quote other than SOL, the launch's pot, the token account holding its deposits, at its PDA; checked in
+    /// the handler. Left out in SOL.
+    #[account(mut)]
+    pub pot: Option<UncheckedAccount<'info>>,
+    /// CHECK: in a quote other than SOL, the launch's quote; checked in the handler.
+    pub quote_mint: Option<UncheckedAccount<'info>>,
+    /// CHECK: in a quote other than SOL, the quote's own token program, SPL Token or Token-2022; checked in the handler.
+    pub quote_token_program: Option<UncheckedAccount<'info>>,
 }
 
 #[event_cpi]
@@ -2196,6 +2545,17 @@ pub struct WithdrawFailed<'info> {
     /// The seat's wallet, which everything goes back to.
     #[account(mut)]
     pub wallet: SystemAccount<'info>,
+    /// CHECK: in a quote other than SOL, the launch's pot, the token account holding its deposits, at its PDA; checked in
+    /// the handler. Left out in SOL.
+    #[account(mut)]
+    pub pot: Option<UncheckedAccount<'info>>,
+    /// CHECK: in a quote other than SOL, the launch's quote; checked in the handler.
+    pub quote_mint: Option<UncheckedAccount<'info>>,
+    /// CHECK: in a quote other than SOL, the quote's own token program, SPL Token or Token-2022; checked in the handler.
+    pub quote_token_program: Option<UncheckedAccount<'info>>,
+    /// CHECK: in a quote other than SOL, the wallet's account of the quote its deposit goes back to; checked in the handler.
+    #[account(mut)]
+    pub wallet_quote: Option<UncheckedAccount<'info>>,
 }
 
 #[event_cpi]
@@ -2213,6 +2573,17 @@ pub struct CloseLaunch<'info> {
     pub vault: Account<'info, Vault>,
     #[account(mut)]
     pub creator: SystemAccount<'info>,
+    /// CHECK: in a quote other than SOL, the launch's pot, the token account holding its deposits, at its PDA; checked in
+    /// the handler. Left out in SOL.
+    #[account(mut)]
+    pub pot: Option<UncheckedAccount<'info>>,
+    /// CHECK: in a quote other than SOL, the launch's quote; checked in the handler.
+    pub quote_mint: Option<UncheckedAccount<'info>>,
+    /// CHECK: in a quote other than SOL, the quote's own token program, SPL Token or Token-2022; checked in the handler.
+    pub quote_token_program: Option<UncheckedAccount<'info>>,
+    /// CHECK: in a quote other than SOL, the Creator wallet's account of the quote, which takes anything sent to the pot besides the deposits; checked in the handler.
+    #[account(mut)]
+    pub creator_quote: Option<UncheckedAccount<'info>>,
 }
 
 #[event]
@@ -2444,7 +2815,7 @@ pub enum FairOpenError {
     NotTheFairOpenConfig,
     #[msg("The config is not a DBC config")]
     NotADbcConfig,
-    #[msg("A Fair Open takes SOL only, until another quote's deposits are built")]
+    #[msg("That is not the launch's quote")]
     QuoteNotSupported,
     #[msg("The minimum raise is more than the pot can spend")]
     MinRaiseAboveCap,
@@ -2556,4 +2927,16 @@ pub enum FairOpenError {
     NotThisQuote,
     #[msg("That config is not shaped as Heat's Fair Open config")]
     NotHeatsConfigShape,
+    #[msg("A launch in a quote other than SOL needs its pot, its quote and its token program, and a wallet's quote account")]
+    QuoteAccountsMissing,
+    #[msg("The quote moves only to an account of the quote the seat's wallet owns")]
+    NotYourQuoteAccount,
+    #[msg("That is not the launch's pot")]
+    NotThePot,
+    #[msg("The quote's issuer has paused it")]
+    QuotePaused,
+    #[msg(
+        "Heat does not take this quote: a transfer fee or its authority, a transfer hook program or a frozen default"
+    )]
+    QuoteRefused,
 }

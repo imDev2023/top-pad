@@ -150,6 +150,8 @@ export type Launch = {
   taxShare: bigint;
   /** The fills of the seats paid their Tax Share so far, from which each next seat's share is found to the lamport. */
   taxFillsPaid: bigint;
+  /** In a quote other than SOL, the bump of the pot, the token account holding the deposits (ADR 0007 decision 1). */
+  potBump: number;
   /** Room kept, so the account keeps its size. */
   reserved: ReadonlyUint8Array;
   bump: number;
@@ -228,6 +230,8 @@ export type LaunchArgs = {
   taxShare: number | bigint;
   /** The fills of the seats paid their Tax Share so far, from which each next seat's share is found to the lamport. */
   taxFillsPaid: number | bigint;
+  /** In a quote other than SOL, the bump of the pot, the token account holding the deposits (ADR 0007 decision 1). */
+  potBump: number;
   /** Room kept, so the account keeps its size. */
   reserved: ReadonlyUint8Array;
   bump: number;
@@ -275,7 +279,8 @@ export function getLaunchEncoder(): Encoder<LaunchArgs> {
       ["taxCollected", getBooleanEncoder()],
       ["taxShare", getU64Encoder()],
       ["taxFillsPaid", getU64Encoder()],
-      ["reserved", fixEncoderSize(getBytesEncoder(), 2)],
+      ["potBump", getU8Encoder()],
+      ["reserved", fixEncoderSize(getBytesEncoder(), 1)],
       ["bump", getU8Encoder()],
       ["vaultBump", getU8Encoder()],
     ]),
@@ -323,7 +328,8 @@ export function getLaunchDecoder(): Decoder<Launch> {
     ["taxCollected", getBooleanDecoder()],
     ["taxShare", getU64Decoder()],
     ["taxFillsPaid", getU64Decoder()],
-    ["reserved", fixDecoderSize(getBytesDecoder(), 2)],
+    ["potBump", getU8Decoder()],
+    ["reserved", fixDecoderSize(getBytesDecoder(), 1)],
     ["bump", getU8Decoder()],
     ["vaultBump", getU8Decoder()],
   ]);

@@ -77,6 +77,8 @@ export type CreateLaunchInstruction<
   TAccountVault extends string | AccountMeta<string> = string,
   TAccountSystemProgram extends string | AccountMeta<string> =
     "11111111111111111111111111111111",
+  TAccountPot extends string | AccountMeta<string> = string,
+  TAccountQuoteTokenProgram extends string | AccountMeta<string> = string,
   TAccountEventAuthority extends string | AccountMeta<string> = string,
   TAccountProgram extends string | AccountMeta<string> = string,
   TRemainingAccounts extends readonly AccountMeta<string>[] = [],
@@ -119,6 +121,10 @@ export type CreateLaunchInstruction<
       TAccountSystemProgram extends string
         ? ReadonlyAccount<TAccountSystemProgram>
         : TAccountSystemProgram,
+      TAccountPot extends string ? WritableAccount<TAccountPot> : TAccountPot,
+      TAccountQuoteTokenProgram extends string
+        ? ReadonlyAccount<TAccountQuoteTokenProgram>
+        : TAccountQuoteTokenProgram,
       TAccountEventAuthority extends string
         ? ReadonlyAccount<TAccountEventAuthority>
         : TAccountEventAuthority,
@@ -201,6 +207,9 @@ export type CreateLaunchAsyncInput<
   TAccountVault extends InstructionAccountInput = InstructionAccountInput,
   TAccountSystemProgram extends InstructionAccountInput =
     InstructionAccountInput,
+  TAccountPot extends InstructionAccountInput = InstructionAccountInput,
+  TAccountQuoteTokenProgram extends InstructionAccountInput =
+    InstructionAccountInput,
   TAccountEventAuthority extends InstructionAccountInput =
     InstructionAccountInput,
   TAccountProgram extends InstructionAccountInput = InstructionAccountInput,
@@ -219,6 +228,9 @@ export type CreateLaunchAsyncInput<
   launch?: TAccountLaunch;
   vault?: TAccountVault;
   systemProgram?: TAccountSystemProgram;
+  /** in the handler. Left out in SOL. */
+  pot?: TAccountPot;
+  quoteTokenProgram?: TAccountQuoteTokenProgram;
   eventAuthority: TAccountEventAuthority;
   program: TAccountProgram;
   depositsOpenAt: CreateLaunchInstructionDataArgs["depositsOpenAt"];
@@ -238,6 +250,8 @@ export async function getCreateLaunchInstructionAsync<
   TAccountLaunch extends InstructionAccountInput,
   TAccountVault extends InstructionAccountInput,
   TAccountSystemProgram extends InstructionAccountInput,
+  TAccountPot extends InstructionAccountInput,
+  TAccountQuoteTokenProgram extends InstructionAccountInput,
   TAccountEventAuthority extends InstructionAccountInput,
   TAccountProgram extends InstructionAccountInput,
   TProgramAddress extends Address = typeof FAIR_OPEN_PROGRAM_ADDRESS,
@@ -254,6 +268,8 @@ export async function getCreateLaunchInstructionAsync<
     TAccountLaunch,
     TAccountVault,
     TAccountSystemProgram,
+    TAccountPot,
+    TAccountQuoteTokenProgram,
     TAccountEventAuthority,
     TAccountProgram
   >,
@@ -306,6 +322,14 @@ export async function getCreateLaunchInstructionAsync<
     ResolvedInstructionAccountMeta<
       TAccountSystemProgram,
       InstructionAccountInputAddress<TAccountSystemProgram>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountPot,
+      InstructionAccountInputAddress<TAccountPot>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountQuoteTokenProgram,
+      InstructionAccountInputAddress<TAccountQuoteTokenProgram>
     >,
     ResolvedInstructionAccountMeta<
       TAccountEventAuthority,
@@ -362,6 +386,12 @@ export async function getCreateLaunchInstructionAsync<
     vault: { value: input.vault ?? null, isSigner: false, isWritable: true },
     systemProgram: {
       value: input.systemProgram ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
+    pot: { value: input.pot ?? null, isSigner: false, isWritable: true },
+    quoteTokenProgram: {
+      value: input.quoteTokenProgram ?? null,
       isSigner: false,
       isWritable: false,
     },
@@ -441,6 +471,8 @@ export async function getCreateLaunchInstructionAsync<
       getAccountMeta("launch", accounts.launch),
       getAccountMeta("vault", accounts.vault),
       getAccountMeta("systemProgram", accounts.systemProgram),
+      getAccountMeta("pot", accounts.pot),
+      getAccountMeta("quoteTokenProgram", accounts.quoteTokenProgram),
       getAccountMeta("eventAuthority", accounts.eventAuthority),
       getAccountMeta("program", accounts.program),
     ],
@@ -495,6 +527,14 @@ export async function getCreateLaunchInstructionAsync<
       InstructionAccountInputAddress<TAccountSystemProgram>
     >,
     ResolvedInstructionAccountMeta<
+      TAccountPot,
+      InstructionAccountInputAddress<TAccountPot>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountQuoteTokenProgram,
+      InstructionAccountInputAddress<TAccountQuoteTokenProgram>
+    >,
+    ResolvedInstructionAccountMeta<
       TAccountEventAuthority,
       InstructionAccountInputAddress<TAccountEventAuthority>
     >,
@@ -521,6 +561,9 @@ export type CreateLaunchInput<
   TAccountVault extends InstructionAccountInput = InstructionAccountInput,
   TAccountSystemProgram extends InstructionAccountInput =
     InstructionAccountInput,
+  TAccountPot extends InstructionAccountInput = InstructionAccountInput,
+  TAccountQuoteTokenProgram extends InstructionAccountInput =
+    InstructionAccountInput,
   TAccountEventAuthority extends InstructionAccountInput =
     InstructionAccountInput,
   TAccountProgram extends InstructionAccountInput = InstructionAccountInput,
@@ -539,6 +582,9 @@ export type CreateLaunchInput<
   launch: TAccountLaunch;
   vault: TAccountVault;
   systemProgram?: TAccountSystemProgram;
+  /** in the handler. Left out in SOL. */
+  pot?: TAccountPot;
+  quoteTokenProgram?: TAccountQuoteTokenProgram;
   eventAuthority: TAccountEventAuthority;
   program: TAccountProgram;
   depositsOpenAt: CreateLaunchInstructionDataArgs["depositsOpenAt"];
@@ -558,6 +604,8 @@ export function getCreateLaunchInstruction<
   TAccountLaunch extends InstructionAccountInput,
   TAccountVault extends InstructionAccountInput,
   TAccountSystemProgram extends InstructionAccountInput,
+  TAccountPot extends InstructionAccountInput,
+  TAccountQuoteTokenProgram extends InstructionAccountInput,
   TAccountEventAuthority extends InstructionAccountInput,
   TAccountProgram extends InstructionAccountInput,
   TProgramAddress extends Address = typeof FAIR_OPEN_PROGRAM_ADDRESS,
@@ -574,6 +622,8 @@ export function getCreateLaunchInstruction<
     TAccountLaunch,
     TAccountVault,
     TAccountSystemProgram,
+    TAccountPot,
+    TAccountQuoteTokenProgram,
     TAccountEventAuthority,
     TAccountProgram
   >,
@@ -625,6 +675,14 @@ export function getCreateLaunchInstruction<
   ResolvedInstructionAccountMeta<
     TAccountSystemProgram,
     InstructionAccountInputAddress<TAccountSystemProgram>
+  >,
+  ResolvedInstructionAccountMeta<
+    TAccountPot,
+    InstructionAccountInputAddress<TAccountPot>
+  >,
+  ResolvedInstructionAccountMeta<
+    TAccountQuoteTokenProgram,
+    InstructionAccountInputAddress<TAccountQuoteTokenProgram>
   >,
   ResolvedInstructionAccountMeta<
     TAccountEventAuthority,
@@ -683,6 +741,12 @@ export function getCreateLaunchInstruction<
       isSigner: false,
       isWritable: false,
     },
+    pot: { value: input.pot ?? null, isSigner: false, isWritable: true },
+    quoteTokenProgram: {
+      value: input.quoteTokenProgram ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
     eventAuthority: {
       value: input.eventAuthority ?? null,
       isSigner: false,
@@ -721,6 +785,8 @@ export function getCreateLaunchInstruction<
       getAccountMeta("launch", accounts.launch),
       getAccountMeta("vault", accounts.vault),
       getAccountMeta("systemProgram", accounts.systemProgram),
+      getAccountMeta("pot", accounts.pot),
+      getAccountMeta("quoteTokenProgram", accounts.quoteTokenProgram),
       getAccountMeta("eventAuthority", accounts.eventAuthority),
       getAccountMeta("program", accounts.program),
     ],
@@ -775,6 +841,14 @@ export function getCreateLaunchInstruction<
       InstructionAccountInputAddress<TAccountSystemProgram>
     >,
     ResolvedInstructionAccountMeta<
+      TAccountPot,
+      InstructionAccountInputAddress<TAccountPot>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountQuoteTokenProgram,
+      InstructionAccountInputAddress<TAccountQuoteTokenProgram>
+    >,
+    ResolvedInstructionAccountMeta<
       TAccountEventAuthority,
       InstructionAccountInputAddress<TAccountEventAuthority>
     >,
@@ -805,8 +879,11 @@ export type ParsedCreateLaunchInstruction<
     launch: TAccountMetas[8];
     vault: TAccountMetas[9];
     systemProgram: TAccountMetas[10];
-    eventAuthority: TAccountMetas[11];
-    program: TAccountMetas[12];
+    /** in the handler. Left out in SOL. */
+    pot?: TAccountMetas[11] | undefined;
+    quoteTokenProgram?: TAccountMetas[12] | undefined;
+    eventAuthority: TAccountMetas[13];
+    program: TAccountMetas[14];
   };
   data: CreateLaunchInstructionData;
 };
@@ -819,12 +896,12 @@ export function parseCreateLaunchInstruction<
     InstructionWithAccounts<TAccountMetas> &
     InstructionWithData<ReadonlyUint8Array>,
 ): ParsedCreateLaunchInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 13) {
+  if (instruction.accounts.length < 15) {
     throw new SolanaError(
       SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS,
       {
         actualAccountMetas: instruction.accounts.length,
-        expectedAccountMetas: 13,
+        expectedAccountMetas: 15,
       },
     );
   }
@@ -833,6 +910,12 @@ export function parseCreateLaunchInstruction<
     const accountMeta = (instruction.accounts as TAccountMetas)[accountIndex]!;
     accountIndex += 1;
     return accountMeta;
+  };
+  const getNextOptionalAccount = () => {
+    const accountMeta = getNextAccount();
+    return accountMeta.address === FAIR_OPEN_PROGRAM_ADDRESS
+      ? undefined
+      : accountMeta;
   };
   return {
     programAddress: instruction.programAddress,
@@ -848,6 +931,8 @@ export function parseCreateLaunchInstruction<
       launch: getNextAccount(),
       vault: getNextAccount(),
       systemProgram: getNextAccount(),
+      pot: getNextOptionalAccount(),
+      quoteTokenProgram: getNextOptionalAccount(),
       eventAuthority: getNextAccount(),
       program: getNextAccount(),
     },

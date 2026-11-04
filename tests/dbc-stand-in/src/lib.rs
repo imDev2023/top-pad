@@ -2,7 +2,9 @@
 //! DBC 0.2.2's partner fee claim, `claim_trading_fee`, as its source does it (`instructions/partner/
 //! ix_claim_partner_trading_fee.rs` and `VirtualPool::claim_partner_trading_fee`), over pools and configs the tests write
 //! in DBC's layout. For the Fair Open program's open: a pool's creation, `initialize_virtual_pool_with_spl_token`, making
-//! the coin, the pool and its vaults where DBC makes them and charging the payer what Metaplex's metadata costs it, and
+//! the coin, the pool and its vaults where DBC makes them and charging the payer what Metaplex's metadata costs it, its
+//! quote vault under the quote's own token program and, for a Token-2022 quote DBC does not take permissionlessly,
+//! requiring the quote's TokenBadge as its first remaining account, as DBC 0.2.2 does; and
 //! a buy, `swap2`, at a flat made-up price, paying the ending fee if it is the pool's first swap and passes the
 //! instructions sysvar, and the 99% cliff otherwise, the partner's share of the fee accruing in the pool as DBC accrues
 //! it. For the fee program's Graduation: the partner's surplus, `partner_withdraw_surplus`, and the leftover,
@@ -85,6 +87,14 @@ pub const METAPLEX_CREATE_FEE: u64 = 10_000_000;
 
 /// SPL Token and the system program, and what the creation asks of them.
 const TOKEN_PROGRAM: Pubkey = anchor_lang::pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+const TOKEN_2022_PROGRAM: Pubkey = anchor_lang::pubkey!("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+/// DBC's `TokenBadge`, made by Meteora's operators alone for a quote mint, at the PDA of `TOKEN_BADGE_SEED` and the mint:
+/// its discriminator, then the mint.
+pub const TOKEN_BADGE_SEED: &[u8] = b"token_badge";
+pub const TOKEN_BADGE_DISCRIMINATOR: [u8; 8] = [116, 219, 204, 229, 249, 116, 255, 150];
+pub const TOKEN_BADGE_LEN: usize = 168;
+/// The Token-2022 extensions DBC takes on a quote with no badge: `MetadataPointer` and `TokenMetadata`.
+const PERMISSIONLESS_EXTENSIONS: [u16; 2] = [18, 19];
 const SYSTEM_PROGRAM: Pubkey = anchor_lang::pubkey!("11111111111111111111111111111111");
 const INSTRUCTIONS_SYSVAR: Pubkey = anchor_lang::pubkey!("Sysvar1nstructions1111111111111111111111111");
 const ASSOCIATED_TOKEN_PROGRAM: Pubkey = anchor_lang::pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
@@ -165,11 +175,18 @@ fn token<'info>(
 /// its mint authority, the pool at its PDA naming its config, creator, coin and vaults, both vaults at their PDAs, the
 /// whole supply in the coin vault, and the payer charged for all of it, the metadata's rent and Metaplex's fee included.
 fn initialize_pool(accounts: &[AccountInfo]) -> ProgramResult {
-    let [config, pool_authority, creator, base_mint, quote_mint, pool, base_vault, quote_vault, mint_metadata, _metadata_program, payer, _token_quote_program, _token_program, _system_program, _event_authority, _program] =
+    let [config, pool_authority, creator, base_mint, quote_mint, pool, base_vault, quote_vault, mint_metadata, _metadata_program, payer, token_quote_program, _token_program, _system_program, _event_authority, _program, remaining @ ..] =
         accounts
     else {
         return Err(ProgramError::NotEnoughAccountKeys);
     };
+    require(quote_mint.owner == token_quote_program.key, "not the quote's token program")?;
+    if !permissionless(quote_mint)? {
+        let (badge, _) = Pubkey::find_program_address(&[TOKEN_BADGE_SEED, quote_mint.key.as_ref()], &ID);
+        let given = remaining.first().filter(|a| *a.key == badge && a.owner == &ID);
+        let valid = given.is_some_and(|a| a.try_borrow_data().is_ok_and(|d| d.starts_with(&TOKEN_BADGE_DISCRIMINATOR)));
+        require(valid, "the quote needs its TokenBadge")?;
+    }
     require(config.owner == &ID, "the config is not DBC's")?;
     let config_data = config.try_borrow_data()?;
     require(config_data.starts_with(&POOL_CONFIG_DISCRIMINATOR), "not a config")?;
@@ -195,18 +212,22 @@ fn initialize_pool(accounts: &[AccountInfo]) -> ProgramResult {
     let bump = [pool_bump];
     let signer = [pool_seeds, &[&bump[..]]].concat();
     create_account(payer, pool, POOL_LEN as u64, &ID, &signer)?;
-    // The vaults, both owned by the pool authority.
+    // The vaults, both owned by the pool authority, the quote's under its own token program and as large as that
+    // program says an account of the quote must be.
     for (vault, mint) in [(base_vault, base_mint), (quote_vault, quote_mint)] {
         let seeds: &[&[u8]] = &[TOKEN_VAULT_SEED, mint.key.as_ref(), pool.key.as_ref()];
         let (address, bump) = Pubkey::find_program_address(seeds, &ID);
         require(*vault.key == address, "not the vault's address")?;
         let bump = [bump];
         let signer = [seeds, &[&bump[..]]].concat();
-        create_account(payer, vault, TOKEN_ACCOUNT_LEN, &TOKEN_PROGRAM, &signer)?;
+        let program = *mint.owner;
+        let space = if program == TOKEN_2022_PROGRAM { account_size(mint)? } else { TOKEN_ACCOUNT_LEN };
+        create_account(payer, vault, space, &program, &signer)?;
         let mut data = vec![18];
         data.extend_from_slice(authority.as_ref());
         let metas = vec![AccountMeta::new(*vault.key, false), AccountMeta::new_readonly(*mint.key, false)];
-        token(data, metas, &[vault.clone(), mint.clone()], &[])?;
+        let instruction = Instruction { program_id: program, accounts: metas, data };
+        system(instruction, &[vault.clone(), mint.clone()], &[])?;
     }
     // What Metaplex's metadata costs the payer.
     transfer_lamports(payer, mint_metadata, rent(METADATA_LEN as u64)? + METAPLEX_CREATE_FEE)?;
@@ -284,6 +305,41 @@ fn swap2(accounts: &[AccountInfo], args: &[u8]) -> ProgramResult {
     transfer(token_quote_program, input, quote_mint, quote_vault, payer, amount_in, &[])?;
     let signer: &[&[u8]] = &[POOL_AUTHORITY_SEED, &[authority_bump]];
     transfer(token_base_program, base_vault, base_mint, output, pool_authority, coins, signer)
+}
+
+/// Token-2022's `GetAccountDataSize`: the bytes an account of `mint` needs with every extension the mint requires.
+fn account_size(mint: &AccountInfo) -> Result<u64, ProgramError> {
+    let instruction = Instruction {
+        program_id: TOKEN_2022_PROGRAM,
+        accounts: vec![AccountMeta::new_readonly(*mint.key, false)],
+        data: vec![21],
+    };
+    system(instruction, std::slice::from_ref(mint), &[])?;
+    let (_, data) = anchor_lang::solana_program::program::get_return_data().ok_or(ProgramError::InvalidAccountData)?;
+    Ok(u64::from_le_bytes(data.get(..8).ok_or(ProgramError::InvalidAccountData)?.try_into().unwrap()))
+}
+
+/// Whether DBC takes `mint` as a quote with no TokenBadge: any SPL Token mint, and a Token-2022 mint whose every
+/// extension is `MetadataPointer` or `TokenMetadata`. (DBC 0.2.2 also takes a zero-fee `TransferFeeConfig` whose
+/// authority is gone, which no test quote carries.)
+fn permissionless(mint: &AccountInfo) -> Result<bool, ProgramError> {
+    if *mint.owner == TOKEN_PROGRAM {
+        return Ok(true);
+    }
+    require(*mint.owner == TOKEN_2022_PROGRAM, "the quote is not a mint")?;
+    let data = mint.try_borrow_data()?;
+    let mut at = 166;
+    while let Some(header) = data.get(at..at + 4) {
+        let kind = u16::from_le_bytes([header[0], header[1]]);
+        if kind == 0 {
+            break;
+        }
+        if !PERMISSIONLESS_EXTENSIONS.contains(&kind) {
+            return Ok(false);
+        }
+        at += 4 + u16::from_le_bytes([header[2], header[3]]) as usize;
+    }
+    Ok(true)
 }
 
 fn address(data: &[u8], offset: usize) -> Result<Pubkey, ProgramError> {

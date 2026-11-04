@@ -25,7 +25,7 @@ export const FAIR_OPEN_ERROR__NOT_THE_KEEPER = 0x1772; // 6002
 export const FAIR_OPEN_ERROR__NOT_THE_FAIR_OPEN_CONFIG = 0x1773; // 6003
 /** NotADbcConfig: The config is not a DBC config */
 export const FAIR_OPEN_ERROR__NOT_A_DBC_CONFIG = 0x1774; // 6004
-/** QuoteNotSupported: A Fair Open takes SOL only, until another quote's deposits are built */
+/** QuoteNotSupported: That is not the launch's quote */
 export const FAIR_OPEN_ERROR__QUOTE_NOT_SUPPORTED = 0x1775; // 6005
 /** MinRaiseAboveCap: The minimum raise is more than the pot can spend */
 export const FAIR_OPEN_ERROR__MIN_RAISE_ABOVE_CAP = 0x1776; // 6006
@@ -137,6 +137,16 @@ export const FAIR_OPEN_ERROR__NOT_THE_QUOTE_MANAGER = 0x17aa; // 6058
 export const FAIR_OPEN_ERROR__NOT_THIS_QUOTE = 0x17ab; // 6059
 /** NotHeatsConfigShape: That config is not shaped as Heat's Fair Open config */
 export const FAIR_OPEN_ERROR__NOT_HEATS_CONFIG_SHAPE = 0x17ac; // 6060
+/** QuoteAccountsMissing: A launch in a quote other than SOL needs its pot, its quote and its token program, and a wallet's quote account */
+export const FAIR_OPEN_ERROR__QUOTE_ACCOUNTS_MISSING = 0x17ad; // 6061
+/** NotYourQuoteAccount: The quote moves only to an account of the quote the seat's wallet owns */
+export const FAIR_OPEN_ERROR__NOT_YOUR_QUOTE_ACCOUNT = 0x17ae; // 6062
+/** NotThePot: That is not the launch's pot */
+export const FAIR_OPEN_ERROR__NOT_THE_POT = 0x17af; // 6063
+/** QuotePaused: The quote's issuer has paused it */
+export const FAIR_OPEN_ERROR__QUOTE_PAUSED = 0x17b0; // 6064
+/** QuoteRefused: Heat does not take this quote: a transfer fee or its authority, a transfer hook program or a frozen default */
+export const FAIR_OPEN_ERROR__QUOTE_REFUSED = 0x17b1; // 6065
 
 export type FairOpenError =
   | typeof FAIR_OPEN_ERROR__ADMISSION_EXPIRED
@@ -171,6 +181,7 @@ export type FairOpenError =
   | typeof FAIR_OPEN_ERROR__NOT_THE_FEE_PROGRAM
   | typeof FAIR_OPEN_ERROR__NOT_THE_KEEPER
   | typeof FAIR_OPEN_ERROR__NOT_THE_POOL
+  | typeof FAIR_OPEN_ERROR__NOT_THE_POT
   | typeof FAIR_OPEN_ERROR__NOT_THE_POTS_COINS
   | typeof FAIR_OPEN_ERROR__NOT_THE_QUOTE_MANAGER
   | typeof FAIR_OPEN_ERROR__NOT_THE_TREASURY
@@ -179,11 +190,15 @@ export type FairOpenError =
   | typeof FAIR_OPEN_ERROR__NOT_THIS_QUOTE
   | typeof FAIR_OPEN_ERROR__NOT_UPGRADE_AUTHORITY
   | typeof FAIR_OPEN_ERROR__NOT_YOUR_COIN_ACCOUNT
+  | typeof FAIR_OPEN_ERROR__NOT_YOUR_QUOTE_ACCOUNT
   | typeof FAIR_OPEN_ERROR__NOT_YOUR_SEAT
   | typeof FAIR_OPEN_ERROR__OFF_STEP
   | typeof FAIR_OPEN_ERROR__OVER_CAP
   | typeof FAIR_OPEN_ERROR__OVER_DEPOSIT
+  | typeof FAIR_OPEN_ERROR__QUOTE_ACCOUNTS_MISSING
   | typeof FAIR_OPEN_ERROR__QUOTE_NOT_SUPPORTED
+  | typeof FAIR_OPEN_ERROR__QUOTE_PAUSED
+  | typeof FAIR_OPEN_ERROR__QUOTE_REFUSED
   | typeof FAIR_OPEN_ERROR__SEAT_ACCOUNTS
   | typeof FAIR_OPEN_ERROR__SEAT_HELD_BY_ANOTHER_WALLET
   | typeof FAIR_OPEN_ERROR__SEAT_NOT_COUNTED
@@ -236,6 +251,7 @@ if (process.env["NODE_ENV"] !== "production") {
     [FAIR_OPEN_ERROR__NOT_THE_FEE_PROGRAM]: `That is not the fee program the program config names`,
     [FAIR_OPEN_ERROR__NOT_THE_KEEPER]: `The keeper did not sign`,
     [FAIR_OPEN_ERROR__NOT_THE_POOL]: `That is not the coin's DBC pool`,
+    [FAIR_OPEN_ERROR__NOT_THE_POT]: `That is not the launch's pot`,
     [FAIR_OPEN_ERROR__NOT_THE_POTS_COINS]: `That is not the pot's coin account`,
     [FAIR_OPEN_ERROR__NOT_THE_QUOTE_MANAGER]: `Only the quote manager can write a quote's settings`,
     [FAIR_OPEN_ERROR__NOT_THE_TREASURY]: `That is not Heat's treasury`,
@@ -244,11 +260,15 @@ if (process.env["NODE_ENV"] !== "production") {
     [FAIR_OPEN_ERROR__NOT_THIS_QUOTE]: `That config or mint is not this quote's`,
     [FAIR_OPEN_ERROR__NOT_UPGRADE_AUTHORITY]: `Only the program's upgrade authority can change its settings`,
     [FAIR_OPEN_ERROR__NOT_YOUR_COIN_ACCOUNT]: `The coins go to an account of the coin the seat's wallet owns`,
+    [FAIR_OPEN_ERROR__NOT_YOUR_QUOTE_ACCOUNT]: `The quote moves only to an account of the quote the seat's wallet owns`,
     [FAIR_OPEN_ERROR__NOT_YOUR_SEAT]: `The seat is another wallet's`,
     [FAIR_OPEN_ERROR__OFF_STEP]: `Deposits and withdrawals move in whole steps of 0.01 SOL`,
     [FAIR_OPEN_ERROR__OVER_CAP]: `The deposit would be over the seat's cap`,
     [FAIR_OPEN_ERROR__OVER_DEPOSIT]: `That is more than the seat holds`,
-    [FAIR_OPEN_ERROR__QUOTE_NOT_SUPPORTED]: `A Fair Open takes SOL only, until another quote's deposits are built`,
+    [FAIR_OPEN_ERROR__QUOTE_ACCOUNTS_MISSING]: `A launch in a quote other than SOL needs its pot, its quote and its token program, and a wallet's quote account`,
+    [FAIR_OPEN_ERROR__QUOTE_NOT_SUPPORTED]: `That is not the launch's quote`,
+    [FAIR_OPEN_ERROR__QUOTE_PAUSED]: `The quote's issuer has paused it`,
+    [FAIR_OPEN_ERROR__QUOTE_REFUSED]: `Heat does not take this quote: a transfer fee or its authority, a transfer hook program or a frozen default`,
     [FAIR_OPEN_ERROR__SEAT_ACCOUNTS]: `A push takes each seat as three accounts: the seat, its wallet and the wallet's account of the coin`,
     [FAIR_OPEN_ERROR__SEAT_HELD_BY_ANOTHER_WALLET]: `This person's seat is held by another wallet`,
     [FAIR_OPEN_ERROR__SEAT_NOT_COUNTED]: `The seat is not counted in the launch`,

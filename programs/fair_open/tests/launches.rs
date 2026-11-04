@@ -81,20 +81,6 @@ fn runs_only_on_heats_fair_open_config() {
 }
 
 #[test]
-fn takes_sol_only() {
-    // A quote with its own settings and a config in it is refused until a non-SOL quote's deposits exist (#88).
-    let mut t = Test::new();
-    let quote = Pubkey::new_unique();
-    t.set_account(quote, mint_data(6), TOKEN_PROGRAM);
-    let config = Pubkey::new_unique();
-    t.set_account(config, dbc_config_data(&quote, GRADUATION_TARGET), fair_open::dbc::PROGRAM_ID);
-    t.set_quote_settings(&quote, config, config, 10_000).unwrap();
-    let (creator, keeper) = (t.creator.insecure_clone(), t.keeper.insecure_clone());
-    let nonce = t.nonce_held_by(&keeper.pubkey());
-    refused(t.create_launch_in(&quote, &creator, &keeper, nonce, config, params()), Code::QuoteNotSupported);
-}
-
-#[test]
 fn refuses_a_minimum_raise_the_pot_can_never_reach() {
     let mut t = Test::new();
     let (creator, keeper) = (t.creator.insecure_clone(), t.keeper.insecure_clone());

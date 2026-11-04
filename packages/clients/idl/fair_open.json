@@ -11,8 +11,8 @@
       "name": "claim",
       "docs": [
         "A depositor takes their seat's coins and refund themselves, if no push has (spec 2.1 step 12), into any account of",
-        "the coin they own; the coin account's prepaid rent comes back with the refund. The creator's seat is the Creator",
-        "lock's alone."
+        "the coin they own; the coin account's prepaid rent comes back with the refund, which in a quote other than SOL",
+        "goes to an account of the quote they own. The creator's seat is the Creator lock's alone."
       ],
       "discriminator": [
         62,
@@ -125,6 +125,27 @@
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         },
         {
+          "name": "pot",
+          "docs": [
+            "the handler. Left out in SOL."
+          ],
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "quote_mint",
+          "optional": true
+        },
+        {
+          "name": "quote_token_program",
+          "optional": true
+        },
+        {
+          "name": "wallet_quote",
+          "writable": true,
+          "optional": true
+        },
+        {
           "name": "event_authority"
         },
         {
@@ -139,7 +160,9 @@
         "Closes a launch once it is done, giving the creator back the rent of the launch and its vault, with what is left of",
         "the rent they prepaid (spec 2.1 step 7): a failed launch once every seat has been returned, an opened one once its",
         "Tax Share is collected and every seat, the creator's with the Creator lock, has closed. Anyone may send it; it pays",
-        "only the creator."
+        "only the creator. In a quote other than SOL the pot closes too, its rent the creator's: by then it owes nothing,",
+        "and anything sent to it besides goes to the Creator wallet's account of the quote, as lamports sent to a vault go",
+        "to the Creator wallet."
       ],
       "discriminator": [
         27,
@@ -206,6 +229,27 @@
           ]
         },
         {
+          "name": "pot",
+          "docs": [
+            "the handler. Left out in SOL."
+          ],
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "quote_mint",
+          "optional": true
+        },
+        {
+          "name": "quote_token_program",
+          "optional": true
+        },
+        {
+          "name": "creator_quote",
+          "writable": true,
+          "optional": true
+        },
+        {
           "name": "event_authority"
         },
         {
@@ -218,11 +262,12 @@
       "name": "collect_tax_share",
       "docs": [
         "The Tax Share's collection (spec 2.1 step 14, 4): anyone may send it once the coin's Tax window has ended, and our",
-        "keeper does at 60 s. It opens the launch's pot again, has the fee program's window claim pay the window's fees,",
-        "less the pot's own fee, into it, and unwraps them into the vault, all in this instruction. The Tax Share is those",
-        "fees and the lamport dust the open's rounding gathered, paid to every seat but the creator's in proportion to its",
-        "fill, which is in proportion to the SOL it spent. With no seat but the creator's, nobody may take it, so it goes",
-        "to Heat's treasury, as an Instant launch's window fees do."
+        "keeper does at 60 s. It has the fee program's window claim pay the window's fees, less the pot's own fee, into",
+        "the launch's pot, all in this instruction: in SOL it opens the pot's wrapped-SOL account again and unwraps the",
+        "fees into the vault; in any other quote the pot holds them. The Tax Share is those fees and the dust the open's",
+        "rounding gathered, paid to every seat but the creator's in proportion to its fill, which is in proportion to what",
+        "it spent. With no seat but the creator's, nobody may take it, so it goes to Heat's treasury, as an Instant launch's",
+        "window fees do."
       ],
       "discriminator": [
         138,
@@ -415,12 +460,19 @@
           ]
         },
         {
-          "name": "token_program",
-          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+          "name": "token_program"
         },
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "treasury_quote",
+          "docs": [
+            "but the creator's may; checked in the handler."
+          ],
+          "writable": true,
+          "optional": true
         },
         {
           "name": "event_authority"
@@ -435,9 +487,10 @@
       "name": "create_launch",
       "docs": [
         "Schedules a Fair Open (spec 2.1 steps 4 to 7): its window, its optional minimum raise and the hash its coin's",
-        "identity is sealed behind, on Heat's Fair Open config and with the durable nonce its open will be signed on. The",
-        "Creator wallet signs and prepays the rent of the launch and its vault; our keeper co-signs, so every launch is",
-        "one Heat scheduled, as every Heat coin is one our launch key co-signed (spec 2.4)."
+        "identity is sealed behind, on its quote's Fair Open config and with the durable nonce its open will be signed on.",
+        "The Creator wallet signs and prepays the rent of the launch and its vault, and in a quote other than SOL of its pot,",
+        "the token account its deposits will be held in; our keeper co-signs, so every launch is one Heat scheduled, as",
+        "every Heat coin is one our launch key co-signed (spec 2.4). A quote Heat does not take is refused (ADR 0007)."
       ],
       "discriminator": [
         239,
@@ -580,6 +633,18 @@
           "address": "11111111111111111111111111111111"
         },
         {
+          "name": "pot",
+          "docs": [
+            "in the handler. Left out in SOL."
+          ],
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "quote_token_program",
+          "optional": true
+        },
+        {
           "name": "event_authority"
         },
         {
@@ -604,7 +669,8 @@
         "Ed25519 precompile instruction right before this one. The first wallet of a person takes their seat and prepays",
         "its rent and their coin account's; a second wallet of the same person is refused, so one person holds one seat",
         "and one cap. The same wallet may add to its deposit, under the cap of its latest admission. Nothing is ever",
-        "revoked inside a window."
+        "revoked inside a window. In a quote other than SOL the deposit moves from the depositor's account of the quote",
+        "into the pot, and the rents still in SOL into the vault."
       ],
       "discriminator": [
         242,
@@ -726,6 +792,27 @@
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "pot",
+          "docs": [
+            "the handler. Left out in SOL."
+          ],
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "quote_mint",
+          "optional": true
+        },
+        {
+          "name": "quote_token_program",
+          "optional": true
+        },
+        {
+          "name": "depositor_quote",
+          "writable": true,
+          "optional": true
         },
         {
           "name": "event_authority"
@@ -919,7 +1006,8 @@
         "them, so they can leave the pot for the escrow alone. The escrow's rent comes out of the creator's prepaid rent,",
         "or, for a launch scheduled before the prepayment covered it, out of the seat's refund; the rest of the seat's",
         "refund, its prepaid coin-account rent and the seat's own rent go back to the Creator wallet, and the seat closes:",
-        "it gets no Tax Share."
+        "it gets no Tax Share. In a quote other than SOL the refund goes to the Creator wallet's account of the quote, and",
+        "only the seat's SOL can make up the escrow's rent, every launch in such a quote prepaying it."
       ],
       "discriminator": [
         68,
@@ -1142,6 +1230,27 @@
           "address": "11111111111111111111111111111111"
         },
         {
+          "name": "pot",
+          "docs": [
+            "the handler. Left out in SOL."
+          ],
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "quote_mint",
+          "optional": true
+        },
+        {
+          "name": "quote_token_program",
+          "optional": true
+        },
+        {
+          "name": "creator_quote",
+          "writable": true,
+          "optional": true
+        },
+        {
           "name": "event_authority"
         },
         {
@@ -1207,8 +1316,10 @@
         "The open (spec 2.1 step 10): the first of this program's two instructions in the coin's creation transaction, the",
         "rung of the creator's ladder that our keeper sends at the scheduled time. It refuses before the scheduled time and",
         "from 15 minutes after it, a pot that cannot open, any rung but the largest at or below what the pot should spend,",
-        "and any transaction but the creation transaction (`creation`). It then wraps exactly the rung into the pot's",
-        "wrapped-SOL account and lets our keeper spend exactly that, as the pot's delegate, in DBC's swap."
+        "and any transaction but the creation transaction (`creation`). In SOL it then wraps exactly the rung into the",
+        "pot's wrapped-SOL account; in any other quote the pot already holds every deposit. Either way our keeper may spend",
+        "exactly the rung, as the pot's delegate, in DBC's swap. A quote Heat would no longer take, a paused one above all,",
+        "is refused, so the launch fails late and every deposit comes back once its issuer lets it move (ADR 0007)."
       ],
       "discriminator": [
         228,
@@ -1327,8 +1438,7 @@
           "name": "quote_mint"
         },
         {
-          "name": "token_program",
-          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+          "name": "token_program"
         },
         {
           "name": "instructions",
@@ -1352,8 +1462,9 @@
         "Delivers seats their coins and refund once the launch has opened (spec 2.1 step 12): anyone may send it, and our",
         "keeper does at once. Each seat comes as three remaining accounts: the seat, its wallet, and the wallet's own",
         "account of the coin, which the push makes from the rent the seat prepaid, or, if it exists already, returns that",
-        "rent with the refund. A seat already delivered is passed over, and so is the creator's, whose coins leave the pot",
-        "only into the Creator lock (spec 2.1 step 13), so a push sent twice delivers nothing twice."
+        "rent with the refund; in a quote other than SOL a fourth, the wallet's account of the quote, takes the refund. A",
+        "seat already delivered is passed over, and so is the creator's, whose coins leave the pot only into the Creator",
+        "lock (spec 2.1 step 13), so a push sent twice delivers nothing twice."
       ],
       "discriminator": [
         143,
@@ -1442,6 +1553,22 @@
           "address": "11111111111111111111111111111111"
         },
         {
+          "name": "pot",
+          "docs": [
+            "the handler. Left out in SOL."
+          ],
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "quote_mint",
+          "optional": true
+        },
+        {
+          "name": "quote_token_program",
+          "optional": true
+        },
+        {
           "name": "event_authority"
         },
         {
@@ -1455,8 +1582,9 @@
       "docs": [
         "Pays seats their Tax Share and closes them, returning each seat's rent (spec 2.1 step 14): anyone may send it once",
         "the Tax Share is collected, and our keeper does at once. Each seat comes as two remaining accounts, the seat and",
-        "its wallet; a seat whose coins and refund have not been delivered yet waits, since closing it would lose them, and",
-        "the creator's seat, which gets no Tax Share, closes with the Creator lock."
+        "its wallet, and in a quote other than SOL a third, the wallet's account of the quote, which the share is paid to; a",
+        "seat whose coins and refund have not been delivered yet waits, since closing it would lose them, and the creator's",
+        "seat, which gets no Tax Share, closes with the Creator lock."
       ],
       "discriminator": [
         111,
@@ -1514,6 +1642,22 @@
               }
             ]
           }
+        },
+        {
+          "name": "pot",
+          "docs": [
+            "the handler. Left out in SOL."
+          ],
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "quote_mint",
+          "optional": true
+        },
+        {
+          "name": "quote_token_program",
+          "optional": true
         },
         {
           "name": "event_authority"
@@ -1794,8 +1938,9 @@
     {
       "name": "settle",
       "docs": [
-        "The last instruction of the creation transaction (spec 2.1 step 10). DBC's swap has spent exactly the rung, so the",
-        "pot's wrapped-SOL account closes back into the vault; the coins it bought are recorded; the pool's partner fee,",
+        "The last instruction of the creation transaction (spec 2.1 step 10). DBC's swap has spent exactly the rung, so in",
+        "SOL the pot's wrapped-SOL account closes back into the vault, and in any other quote the pot keeps the deposits",
+        "left for the refunds; the coins it bought are recorded; the pool's partner fee,",
         "at this instant exactly the pot's own fee, is recorded with the coin's registration in the fee program; and our",
         "keeper is paid back what the open's accounts cost it, out of the rent the creator prepaid."
       ],
@@ -2137,7 +2282,8 @@
       "name": "withdraw",
       "docs": [
         "Takes back part or all of a deposit while the window is open (spec 2.1 step 9). Taking back everything closes",
-        "the seat and returns both rents."
+        "the seat and returns both rents. In a quote other than SOL the deposit goes back to the wallet's account of the",
+        "quote."
       ],
       "discriminator": [
         183,
@@ -2234,6 +2380,27 @@
           ]
         },
         {
+          "name": "pot",
+          "docs": [
+            "the handler. Left out in SOL."
+          ],
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "quote_mint",
+          "optional": true
+        },
+        {
+          "name": "quote_token_program",
+          "optional": true
+        },
+        {
+          "name": "wallet_quote",
+          "writable": true,
+          "optional": true
+        },
+        {
           "name": "event_authority"
         },
         {
@@ -2251,7 +2418,9 @@
       "name": "withdraw_failed",
       "docs": [
         "Returns a failed launch's deposit and both rents to its depositor's wallet (spec 2.1 step 15). The depositor can",
-        "send it alone, with no Heat server running; anyone else may send it too, since it pays only that wallet."
+        "send it alone, with no Heat server running; anyone else may send it too, since it pays only that wallet, and in a",
+        "quote other than SOL only the wallet's own account of the quote. While the quote's issuer has paused it, the",
+        "deposit cannot move and the refund waits."
       ],
       "discriminator": [
         235,
@@ -2348,6 +2517,27 @@
           "relations": [
             "seat"
           ]
+        },
+        {
+          "name": "pot",
+          "docs": [
+            "the handler. Left out in SOL."
+          ],
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "quote_mint",
+          "optional": true
+        },
+        {
+          "name": "quote_token_program",
+          "optional": true
+        },
+        {
+          "name": "wallet_quote",
+          "writable": true,
+          "optional": true
         },
         {
           "name": "event_authority"
@@ -2652,7 +2842,7 @@
     {
       "code": 6005,
       "name": "QuoteNotSupported",
-      "msg": "A Fair Open takes SOL only, until another quote's deposits are built"
+      "msg": "That is not the launch's quote"
     },
     {
       "code": 6006,
@@ -2928,6 +3118,31 @@
       "code": 6060,
       "name": "NotHeatsConfigShape",
       "msg": "That config is not shaped as Heat's Fair Open config"
+    },
+    {
+      "code": 6061,
+      "name": "QuoteAccountsMissing",
+      "msg": "A launch in a quote other than SOL needs its pot, its quote and its token program, and a wallet's quote account"
+    },
+    {
+      "code": 6062,
+      "name": "NotYourQuoteAccount",
+      "msg": "The quote moves only to an account of the quote the seat's wallet owns"
+    },
+    {
+      "code": 6063,
+      "name": "NotThePot",
+      "msg": "That is not the launch's pot"
+    },
+    {
+      "code": 6064,
+      "name": "QuotePaused",
+      "msg": "The quote's issuer has paused it"
+    },
+    {
+      "code": 6065,
+      "name": "QuoteRefused",
+      "msg": "Heat does not take this quote: a transfer fee or its authority, a transfer hook program or a frozen default"
     }
   ],
   "types": [
@@ -3473,6 +3688,13 @@
             "type": "u64"
           },
           {
+            "name": "pot_bump",
+            "docs": [
+              "In a quote other than SOL, the bump of the pot, the token account holding the deposits (ADR 0007 decision 1)."
+            ],
+            "type": "u8"
+          },
+          {
             "name": "reserved",
             "docs": [
               "Room kept, so the account keeps its size."
@@ -3480,7 +3702,7 @@
             "type": {
               "array": [
                 "u8",
-                2
+                1
               ]
             }
           },
@@ -4231,7 +4453,8 @@
     {
       "name": "Vault",
       "docs": [
-        "Holds a launch's deposits as plain SOL (spec 5.3), at the PDA of its launch."
+        "Holds a launch's deposits as plain SOL (spec 5.3), at the PDA of its launch; in any other quote, only the rents, the",
+        "deposits being in the pot (ADR 0007 decision 1)."
       ],
       "type": {
         "kind": "struct",

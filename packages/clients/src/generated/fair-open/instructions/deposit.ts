@@ -72,6 +72,10 @@ export type DepositInstruction<
     "Sysvar1nstructions1111111111111111111111111",
   TAccountSystemProgram extends string | AccountMeta<string> =
     "11111111111111111111111111111111",
+  TAccountPot extends string | AccountMeta<string> = string,
+  TAccountQuoteMint extends string | AccountMeta<string> = string,
+  TAccountQuoteTokenProgram extends string | AccountMeta<string> = string,
+  TAccountDepositorQuote extends string | AccountMeta<string> = string,
   TAccountEventAuthority extends string | AccountMeta<string> = string,
   TAccountProgram extends string | AccountMeta<string> = string,
   TRemainingAccounts extends readonly AccountMeta<string>[] = [],
@@ -101,6 +105,16 @@ export type DepositInstruction<
       TAccountSystemProgram extends string
         ? ReadonlyAccount<TAccountSystemProgram>
         : TAccountSystemProgram,
+      TAccountPot extends string ? WritableAccount<TAccountPot> : TAccountPot,
+      TAccountQuoteMint extends string
+        ? ReadonlyAccount<TAccountQuoteMint>
+        : TAccountQuoteMint,
+      TAccountQuoteTokenProgram extends string
+        ? ReadonlyAccount<TAccountQuoteTokenProgram>
+        : TAccountQuoteTokenProgram,
+      TAccountDepositorQuote extends string
+        ? WritableAccount<TAccountDepositorQuote>
+        : TAccountDepositorQuote,
       TAccountEventAuthority extends string
         ? ReadonlyAccount<TAccountEventAuthority>
         : TAccountEventAuthority,
@@ -186,6 +200,12 @@ export type DepositAsyncInput<
     InstructionAccountInput,
   TAccountSystemProgram extends InstructionAccountInput =
     InstructionAccountInput,
+  TAccountPot extends InstructionAccountInput = InstructionAccountInput,
+  TAccountQuoteMint extends InstructionAccountInput = InstructionAccountInput,
+  TAccountQuoteTokenProgram extends InstructionAccountInput =
+    InstructionAccountInput,
+  TAccountDepositorQuote extends InstructionAccountInput =
+    InstructionAccountInput,
   TAccountEventAuthority extends InstructionAccountInput =
     InstructionAccountInput,
   TAccountProgram extends InstructionAccountInput = InstructionAccountInput,
@@ -197,6 +217,11 @@ export type DepositAsyncInput<
   depositor: TAccountDepositor;
   instructions?: TAccountInstructions;
   systemProgram?: TAccountSystemProgram;
+  /** the handler. Left out in SOL. */
+  pot?: TAccountPot;
+  quoteMint?: TAccountQuoteMint;
+  quoteTokenProgram?: TAccountQuoteTokenProgram;
+  depositorQuote?: TAccountDepositorQuote;
   eventAuthority: TAccountEventAuthority;
   program: TAccountProgram;
   amount: DepositInstructionDataArgs["amount"];
@@ -214,6 +239,10 @@ export async function getDepositInstructionAsync<
   TAccountDepositor extends InstructionSignerInput,
   TAccountInstructions extends InstructionAccountInput,
   TAccountSystemProgram extends InstructionAccountInput,
+  TAccountPot extends InstructionAccountInput,
+  TAccountQuoteMint extends InstructionAccountInput,
+  TAccountQuoteTokenProgram extends InstructionAccountInput,
+  TAccountDepositorQuote extends InstructionAccountInput,
   TAccountEventAuthority extends InstructionAccountInput,
   TAccountProgram extends InstructionAccountInput,
   TProgramAddress extends Address = typeof FAIR_OPEN_PROGRAM_ADDRESS,
@@ -226,6 +255,10 @@ export async function getDepositInstructionAsync<
     TAccountDepositor,
     TAccountInstructions,
     TAccountSystemProgram,
+    TAccountPot,
+    TAccountQuoteMint,
+    TAccountQuoteTokenProgram,
+    TAccountDepositorQuote,
     TAccountEventAuthority,
     TAccountProgram
   >,
@@ -262,6 +295,22 @@ export async function getDepositInstructionAsync<
     ResolvedInstructionAccountMeta<
       TAccountSystemProgram,
       InstructionAccountInputAddress<TAccountSystemProgram>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountPot,
+      InstructionAccountInputAddress<TAccountPot>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountQuoteMint,
+      InstructionAccountInputAddress<TAccountQuoteMint>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountQuoteTokenProgram,
+      InstructionAccountInputAddress<TAccountQuoteTokenProgram>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountDepositorQuote,
+      InstructionAccountInputAddress<TAccountDepositorQuote>
     >,
     ResolvedInstructionAccountMeta<
       TAccountEventAuthority,
@@ -308,6 +357,22 @@ export async function getDepositInstructionAsync<
       value: input.systemProgram ?? null,
       isSigner: false,
       isWritable: false,
+    },
+    pot: { value: input.pot ?? null, isSigner: false, isWritable: true },
+    quoteMint: {
+      value: input.quoteMint ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
+    quoteTokenProgram: {
+      value: input.quoteTokenProgram ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
+    depositorQuote: {
+      value: input.depositorQuote ?? null,
+      isSigner: false,
+      isWritable: true,
     },
     eventAuthority: {
       value: input.eventAuthority ?? null,
@@ -363,6 +428,10 @@ export async function getDepositInstructionAsync<
       getAccountMeta("depositor", accounts.depositor),
       getAccountMeta("instructions", accounts.instructions),
       getAccountMeta("systemProgram", accounts.systemProgram),
+      getAccountMeta("pot", accounts.pot),
+      getAccountMeta("quoteMint", accounts.quoteMint),
+      getAccountMeta("quoteTokenProgram", accounts.quoteTokenProgram),
+      getAccountMeta("depositorQuote", accounts.depositorQuote),
       getAccountMeta("eventAuthority", accounts.eventAuthority),
       getAccountMeta("program", accounts.program),
     ],
@@ -401,6 +470,22 @@ export async function getDepositInstructionAsync<
       InstructionAccountInputAddress<TAccountSystemProgram>
     >,
     ResolvedInstructionAccountMeta<
+      TAccountPot,
+      InstructionAccountInputAddress<TAccountPot>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountQuoteMint,
+      InstructionAccountInputAddress<TAccountQuoteMint>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountQuoteTokenProgram,
+      InstructionAccountInputAddress<TAccountQuoteTokenProgram>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountDepositorQuote,
+      InstructionAccountInputAddress<TAccountDepositorQuote>
+    >,
+    ResolvedInstructionAccountMeta<
       TAccountEventAuthority,
       InstructionAccountInputAddress<TAccountEventAuthority>
     >,
@@ -422,6 +507,12 @@ export type DepositInput<
     InstructionAccountInput,
   TAccountSystemProgram extends InstructionAccountInput =
     InstructionAccountInput,
+  TAccountPot extends InstructionAccountInput = InstructionAccountInput,
+  TAccountQuoteMint extends InstructionAccountInput = InstructionAccountInput,
+  TAccountQuoteTokenProgram extends InstructionAccountInput =
+    InstructionAccountInput,
+  TAccountDepositorQuote extends InstructionAccountInput =
+    InstructionAccountInput,
   TAccountEventAuthority extends InstructionAccountInput =
     InstructionAccountInput,
   TAccountProgram extends InstructionAccountInput = InstructionAccountInput,
@@ -433,6 +524,11 @@ export type DepositInput<
   depositor: TAccountDepositor;
   instructions?: TAccountInstructions;
   systemProgram?: TAccountSystemProgram;
+  /** the handler. Left out in SOL. */
+  pot?: TAccountPot;
+  quoteMint?: TAccountQuoteMint;
+  quoteTokenProgram?: TAccountQuoteTokenProgram;
+  depositorQuote?: TAccountDepositorQuote;
   eventAuthority: TAccountEventAuthority;
   program: TAccountProgram;
   amount: DepositInstructionDataArgs["amount"];
@@ -450,6 +546,10 @@ export function getDepositInstruction<
   TAccountDepositor extends InstructionSignerInput,
   TAccountInstructions extends InstructionAccountInput,
   TAccountSystemProgram extends InstructionAccountInput,
+  TAccountPot extends InstructionAccountInput,
+  TAccountQuoteMint extends InstructionAccountInput,
+  TAccountQuoteTokenProgram extends InstructionAccountInput,
+  TAccountDepositorQuote extends InstructionAccountInput,
   TAccountEventAuthority extends InstructionAccountInput,
   TAccountProgram extends InstructionAccountInput,
   TProgramAddress extends Address = typeof FAIR_OPEN_PROGRAM_ADDRESS,
@@ -462,6 +562,10 @@ export function getDepositInstruction<
     TAccountDepositor,
     TAccountInstructions,
     TAccountSystemProgram,
+    TAccountPot,
+    TAccountQuoteMint,
+    TAccountQuoteTokenProgram,
+    TAccountDepositorQuote,
     TAccountEventAuthority,
     TAccountProgram
   >,
@@ -497,6 +601,22 @@ export function getDepositInstruction<
   ResolvedInstructionAccountMeta<
     TAccountSystemProgram,
     InstructionAccountInputAddress<TAccountSystemProgram>
+  >,
+  ResolvedInstructionAccountMeta<
+    TAccountPot,
+    InstructionAccountInputAddress<TAccountPot>
+  >,
+  ResolvedInstructionAccountMeta<
+    TAccountQuoteMint,
+    InstructionAccountInputAddress<TAccountQuoteMint>
+  >,
+  ResolvedInstructionAccountMeta<
+    TAccountQuoteTokenProgram,
+    InstructionAccountInputAddress<TAccountQuoteTokenProgram>
+  >,
+  ResolvedInstructionAccountMeta<
+    TAccountDepositorQuote,
+    InstructionAccountInputAddress<TAccountDepositorQuote>
   >,
   ResolvedInstructionAccountMeta<
     TAccountEventAuthority,
@@ -543,6 +663,22 @@ export function getDepositInstruction<
       isSigner: false,
       isWritable: false,
     },
+    pot: { value: input.pot ?? null, isSigner: false, isWritable: true },
+    quoteMint: {
+      value: input.quoteMint ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
+    quoteTokenProgram: {
+      value: input.quoteTokenProgram ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
+    depositorQuote: {
+      value: input.depositorQuote ?? null,
+      isSigner: false,
+      isWritable: true,
+    },
     eventAuthority: {
       value: input.eventAuthority ?? null,
       isSigner: false,
@@ -581,6 +717,10 @@ export function getDepositInstruction<
       getAccountMeta("depositor", accounts.depositor),
       getAccountMeta("instructions", accounts.instructions),
       getAccountMeta("systemProgram", accounts.systemProgram),
+      getAccountMeta("pot", accounts.pot),
+      getAccountMeta("quoteMint", accounts.quoteMint),
+      getAccountMeta("quoteTokenProgram", accounts.quoteTokenProgram),
+      getAccountMeta("depositorQuote", accounts.depositorQuote),
       getAccountMeta("eventAuthority", accounts.eventAuthority),
       getAccountMeta("program", accounts.program),
     ],
@@ -619,6 +759,22 @@ export function getDepositInstruction<
       InstructionAccountInputAddress<TAccountSystemProgram>
     >,
     ResolvedInstructionAccountMeta<
+      TAccountPot,
+      InstructionAccountInputAddress<TAccountPot>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountQuoteMint,
+      InstructionAccountInputAddress<TAccountQuoteMint>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountQuoteTokenProgram,
+      InstructionAccountInputAddress<TAccountQuoteTokenProgram>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountDepositorQuote,
+      InstructionAccountInputAddress<TAccountDepositorQuote>
+    >,
+    ResolvedInstructionAccountMeta<
       TAccountEventAuthority,
       InstructionAccountInputAddress<TAccountEventAuthority>
     >,
@@ -642,8 +798,13 @@ export type ParsedDepositInstruction<
     depositor: TAccountMetas[4];
     instructions: TAccountMetas[5];
     systemProgram: TAccountMetas[6];
-    eventAuthority: TAccountMetas[7];
-    program: TAccountMetas[8];
+    /** the handler. Left out in SOL. */
+    pot?: TAccountMetas[7] | undefined;
+    quoteMint?: TAccountMetas[8] | undefined;
+    quoteTokenProgram?: TAccountMetas[9] | undefined;
+    depositorQuote?: TAccountMetas[10] | undefined;
+    eventAuthority: TAccountMetas[11];
+    program: TAccountMetas[12];
   };
   data: DepositInstructionData;
 };
@@ -656,12 +817,12 @@ export function parseDepositInstruction<
     InstructionWithAccounts<TAccountMetas> &
     InstructionWithData<ReadonlyUint8Array>,
 ): ParsedDepositInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 9) {
+  if (instruction.accounts.length < 13) {
     throw new SolanaError(
       SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS,
       {
         actualAccountMetas: instruction.accounts.length,
-        expectedAccountMetas: 9,
+        expectedAccountMetas: 13,
       },
     );
   }
@@ -670,6 +831,12 @@ export function parseDepositInstruction<
     const accountMeta = (instruction.accounts as TAccountMetas)[accountIndex]!;
     accountIndex += 1;
     return accountMeta;
+  };
+  const getNextOptionalAccount = () => {
+    const accountMeta = getNextAccount();
+    return accountMeta.address === FAIR_OPEN_PROGRAM_ADDRESS
+      ? undefined
+      : accountMeta;
   };
   return {
     programAddress: instruction.programAddress,
@@ -681,6 +848,10 @@ export function parseDepositInstruction<
       depositor: getNextAccount(),
       instructions: getNextAccount(),
       systemProgram: getNextAccount(),
+      pot: getNextOptionalAccount(),
+      quoteMint: getNextOptionalAccount(),
+      quoteTokenProgram: getNextOptionalAccount(),
+      depositorQuote: getNextOptionalAccount(),
       eventAuthority: getNextAccount(),
       program: getNextAccount(),
     },

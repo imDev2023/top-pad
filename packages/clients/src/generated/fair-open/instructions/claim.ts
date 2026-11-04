@@ -62,6 +62,10 @@ export type ClaimInstruction<
   TAccountMint extends string | AccountMeta<string> = string,
   TAccountTokenProgram extends string | AccountMeta<string> =
     "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+  TAccountPot extends string | AccountMeta<string> = string,
+  TAccountQuoteMint extends string | AccountMeta<string> = string,
+  TAccountQuoteTokenProgram extends string | AccountMeta<string> = string,
+  TAccountWalletQuote extends string | AccountMeta<string> = string,
   TAccountEventAuthority extends string | AccountMeta<string> = string,
   TAccountProgram extends string | AccountMeta<string> = string,
   TRemainingAccounts extends readonly AccountMeta<string>[] = [],
@@ -94,6 +98,16 @@ export type ClaimInstruction<
       TAccountTokenProgram extends string
         ? ReadonlyAccount<TAccountTokenProgram>
         : TAccountTokenProgram,
+      TAccountPot extends string ? WritableAccount<TAccountPot> : TAccountPot,
+      TAccountQuoteMint extends string
+        ? ReadonlyAccount<TAccountQuoteMint>
+        : TAccountQuoteMint,
+      TAccountQuoteTokenProgram extends string
+        ? ReadonlyAccount<TAccountQuoteTokenProgram>
+        : TAccountQuoteTokenProgram,
+      TAccountWalletQuote extends string
+        ? WritableAccount<TAccountWalletQuote>
+        : TAccountWalletQuote,
       TAccountEventAuthority extends string
         ? ReadonlyAccount<TAccountEventAuthority>
         : TAccountEventAuthority,
@@ -141,6 +155,11 @@ export type ClaimAsyncInput<
   TAccountMint extends InstructionAccountInput = InstructionAccountInput,
   TAccountTokenProgram extends InstructionAccountInput =
     InstructionAccountInput,
+  TAccountPot extends InstructionAccountInput = InstructionAccountInput,
+  TAccountQuoteMint extends InstructionAccountInput = InstructionAccountInput,
+  TAccountQuoteTokenProgram extends InstructionAccountInput =
+    InstructionAccountInput,
+  TAccountWalletQuote extends InstructionAccountInput = InstructionAccountInput,
   TAccountEventAuthority extends InstructionAccountInput =
     InstructionAccountInput,
   TAccountProgram extends InstructionAccountInput = InstructionAccountInput,
@@ -153,6 +172,11 @@ export type ClaimAsyncInput<
   potCoins: TAccountPotCoins;
   mint: TAccountMint;
   tokenProgram?: TAccountTokenProgram;
+  /** the handler. Left out in SOL. */
+  pot?: TAccountPot;
+  quoteMint?: TAccountQuoteMint;
+  quoteTokenProgram?: TAccountQuoteTokenProgram;
+  walletQuote?: TAccountWalletQuote;
   eventAuthority: TAccountEventAuthority;
   program: TAccountProgram;
 };
@@ -166,6 +190,10 @@ export async function getClaimInstructionAsync<
   TAccountPotCoins extends InstructionAccountInput,
   TAccountMint extends InstructionAccountInput,
   TAccountTokenProgram extends InstructionAccountInput,
+  TAccountPot extends InstructionAccountInput,
+  TAccountQuoteMint extends InstructionAccountInput,
+  TAccountQuoteTokenProgram extends InstructionAccountInput,
+  TAccountWalletQuote extends InstructionAccountInput,
   TAccountEventAuthority extends InstructionAccountInput,
   TAccountProgram extends InstructionAccountInput,
   TProgramAddress extends Address = typeof FAIR_OPEN_PROGRAM_ADDRESS,
@@ -179,6 +207,10 @@ export async function getClaimInstructionAsync<
     TAccountPotCoins,
     TAccountMint,
     TAccountTokenProgram,
+    TAccountPot,
+    TAccountQuoteMint,
+    TAccountQuoteTokenProgram,
+    TAccountWalletQuote,
     TAccountEventAuthority,
     TAccountProgram
   >,
@@ -219,6 +251,22 @@ export async function getClaimInstructionAsync<
     ResolvedInstructionAccountMeta<
       TAccountTokenProgram,
       InstructionAccountInputAddress<TAccountTokenProgram>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountPot,
+      InstructionAccountInputAddress<TAccountPot>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountQuoteMint,
+      InstructionAccountInputAddress<TAccountQuoteMint>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountQuoteTokenProgram,
+      InstructionAccountInputAddress<TAccountQuoteTokenProgram>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountWalletQuote,
+      InstructionAccountInputAddress<TAccountWalletQuote>
     >,
     ResolvedInstructionAccountMeta<
       TAccountEventAuthority,
@@ -262,6 +310,22 @@ export async function getClaimInstructionAsync<
       value: input.tokenProgram ?? null,
       isSigner: false,
       isWritable: false,
+    },
+    pot: { value: input.pot ?? null, isSigner: false, isWritable: true },
+    quoteMint: {
+      value: input.quoteMint ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
+    quoteTokenProgram: {
+      value: input.quoteTokenProgram ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
+    walletQuote: {
+      value: input.walletQuote ?? null,
+      isSigner: false,
+      isWritable: true,
     },
     eventAuthority: {
       value: input.eventAuthority ?? null,
@@ -306,6 +370,10 @@ export async function getClaimInstructionAsync<
       getAccountMeta("potCoins", accounts.potCoins),
       getAccountMeta("mint", accounts.mint),
       getAccountMeta("tokenProgram", accounts.tokenProgram),
+      getAccountMeta("pot", accounts.pot),
+      getAccountMeta("quoteMint", accounts.quoteMint),
+      getAccountMeta("quoteTokenProgram", accounts.quoteTokenProgram),
+      getAccountMeta("walletQuote", accounts.walletQuote),
       getAccountMeta("eventAuthority", accounts.eventAuthority),
       getAccountMeta("program", accounts.program),
     ],
@@ -346,6 +414,22 @@ export async function getClaimInstructionAsync<
       InstructionAccountInputAddress<TAccountTokenProgram>
     >,
     ResolvedInstructionAccountMeta<
+      TAccountPot,
+      InstructionAccountInputAddress<TAccountPot>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountQuoteMint,
+      InstructionAccountInputAddress<TAccountQuoteMint>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountQuoteTokenProgram,
+      InstructionAccountInputAddress<TAccountQuoteTokenProgram>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountWalletQuote,
+      InstructionAccountInputAddress<TAccountWalletQuote>
+    >,
+    ResolvedInstructionAccountMeta<
       TAccountEventAuthority,
       InstructionAccountInputAddress<TAccountEventAuthority>
     >,
@@ -366,6 +450,11 @@ export type ClaimInput<
   TAccountMint extends InstructionAccountInput = InstructionAccountInput,
   TAccountTokenProgram extends InstructionAccountInput =
     InstructionAccountInput,
+  TAccountPot extends InstructionAccountInput = InstructionAccountInput,
+  TAccountQuoteMint extends InstructionAccountInput = InstructionAccountInput,
+  TAccountQuoteTokenProgram extends InstructionAccountInput =
+    InstructionAccountInput,
+  TAccountWalletQuote extends InstructionAccountInput = InstructionAccountInput,
   TAccountEventAuthority extends InstructionAccountInput =
     InstructionAccountInput,
   TAccountProgram extends InstructionAccountInput = InstructionAccountInput,
@@ -378,6 +467,11 @@ export type ClaimInput<
   potCoins: TAccountPotCoins;
   mint: TAccountMint;
   tokenProgram?: TAccountTokenProgram;
+  /** the handler. Left out in SOL. */
+  pot?: TAccountPot;
+  quoteMint?: TAccountQuoteMint;
+  quoteTokenProgram?: TAccountQuoteTokenProgram;
+  walletQuote?: TAccountWalletQuote;
   eventAuthority: TAccountEventAuthority;
   program: TAccountProgram;
 };
@@ -391,6 +485,10 @@ export function getClaimInstruction<
   TAccountPotCoins extends InstructionAccountInput,
   TAccountMint extends InstructionAccountInput,
   TAccountTokenProgram extends InstructionAccountInput,
+  TAccountPot extends InstructionAccountInput,
+  TAccountQuoteMint extends InstructionAccountInput,
+  TAccountQuoteTokenProgram extends InstructionAccountInput,
+  TAccountWalletQuote extends InstructionAccountInput,
   TAccountEventAuthority extends InstructionAccountInput,
   TAccountProgram extends InstructionAccountInput,
   TProgramAddress extends Address = typeof FAIR_OPEN_PROGRAM_ADDRESS,
@@ -404,6 +502,10 @@ export function getClaimInstruction<
     TAccountPotCoins,
     TAccountMint,
     TAccountTokenProgram,
+    TAccountPot,
+    TAccountQuoteMint,
+    TAccountQuoteTokenProgram,
+    TAccountWalletQuote,
     TAccountEventAuthority,
     TAccountProgram
   >,
@@ -443,6 +545,22 @@ export function getClaimInstruction<
   ResolvedInstructionAccountMeta<
     TAccountTokenProgram,
     InstructionAccountInputAddress<TAccountTokenProgram>
+  >,
+  ResolvedInstructionAccountMeta<
+    TAccountPot,
+    InstructionAccountInputAddress<TAccountPot>
+  >,
+  ResolvedInstructionAccountMeta<
+    TAccountQuoteMint,
+    InstructionAccountInputAddress<TAccountQuoteMint>
+  >,
+  ResolvedInstructionAccountMeta<
+    TAccountQuoteTokenProgram,
+    InstructionAccountInputAddress<TAccountQuoteTokenProgram>
+  >,
+  ResolvedInstructionAccountMeta<
+    TAccountWalletQuote,
+    InstructionAccountInputAddress<TAccountWalletQuote>
   >,
   ResolvedInstructionAccountMeta<
     TAccountEventAuthority,
@@ -486,6 +604,22 @@ export function getClaimInstruction<
       isSigner: false,
       isWritable: false,
     },
+    pot: { value: input.pot ?? null, isSigner: false, isWritable: true },
+    quoteMint: {
+      value: input.quoteMint ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
+    quoteTokenProgram: {
+      value: input.quoteTokenProgram ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
+    walletQuote: {
+      value: input.walletQuote ?? null,
+      isSigner: false,
+      isWritable: true,
+    },
     eventAuthority: {
       value: input.eventAuthority ?? null,
       isSigner: false,
@@ -518,6 +652,10 @@ export function getClaimInstruction<
       getAccountMeta("potCoins", accounts.potCoins),
       getAccountMeta("mint", accounts.mint),
       getAccountMeta("tokenProgram", accounts.tokenProgram),
+      getAccountMeta("pot", accounts.pot),
+      getAccountMeta("quoteMint", accounts.quoteMint),
+      getAccountMeta("quoteTokenProgram", accounts.quoteTokenProgram),
+      getAccountMeta("walletQuote", accounts.walletQuote),
       getAccountMeta("eventAuthority", accounts.eventAuthority),
       getAccountMeta("program", accounts.program),
     ],
@@ -558,6 +696,22 @@ export function getClaimInstruction<
       InstructionAccountInputAddress<TAccountTokenProgram>
     >,
     ResolvedInstructionAccountMeta<
+      TAccountPot,
+      InstructionAccountInputAddress<TAccountPot>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountQuoteMint,
+      InstructionAccountInputAddress<TAccountQuoteMint>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountQuoteTokenProgram,
+      InstructionAccountInputAddress<TAccountQuoteTokenProgram>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountWalletQuote,
+      InstructionAccountInputAddress<TAccountWalletQuote>
+    >,
+    ResolvedInstructionAccountMeta<
       TAccountEventAuthority,
       InstructionAccountInputAddress<TAccountEventAuthority>
     >,
@@ -582,8 +736,13 @@ export type ParsedClaimInstruction<
     potCoins: TAccountMetas[5];
     mint: TAccountMetas[6];
     tokenProgram: TAccountMetas[7];
-    eventAuthority: TAccountMetas[8];
-    program: TAccountMetas[9];
+    /** the handler. Left out in SOL. */
+    pot?: TAccountMetas[8] | undefined;
+    quoteMint?: TAccountMetas[9] | undefined;
+    quoteTokenProgram?: TAccountMetas[10] | undefined;
+    walletQuote?: TAccountMetas[11] | undefined;
+    eventAuthority: TAccountMetas[12];
+    program: TAccountMetas[13];
   };
   data: ClaimInstructionData;
 };
@@ -596,12 +755,12 @@ export function parseClaimInstruction<
     InstructionWithAccounts<TAccountMetas> &
     InstructionWithData<ReadonlyUint8Array>,
 ): ParsedClaimInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 10) {
+  if (instruction.accounts.length < 14) {
     throw new SolanaError(
       SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS,
       {
         actualAccountMetas: instruction.accounts.length,
-        expectedAccountMetas: 10,
+        expectedAccountMetas: 14,
       },
     );
   }
@@ -610,6 +769,12 @@ export function parseClaimInstruction<
     const accountMeta = (instruction.accounts as TAccountMetas)[accountIndex]!;
     accountIndex += 1;
     return accountMeta;
+  };
+  const getNextOptionalAccount = () => {
+    const accountMeta = getNextAccount();
+    return accountMeta.address === FAIR_OPEN_PROGRAM_ADDRESS
+      ? undefined
+      : accountMeta;
   };
   return {
     programAddress: instruction.programAddress,
@@ -622,6 +787,10 @@ export function parseClaimInstruction<
       potCoins: getNextAccount(),
       mint: getNextAccount(),
       tokenProgram: getNextAccount(),
+      pot: getNextOptionalAccount(),
+      quoteMint: getNextOptionalAccount(),
+      quoteTokenProgram: getNextOptionalAccount(),
+      walletQuote: getNextOptionalAccount(),
       eventAuthority: getNextAccount(),
       program: getNextAccount(),
     },
