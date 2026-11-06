@@ -15,13 +15,11 @@ import {
   getBase64Encoder,
   getSignatureFromTransaction,
   getTransactionDecoder,
-  lamports,
   signTransaction,
   type Address,
   type KeyPairSigner,
 } from "@solana/kit";
-import { getTransferSolInstruction } from "@solana-program/system";
-import { getCloseAccountInstruction, getTransferCheckedInstruction } from "@solana-program/token";
+import { getTransferCheckedInstruction } from "@solana-program/token";
 import { describe, expect, it } from "vitest";
 import {
   closeLaunchInstructions,
@@ -36,7 +34,7 @@ import {
 } from "@top-pad/chain";
 import { fetchLaunch, fetchMaybeLaunch, fetchMaybeQuoteSettings, findPotPda, findQuoteSettingsPda, Failure, LaunchStatus } from "@top-pad/clients/fair-open";
 import { bank, chainTime, fund, programCompute, rpc, send } from "./devnet";
-import { admitted, closeNonce, deposit, depositorsOf, markFailed, newPerson, quoteHeld, recoverDeposits, refundAll, scheduleFairOpen, seatOf } from "./fairOpen";
+import { admitted, closeNonce, deposit, depositorsOf, markFailed, newPerson, quoteHeld, recoverDeposits, refundAll, scheduleFairOpen, seatOf, sweepDepositors } from "./fairOpen";
 
 const keys = ["keeper.json", "admission.json", "bank.json"].every((name) => existsSync(join(homedir(), ".config/top-pad/devnet", name)));
 const API = process.env.HEAT_API_URL || "https://top-pad-api-devnet.imdev2023.workers.dev";
@@ -147,22 +145,11 @@ describe.skipIf(!keys)("a Fair Open in Circle's devnet USDC", () => {
         const after = (await rpc.getBalance(payer.address, { commitment: "confirmed" }).send()).value;
         expect(after - creatorBefore).toBe(rents.reduce((a: bigint, b) => a + b, 0n) - 5_000n);
         expect((await fetchMaybeLaunch(rpc, launch.launch)).exists).toBe(false);
-        expect((await rpc.getAccountInfo(pot).send()).value).toBeNull();
+        expect((await rpc.getAccountInfo(pot, { encoding: "base64" }).send()).value).toBeNull();
         await closeNonce(launch.nonce, payer.address);
       } finally {
         await recoverDeposits(launch.launch, payer, depositors);
-        // The USDC back to the bank, each depositor's account of it closed into the bank, and their SOL swept back.
-        for (const d of depositors) {
-          const account = await quoteTokenAccount(d.address, USDC);
-          const amount = await quoteHeld(d.address, USDC);
-          if (!(await rpc.getAccountInfo(account).send()).value) continue;
-          await send(d, [
-            ...(amount > 0n ? [getTransferCheckedInstruction({ source: account, mint: USDC.mint, destination: bankUsdc, authority: d, amount, decimals: 6 })] : []),
-            getCloseAccountInstruction({ account, destination: payer.address, owner: d }),
-          ]);
-          const { value: left } = await rpc.getBalance(d.address, { commitment: "confirmed" }).send();
-          if (left > 5_000n) await send(d, [getTransferSolInstruction({ source: d, destination: payer.address, amount: lamports(left - 5_000n) })]);
-        }
+        await sweepDepositors(depositors, USDC);
       }
     },
     10 * 60_000,

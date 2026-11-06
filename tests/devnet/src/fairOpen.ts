@@ -27,7 +27,7 @@ import {
   type Nonce,
 } from "@solana/kit";
 import { fetchNonce } from "@solana-program/system";
-import { findAssociatedTokenPda, getCloseAccountInstruction } from "@solana-program/token";
+import { findAssociatedTokenPda, getCloseAccountInstruction, getTransferCheckedInstruction } from "@solana-program/token";
 import {
   admissionMessage,
   claimablePool,
@@ -73,7 +73,7 @@ import {
 } from "@top-pad/chain";
 import { fetchMaybeLaunch, fetchQuoteSettings, findQuoteSettingsPda, getSeatDecoder, getSeatSize, LaunchStatus, type Seat } from "@top-pad/clients/fair-open";
 import { fetchVirtualPool } from "@top-pad/clients/dbc";
-import { bankFile, chainTime, coinBalance, devnet, rpc, send } from "./devnet";
+import { bank, bankFile, chainTime, coinBalance, devnet, rpc, send, sweep } from "./devnet";
 
 const keyFile = (name: string) => Uint8Array.from(JSON.parse(readFileSync(join(homedir(), ".config/top-pad/devnet", name), "utf8")) as number[]);
 
@@ -340,6 +340,32 @@ export async function recoverDeposits(launch: Address, sender: KeyPairSigner, wa
   if (!account.exists || fairOpenPhase(account.data, await chainTime()).phase !== "failed") return;
   if (account.data.seats === 0) await send(sender, await closeLaunchInstructions({ launch, creator: account.data.creator, computeUnitPrice: 0n, quote }));
   await closeNonce(account.data.nonce, account.data.creator);
+}
+
+/**
+ * Sends what a run's throwaway depositors hold back to Heat's bank, whether the run finished or stopped partway: in a
+ * token quote each one's balance of it to the bank's account of it, and each one's account of it closed, its rent to the
+ * bank; then their SOL. Run it after `recoverDeposits`, which brings their deposits back to them first.
+ */
+export async function sweepDepositors(wallets: KeyPairSigner[], quote?: QuoteToken) {
+  if (quote && !inSol(quote)) {
+    const to = await bank();
+    const toAccount = await quoteTokenAccount(to.address, quote);
+    for (const wallet of wallets) {
+      const account = await quoteTokenAccount(wallet.address, quote);
+      const balance = await rpc.getTokenAccountBalance(account, { commitment: "confirmed" }).send().catch(() => null);
+      if (!balance) continue;
+      const amount = BigInt(balance.value.amount);
+      const program = { programAddress: quote.tokenProgram };
+      await send(wallet, [
+        ...(amount > 0n
+          ? [getTransferCheckedInstruction({ source: account, mint: quote.mint, destination: toAccount, authority: wallet, amount, decimals: balance.value.decimals }, program)]
+          : []),
+        getCloseAccountInstruction({ account, destination: to.address, owner: wallet }, program),
+      ]);
+    }
+  }
+  await sweep(...wallets);
 }
 
 /** What settling an opened launch sent: each step's transaction, for the tests to read back. */
