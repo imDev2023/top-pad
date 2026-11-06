@@ -282,6 +282,8 @@ export const launches = pgTable(
     mint: text("mint").notNull().unique(),
     pool: text("pool").notNull().unique(),
     config: text("config").notNull(),
+    /** The mint the coin is priced in, whose `QuoteSettings` named `config` (ADR 0007). */
+    quoteMint: text("quote_mint").notNull(),
     metadataUri: text("metadata_uri").notNull(),
     imageUri: text("image_uri").notNull(),
     /** The message the Creator wallet signs, base64: a submitted transaction must carry exactly these bytes. */
@@ -425,6 +427,13 @@ export const pools = pgTable(
     config: text("config").notNull(),
     /** The pool's DBC creator role when it was created. */
     creator: text("creator").notNull(),
+    /**
+     * What its config prices it in, the config's Graduation Target in the quote's raw units, and curve A's starting
+     * square-root price on it, read from the config when the pool was created (ADR 0007): a config never changes.
+     */
+    quoteMint: text("quote_mint").notNull(),
+    graduationTarget: bigint("graduation_target", { mode: "bigint" }).notNull(),
+    startSqrtPrice: numeric("start_sqrt_price", { precision: 40, scale: 0 }).notNull(),
     name: text("name").notNull(),
     ticker: text("ticker").notNull(),
     uri: text("uri").notNull(),

@@ -6,6 +6,7 @@
 // `DATABASE_URL=... RPC_URL=... pnpm --filter @top-pad/indexer reindex <cluster> <account>`; it exits 1 if any fails.
 import { CLUSTERS } from "@top-pad/chain";
 import { createDb } from "@top-pad/db";
+import { loadHeatConfigs, rpcConfigReader } from "../src/configs";
 import { heatHandler } from "../src/heat";
 import { IndexBatchError, reindexTransactions, rpcSource, type IndexResult, type ListedSignature } from "../src/index";
 import { blockPositions } from "../src/live";
@@ -29,7 +30,9 @@ const history = listed.reverse().filter((s) => !s.failed);
 console.log(`${account}: ${history.length} transactions to index again`);
 
 const { db, close } = createDb(url);
-const handle = heatHandler({ heat, blockIndexOf: blockPositions(rpcUrl) });
+// Every config Heat's coins can be on, SOL's pair and each other quote's (ADR 0007), so a coin priced in USDC is indexed.
+const configs = await loadHeatConfigs(db, heat, rpcConfigReader(rpcUrl));
+const handle = heatHandler({ heat, configs: () => configs, blockIndexOf: blockPositions(rpcUrl) });
 const indexed: IndexResult = {};
 const failed: string[] = [];
 try {

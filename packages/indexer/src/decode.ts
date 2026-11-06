@@ -283,6 +283,12 @@ export type TaxShareCollection = {
 };
 
 export type Decoded = {
+  /**
+   * The configs of coin registrations, pool creations and swaps the transaction holds on configs not in `configs`: a
+   * registration on one means the caller's list of Heat's configs is older than the launch, which the indexer then reads
+   * again before it indexes the transaction (ADR 0007: the band job makes pairs as prices move).
+   */
+  unknownConfigs: string[];
   pools: PoolCreated[];
   coins: CoinRegistered[];
   swaps: Swap[];
@@ -380,6 +386,7 @@ function executionOrder(tx: RawTransaction) {
  */
 export function decodeTransaction(tx: RawTransaction, configs: ReadonlySet<string>, graduated: ReadonlyMap<string, GraduatedPoolRef> = new Map()): Decoded {
   const decoded: Decoded = {
+    unknownConfigs: [],
     pools: [],
     coins: [],
     swaps: [],
@@ -465,7 +472,10 @@ export function decodeTransaction(tx: RawTransaction, configs: ReadonlySet<strin
     } else if (program === FEE_PROGRAM_ADDRESS) {
       if (startsWith(event, COIN_REGISTERED_EVENT_DISCRIMINATOR)) {
         const e = parseCoinRegisteredEvent(event);
-        if (!configs.has(e.config)) continue;
+        if (!configs.has(e.config)) {
+          decoded.unknownConfigs.push(e.config);
+          continue;
+        }
         decoded.coins.push({
           mint: e.mint,
           pool: e.pool,
@@ -515,7 +525,10 @@ export function decodeTransaction(tx: RawTransaction, configs: ReadonlySet<strin
       decoded.curveCompletes.push({ pool: e.pool, mint: key(emitter.ix.accounts[SWAP_BASE_MINT]!), config: e.config, quoteReserve: e.quoteReserve });
     } else if (startsWith(event, EVT_INITIALIZE_POOL_EVENT_DISCRIMINATOR)) {
       const e = parseEvtInitializePoolEvent(event);
-      if (!configs.has(e.config)) continue;
+      if (!configs.has(e.config)) {
+        decoded.unknownConfigs.push(e.config);
+        continue;
+      }
       if (identify(emitter.data) !== DynamicBondingCurveInstruction.InitializeVirtualPoolWithSplToken) {
         throw new Error(`pool ${e.pool} on a Heat config was not made by initialize_virtual_pool_with_spl_token`);
       }
@@ -532,7 +545,10 @@ export function decodeTransaction(tx: RawTransaction, configs: ReadonlySet<strin
       });
     } else if (startsWith(event, EVT_SWAP3_EVENT_DISCRIMINATOR)) {
       const e = parseEvtSwap3Event(event);
-      if (!configs.has(e.config)) continue;
+      if (!configs.has(e.config)) {
+        decoded.unknownConfigs.push(e.config);
+        continue;
+      }
       if (!swapsSeen.includes(emitter)) throw new Error(`a swap event on pool ${e.pool} not emitted by a swap`);
       if (e.feeOnBaseToken) throw new Error(`a swap on pool ${e.pool} paid its fee in the coin, which Heat's configs never do`);
       emitter.swapEvents++;

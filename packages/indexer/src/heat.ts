@@ -21,6 +21,7 @@ import {
   type DbOrTransaction,
 } from "@top-pad/db";
 import { foldTrade } from "./candles";
+import { solConfigs, type HeatConfigs } from "./configs";
 import {
   dammPoolsIn,
   decodeTransaction,
@@ -72,6 +73,16 @@ export type Indexed = {
 export type HeatHandlerOptions = {
   /** Heat on the cluster being indexed; it must have its configs. */
   heat: HeatCluster;
+  /**
+   * Every config Heat's coins can be made on (`loadHeatConfigs`), asked afresh for each transaction, so a pair the band
+   * job makes is indexed from the moment the caller loads it; SOL's pair alone when left out.
+   */
+  configs?: () => HeatConfigs;
+  /**
+   * Reads Heat's configs again, for a transaction that registers a coin, makes a pool or swaps on a config `configs`
+   * does not hold: a pair named since they were read. Without it such a transaction is indexed as `configs` stand.
+   */
+  refreshConfigs?: () => Promise<HeatConfigs>;
   /** A transaction's place in its block (`getBlock`), asked only for a transaction with trades. */
   blockIndexOf(slot: number, signature: string): Promise<number>;
   /** Called once a transaction's rows are committed, with what it added. */
@@ -95,19 +106,29 @@ export function orderKey(slot: number, blockIndex: number, eventIndex: number): 
 export const provisionalOrderKey = (slot: number, eventIndex: number) => orderKey(slot, BLOCK_INDEX_LIMIT - 1, eventIndex);
 
 /** The handler the ingestion entry point runs on Heat's transactions. */
-export function heatHandler({ heat, blockIndexOf, onIndexed }: HeatHandlerOptions): TransactionHandler {
+export function heatHandler({ heat, configs: configsNow, refreshConfigs, blockIndexOf, onIndexed }: HeatHandlerOptions): TransactionHandler {
   if (!heat.configs) throw new Error("the indexer needs Heat's configs on its cluster");
-  const configs = new Set<string>([heat.configs.fairOpen, heat.configs.instant]);
+  const solPair = solConfigs(heat);
 
   return async (db, tx: RawTransaction): Promise<IndexResult> => {
+    let known = configsNow?.() ?? solPair;
+    /** The config a pool or swap was decoded on: the decoder only takes configs `known` holds. */
+    const on = (config: string) => known.get(config)!;
     const signature = tx.transaction.signatures[0]!;
     // The graduated pools the transaction trades on or claims from, as Heat knows them.
     const named = dammPoolsIn(tx);
-    const known = named.length
+    const graduatedRows = named.length
       ? await db.select({ pool: graduations.pool, mint: graduations.mint, config: graduations.config }).from(graduations).where(inArray(graduations.pool, named))
       : [];
-    const graduated = new Map<string, GraduatedPoolRef>(known.map((g) => [g.pool, { mint: g.mint, config: g.config }]));
-    const decoded = decodeTransaction(tx, configs, graduated);
+    const graduated = new Map<string, GraduatedPoolRef>(graduatedRows.map((g) => [g.pool, { mint: g.mint, config: g.config }]));
+    let decoded = decodeTransaction(tx, known.set(), graduated);
+    if (decoded.unknownConfigs.length && refreshConfigs) {
+      const fresh = await refreshConfigs();
+      if (decoded.unknownConfigs.some((config) => fresh.has(config))) {
+        known = fresh;
+        decoded = decodeTransaction(tx, known.set(), graduated);
+      }
+    }
     // A trade's place orders it among its slot's; a pool's creation is where Bundle Radar counts positions from (spec 6.4).
     const blockIndex = decoded.swaps.length || decoded.pools.length ? await blockIndexOf(tx.slot, signature) : null;
     const blockTime = new Date((tx.blockTime ?? Math.floor(Date.now() / 1000)) * 1000);
@@ -128,6 +149,9 @@ export function heatHandler({ heat, blockIndexOf, onIndexed }: HeatHandlerOption
             mint: p.mint,
             config: p.config,
             creator: p.creator,
+            quoteMint: on(p.config).quote.mint,
+            graduationTarget: on(p.config).graduationTarget,
+            startSqrtPrice: on(p.config).sqrtStartPrice.toString(),
             name: p.name,
             ticker: p.ticker,
             uri: p.uri,
@@ -135,7 +159,7 @@ export function heatHandler({ heat, blockIndexOf, onIndexed }: HeatHandlerOption
             createdSignature: signature,
             createdSlot: tx.slot,
             createdAt: blockTime,
-            sqrtPrice: heat.sqrtStartPrice.toString(),
+            sqrtPrice: on(p.config).sqrtStartPrice.toString(),
             quoteReserve: 0n,
           })
           .onConflictDoNothing();
@@ -145,7 +169,7 @@ export function heatHandler({ heat, blockIndexOf, onIndexed }: HeatHandlerOption
       const added: Trade[] = [];
       for (const s of decoded.swaps) {
         const key = orderKey(tx.slot, blockIndex!, s.eventIndex);
-        const price = priceOfSqrtPrice(s.sqrtPrice, heat.quote.decimals);
+        const price = priceOfSqrtPrice(s.sqrtPrice, on(s.config).quote.decimals);
         const at = Number(s.timestamp);
         const [row] = await t
           .insert(trades)

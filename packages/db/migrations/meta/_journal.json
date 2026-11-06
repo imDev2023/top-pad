@@ -99,6 +99,13 @@
       "when": 1793940360409,
       "tag": "0013_quote_config_pairs",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1793943760998,
+      "tag": "0014_stock_priced_coins",
+      "breakpoints": true
     }
   ]
 }

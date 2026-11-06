@@ -22,6 +22,7 @@ import {
 import { createTestDatabase } from "@top-pad/db/testing";
 import { CANDLE_SECONDS, foldTrade, rebuildCandles, writtenCandles, type CandleSeconds } from "./candles";
 import type { RawTransaction } from "./decode";
+import { HeatConfigs, solConfigs } from "./configs";
 import { heatHandler, orderKey, type Indexed } from "./heat";
 import { IndexBatchError, indexTransactions, reindexTransactions } from "./index";
 
@@ -203,6 +204,7 @@ describe("indexing Heat's transactions", () => {
       mint: MINT,
       pool: POOL,
       config: heat.configs!.instant,
+      quoteMint: "So11111111111111111111111111111111111111112",
       metadataUri: "https://turbo-gateway.com/metadata",
       imageUri: "https://turbo-gateway.com/image",
       message: "",
@@ -294,6 +296,9 @@ describe("indexing a Graduation", () => {
       pool: CURVE,
       mint: MINT,
       config: REHEARSAL,
+      quoteMint: "So11111111111111111111111111111111111111112",
+      graduationTarget: 250_000_000n,
+      startSqrtPrice: "6092491434681104",
       creator: "923oSKVPTAdwojxpNBjMsbLwUg8bKTPMEp3LGWn7EDus",
       name: "Heat Graduation Test",
       ticker: "HEATGRAD",
@@ -421,5 +426,38 @@ describe("candles", () => {
     }
     const [candle] = await writtenCandles(db, MINT, 1);
     expect(candle).toMatchObject({ open: early.price, close: late.price, high: late.price, low: early.price, trades: 2 });
+  });
+});
+
+describe("indexing a coin priced in another quote (ADR 0007)", () => {
+  // #88's hand-made devnet USDC pair, retired by the band job on 2026-11-06, and a pool made on its Instant config then,
+  // with its first buy of 0.01 USDC: read from devnet, the config's start price with it.
+  const USDC = heat.quotes.find((q) => q.symbol === "USDC")!;
+  const INSTANT = "4Q9FsvXwiwCA6Anu5q84DLkUeT7jrHK4eXqNgseG1Foa";
+  const FAIR_OPEN = "HB5FNxnP9WY7o1huM8QBrqGp13TmJUfzTxpSKZ9aZ2pC";
+  const pair = (config: string, mode: "fair_open" | "instant") => ({ config, mode, quote: USDC, graduationTarget: 86_974_550n, sqrtStartPrice: 3_593_527_965_327_561n });
+  const withUsdc = new HeatConfigs([...solConfigs(heat).addresses().map((a) => solConfigs(heat).get(a)!), pair(FAIR_OPEN, "fair_open"), pair(INSTANT, "instant")]);
+
+  it("records the pool with its quote, target and start, and prices its trades in the quote's 6 decimals", async () => {
+    const handle = heatHandler({ heat, configs: () => withUsdc, blockIndexOf: async () => 3 });
+    await indexTransactions(db, handle, [fixture("usdc-pool-created"), fixture("usdc-buy")]);
+    const [pool] = await db.select().from(pools);
+    expect(pool).toMatchObject({ config: INSTANT, quoteMint: USDC.mint, graduationTarget: 86_974_550n, startSqrtPrice: "3593527965327561" });
+    const [trade] = await db.select().from(trades);
+    expect(trade).toMatchObject({ side: "buy", quoteAmount: 10_000n, mint: pool!.mint });
+    // (sqrt / 2^64)^2 raw USDC a raw coin, times 10^(6 - 6): whole USDC a whole coin.
+    const sqrt = 3_593_541_496_646_879n;
+    expect(Number(trade!.price)).toBeCloseTo(Number(sqrt * sqrt) / 2 ** 128, 15);
+  });
+
+  it("ignores a quote's pool while its configs are unknown, and reads them again when a launch names one", async () => {
+    await indexTransactions(db, heatHandler({ heat, blockIndexOf: async () => 3 }), [fixture("usdc-pool-created")]);
+    expect(await db.select().from(pools)).toEqual([]);
+    await db.delete(indexedTransactions);
+    let asked = 0;
+    const handle = heatHandler({ heat, configs: () => solConfigs(heat), refreshConfigs: async () => (asked++, withUsdc), blockIndexOf: async () => 3 });
+    await indexTransactions(db, handle, [fixture("usdc-pool-created")]);
+    expect(asked).toBe(1);
+    expect((await db.select().from(pools))[0]).toMatchObject({ quoteMint: USDC.mint });
   });
 });

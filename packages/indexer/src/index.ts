@@ -7,6 +7,7 @@ import { indexedTransactions, indexerCursors, type Db } from "@top-pad/db";
 import type { RawTransaction } from "./decode";
 
 export * from "./candles";
+export * from "./configs";
 export * from "./decode";
 export * from "./funding";
 export * from "./heat";

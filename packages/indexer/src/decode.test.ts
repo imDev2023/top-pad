@@ -158,10 +158,14 @@ describe("decoding a transaction", () => {
       creatorLocks: [],
       taxShares: [],
     };
-    for (const name of ["launch-with-creator-buy", "window-claim", "creator-claim"]) expect(decodeTransaction(fixture(name), new Set())).toEqual(none);
+    for (const name of ["launch-with-creator-buy", "window-claim", "creator-claim"]) {
+      expect(decodeTransaction(fixture(name), new Set())).toEqual({ ...none, unknownConfigs: expect.any(Array) });
+    }
+    // A launch on a config the caller does not know says so, for the indexer to read Heat's configs again (ADR 0007).
+    expect(decodeTransaction(fixture("launch-with-creator-buy"), new Set()).unknownConfigs).toContain(instant);
     const failed = fixture("launch-with-creator-buy");
     failed.meta!.err = { InstructionError: [4, { Custom: 6000 }] };
-    expect(decodeTransaction(failed, HEAT)).toEqual(none);
+    expect(decodeTransaction(failed, HEAT)).toEqual({ ...none, unknownConfigs: [] });
   });
 
   it("refuses a swap whose event is missing rather than index it half right", () => {
