@@ -10,8 +10,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { address } from "@solana/kit";
 import { afterAll, describe, expect, it } from "vitest";
-import { CLUSTERS } from "@top-pad/chain";
+import { CLUSTERS, FAIR_OPEN_PROGRAM_ADDRESS, FEE_PROGRAM_ADDRESS } from "@top-pad/chain";
 import { CoinTrades } from "@top-pad/contract";
+import { createDb, indexerCursors } from "@top-pad/db";
 import { createTestDatabase } from "@top-pad/db/testing";
 import { decodeTransaction, fetchRawTransaction } from "@top-pad/indexer";
 import { bankFile, fundedWallets, poolAroundHeat, rpc, rpcUrl, swap, sweep } from "./devnet";
@@ -64,6 +65,24 @@ describe.skipIf(!helius || !process.env.TEST_DATABASE_URL || !existsSync(bankFil
     }
   }
 
+  /**
+   * The indexer's cursors at the newest transaction of each account it watches, as a running indexer keeps them: on a
+   * database with none, reconciliation reads each account's whole history oldest first, 200 transactions a minute, and
+   * devnet's history grew so long that it never reached this test's trades in time (#88, 2026-11-06).
+   */
+  async function caughtUp() {
+    const { configs } = CLUSTERS.devnet!;
+    const { db, close } = createDb(database.url);
+    try {
+      for (const account of [configs!.instant, configs!.fairOpen, FEE_PROGRAM_ADDRESS, FAIR_OPEN_PROGRAM_ADDRESS]) {
+        const [newest] = await rpc.getSignaturesForAddress(account, { commitment: "confirmed", limit: 1 }).send();
+        if (newest) await db.insert(indexerCursors).values({ account, signature: newest.signature, slot: Number(newest.slot) });
+      }
+    } finally {
+      await close();
+    }
+  }
+
   async function stop() {
     const running = api!;
     api = null;
@@ -82,6 +101,7 @@ describe.skipIf(!helius || !process.env.TEST_DATABASE_URL || !existsSync(bankFil
 
   it("indexes every trade made while it was down, as the chain has them", { timeout: 6 * 60_000 }, async () => {
     database = await createTestDatabase();
+    await caughtUp();
     await start();
     const [stranger, trader] = await fundedWallets(30_000_000n, 60_000_000n);
     const { mint, pool } = await poolAroundHeat(stranger);
@@ -104,7 +124,11 @@ describe.skipIf(!helius || !process.env.TEST_DATABASE_URL || !existsSync(bankFil
     const indexed = await until("the missed trades", async () => {
       const all = await trades();
       return missed.every((s) => all.some((t) => t.signature === s)) && all;
-    }, 120_000);
+    }, 120_000).catch(async (e: Error) => {
+      const status = await fetch(`${API}/indexer`).then((r) => r.text()).catch((f: Error) => f.message);
+      const seen = await trades().then((all) => all.map((t) => t.signature)).catch((f: Error) => [f.message]);
+      throw new Error(`${e.message}: missed ${missed.join(", ")}; indexed ${seen.join(", ")}; the indexer: ${status}; wrangler said:\n${readFileSync(logFile, "utf8").slice(-3_000)}`, { cause: e });
+    });
 
     // Checked against the chain: every swap the pool's transactions hold, decoded from the chain, is indexed, and nothing else.
     const signatures = await rpc.getSignaturesForAddress(address(pool), { commitment: "confirmed" }).send();
