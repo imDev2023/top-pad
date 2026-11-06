@@ -136,6 +136,8 @@ test("an Instant launch in USDC from the picker, bought and sold from its page i
     const row = traderPage.locator("[data-trade]").first();
     await expect(row).toContainText("0.5");
     await expect(traderPage.getByRole("columnheader", { name: "USDC" })).toBeVisible();
+    // The chart draws the coin's first trade once the indexer has its candle, without a reload of the page.
+    await expect(traderPage.getByText("No trades yet: the chart starts with the first one.")).toBeHidden({ timeout: 20_000 });
     const coins = await coinBalance(trader.address, mint as Address);
     expect(coins).toBeGreaterThan(0n);
     await panel.getByRole("radio", { name: "Sell", exact: true }).click();

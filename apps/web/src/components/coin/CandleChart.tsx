@@ -51,6 +51,9 @@ function palette() {
  * through the quote's multiplier in force now (ADR 0007 decision 5), the same for all of them, so a split or a dividend
  * rescales the chart as a whole and never puts a step in it.
  */
+/** How long after a trade confirms the indexer has written its candle, with room: Helius serves it 1.5 to 2 s late. */
+const INDEXER_LAG_MS = 4_000;
+
 export function CandleChart({
   mint,
   ageSeconds,
@@ -143,9 +146,12 @@ export function CandleChart({
       for (const trade of trades) {
         if (!series.current) return;
         const last = newest.current;
-        // The coin's first candle opens at the curve's start, which the API knows: load the candles afresh.
+        // The coin's first candle opens at the curve's start, which the API knows: load the candles afresh. A trade the
+        // browser's fast path shows comes seconds before the indexer has written its candle, so load them again once
+        // the indexer has caught up, or a coin's first trades would leave its chart saying it has none.
         if (!last) {
           setReloads((n) => n + 1);
+          setTimeout(() => setReloads((n) => n + 1), INDEXER_LAG_MS);
           return;
         }
         const value = Number(trade.price) * scale;
