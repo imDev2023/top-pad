@@ -92,6 +92,13 @@
       "when": 1793646387483,
       "tag": "0012_protected_images_tried_at",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1793940360409,
+      "tag": "0013_quote_config_pairs",
+      "breakpoints": true
     }
   ]
 }
