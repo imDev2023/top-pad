@@ -72,7 +72,9 @@ jobs:
       - run: cargo build-sbf --manifest-path tests/dbc-stand-in/Cargo.toml --tools-version v1.57 --arch v2
       - run: cargo build-sbf --manifest-path tests/lock-stand-in/Cargo.toml --tools-version v1.57 --arch v2
       - run: cargo build-sbf --manifest-path tests/damm-stand-in/Cargo.toml --tools-version v1.57 --arch v2
-      - run: anchor build
+      # The fee program first: the Fair Open program's tests embed fee.so, its IDL build compiles them, and `anchor build`
+      # takes the programs in no fixed order (fair_open first on 2026-11-06, #88).
+      - run: anchor build -p fee && anchor build
       # The committed IDLs are what the generated clients came from: the programs' own build must not change them.
       - run: cp target/idl/fee.json target/idl/fair_open.json packages/clients/idl/ && git diff --exit-code packages/clients/idl
       # After the build, since the tests embed the built programs.
