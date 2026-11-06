@@ -812,6 +812,8 @@ Sources: [Stack](https://github.com/imDev2023/top-pad/issues/17), [Backend desig
 
   As built on devnet ([#42](https://github.com/imDev2023/top-pad/issues/42), 2026-10-29): the indexer is one Durable Object in the API Worker.
   - Its logs socket watches what mentions Heat's two configs and the fee program rather than the DBC program, through which every devnet launchpad's pools would come; DAMM v2 joins with the graduated pools ([#51](https://github.com/imDev2023/top-pad/issues/51)).
+  - Since [#90](https://github.com/imDev2023/top-pad/issues/90) it watches every config Heat's coins can be on: SOL's pair and every pair in `quote_config_pairs`, the retired ones too (`loadHeatConfigs` in `@top-pad/indexer`), read again every minute; each pool records its quote, its config's Graduation Target and curve A's start on it, and its trades are priced in its quote's decimals.
+    A transaction counts as indexed once its handler has run, so one indexed while the list was older than its config would be lost for good: a coin registration, pool creation or swap on a config the list does not hold makes the handler read the list again first (at most every 5 s).
   - DBC and the fee program emit events by self-CPI, so each reported transaction is fetched and decoded; a swap's `EvtSwap3` gives the trade, its payer the trader.
   - An alarm every 15 s keeps it awake and reopens a dropped socket; reconciliation runs every minute, asking the chain first so a quiet Heat leaves the database asleep.
   - A launch that lands goes to the indexer at once, its fast path, and a coin's page waits for a coin launched moments ago rather than say there is none.
@@ -1054,6 +1056,13 @@ Thin end-to-end slices, in dependency order, each ending in something demonstrab
 8. **Creators and discovery**: the Creator record, Creator wallet handover and rotation, the World ID mark, role-transfer tracking; the board, trending with the known-bot list, featured slots, the calendar.
    Demo: the board ranks a test cohort's coins.
 9. **Stock-priced coins** ([ADR 0007](adr/0007-stock-priced-coins-on-meteora-quotes.md)): `QuoteSettings` and the quote manager, the token vault, per-quote config pairs, the stand-in xStock and its TokenBadge, prices with the Scaled UI Amount multiplier, Quote Risk Labels on the launch form, coin page and deposit page.
+   As built ([#90](https://github.com/imDev2023/top-pad/issues/90), 2026-11-06):
+   - `GET /quotes` lists every quote `CLUSTERS.<cluster>.quotes` names, read from the chain (its mint, its TokenBadge, its `QuoteSettings` and the configs they name, in four batched calls, kept 30 s for pages); a quote is offered once its settings name a pair on chain and Heat's rules take its mint, and otherwise says what it waits for.
+   - The launch form's picker sits with the launch mode, in both modes; a waiting quote can be chosen to read its labels, but the flow goes on only with an offered one. A launch reads its quote's settings fresh as it is prepared and is built on the config they name, a Fair Open's pot cap and ladder in the quote.
+   - The API answers every amount in the quote's raw units and every price and market cap unscaled, with the coin's `quote` (symbol, decimals, the multiplier in force, labels); pages show them all through that multiplier, the same factor for every candle, so a split rescales a chart and never steps it. Refusals word amounts in the launch's own quote.
+   - Quick trade spends the coin's quote, its presets shares of the coin's Graduation Target (0.05, 0.1, 0.5 and 1 SOL on devnet, 0.5, 1, 5 and 10 USDC); a swap names Heat's referral account only once it exists, since DBC refuses a missing one and the window claim opens it a minute into a coin's life.
+   - Quote Risk Labels (`quoteLabels` in `@top-pad/chain/quotes`, Stoker's words) sit as a section of their own on the launch form, the coin page and the Fair Open page, never beside the quote's name; `/enforced` says what an xStock's issuer can do that Heat cannot prevent, the start of screen 6 ([#59](https://github.com/imDev2023/top-pad/issues/59)).
+   - Creator Earnings stay in SOL coins only: a creator's claim pays one quote, and earnings per quote are a later ticket.
    Demo: a Fair Open and an Instant launch priced in the stand-in xStock, through to Graduation, and a pause handled.
 10. **Fairness and enforcement pages**: the Fairness card and its X image, "How this is enforced", the P&L share card, a review of every screen on phones and desktops in both themes.
    Demo: the screens in section 9 on real devnet data.
