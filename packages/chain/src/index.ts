@@ -71,7 +71,66 @@ export type HeatCluster = {
    * held them. A quote not listed still fits a creation, 32 bytes more an address; a quote added means a new table.
    */
   tableQuotes: { mint: Address; tokenProgram: Address; badge: boolean }[];
+  /**
+   * Every quote Heat offers on the cluster, SOL first (ADR 0007): the band job keeps each one's `QuoteSettings` naming a
+   * config pair within the band at its latest price, and a quote is offered once it has them. The rules take any mint
+   * DBC accepts, so this list is a product choice; a quote DBC does not yet take (the stand-in xStock, until Meteora
+   * badges it on devnet) is listed and waits.
+   */
+  quotes: HeatQuote[];
 };
+
+/**
+ * Where a quote's latest price comes from (ADR 0007, the band): SOL needs none; an xStock is priced by Jupiter's Price
+ * API in USD against SOL's, by the price per unscaled token, named by its mainnet mint (devnet's stand-in is priced as
+ * NVDAx); a quote with no market but a cluster's own pools, such as Circle's devnet USDC, is priced by a DAMM v2 pool of
+ * it and SOL there, read from the chain.
+ */
+export type QuotePriceSource = { kind: "sol" } | { kind: "jupiter"; mint: Address } | { kind: "dammV2"; pool: Address };
+
+/** A quote Heat offers: its mint, token program and decimals as the chain holds them, and where its price comes from. */
+export type HeatQuote = { symbol: string; mint: Address; tokenProgram: Address; decimals: number; price: QuotePriceSource };
+
+const SOL: HeatQuote = { symbol: "SOL", mint: WSOL_MINT, tokenProgram: SPL_TOKEN, decimals: 9, price: { kind: "sol" } };
+
+/**
+ * The cohort's 22 xStocks (ADR 0007, settled question 3: more than $100K of liquidity by EmberCurve's figures on
+ * 2026-11-02), each a Token-2022 mint of 8 decimals with a DBC TokenBadge on mainnet; their mints and symbols checked
+ * against Jupiter's token list on 2026-11-06, and against the chain by `pnpm --filter @top-pad/chain quote-check`.
+ */
+const XSTOCKS = {
+  SPYx: "XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W",
+  CRCLx: "XsueG8BtpquVJX9LVLLEGuViXUungE6WmK5YZ3p3bd1",
+  NVDAx: "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh",
+  QQQx: "Xs8S1uUs1zvS2p7iwtsG3b6fkhpvmwz4GYU3gWAmWHZ",
+  TSLAx: "XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB",
+  MSTRx: "XsP7xzNPvEHS1m6qfanPUGjNmdnmsLKEoNAnHjdxxyZ",
+  SPCXx: "Xs3oZwbHvqis4NYcf4YKWmEia2eC84wSiVrcYcTqpH8",
+  AAPLx: "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp",
+  HOODx: "XsvNBAYkrDRNhA7wPHQfX3ZUXZyZLdnCQDfHZ56bzpg",
+  MSFTx: "XspzcW1PRtgf6Wj92HCiZdjzKCyFekVD8P5Ueh3dRMX",
+  COINx: "Xs7ZdzSHLU9ftNJsii5fCeJhoRWSC32SQGzGQtePxNu",
+  MCDx: "XsqE9cRRpzxcGKDXj1BJ7Xmg4GRhZoyY1KpmGSxAWT2",
+  GLDx: "Xsv9hRk1z5ystj9MhnA7Lq4vjSsLwzL2nxrwmwtD3re",
+  GMEx: "Xsf9mBktVB9BSU5kf4nHxPq5hCBJ2j2ui3ecFGxPRGc",
+  STRCx: "Xs78JED6PFZxWc2wCEPspZW9kL3Se5J7L5TChKgsidH",
+  METAx: "Xsa62P5mvPszXL1krVUnU5ar38bBSVcWAB6fmPCo5Zu",
+  KOx: "XsaBXg8dU5cPM6ehmVctMkVqoiRG2ZjMo1cyBJ3AykQ",
+  GOOGLx: "XsCPL9dNWBMvFtTmwcCA5v3xWPSMEBCszbQdiLLq6aN",
+  AMZNx: "Xs3eBt7uRfJX8QUs4suhyU8p2M6DoUDrJyWBa8LLZsg",
+  "BRK.Bx": "Xs6B6zawENwAbWVi7w92rjazLuAr5Az59qgWKcNb45x",
+  DFDVx: "Xs2yquAgsHByNzx68WJC55WHjHBvG9JsMB7CWjTLyPy",
+  PLTRx: "XsoBhf2ufR8fTyNSjqfU71DYGaE6Z3SUGAidpzriAA4",
+} as const;
+
+/** An xStock on mainnet: priced by Jupiter under its own mint. */
+const xstock = (symbol: keyof typeof XSTOCKS): HeatQuote => {
+  const mint = address(XSTOCKS[symbol]);
+  return { symbol, mint, tokenProgram: TOKEN_2022, decimals: 8, price: { kind: "jupiter", mint } };
+};
+
+/** NVDAx's mainnet mint, by whose price devnet's stand-in xStock is priced. */
+export const NVDAX_MINT = address(XSTOCKS.NVDAx);
 
 /**
  * Heat on each cluster. Localnet has none: Meteora's programs never run locally, since their binaries are never
@@ -107,6 +166,14 @@ export const CLUSTERS: Record<Cluster, HeatCluster | null> = {
       // `DEVNET_XSTOCK_STAND_IN`, with every xStock extension: DBC takes it once Meteora badges it (#91).
       { mint: address("Wm7nXsHnoHJm3NemWaLbnxd7QkmeHLALucsFC4qTUNK"), tokenProgram: TOKEN_2022, badge: true },
     ],
+    quotes: [
+      SOL,
+      // Priced by Meteora's deepest devnet DAMM v2 pool of SOL and USDC, at devnet's own price (about 10 USDC a SOL), the
+      // pool `devnet-usdc` swaps through: Circle's faucet asks for a captcha, so the bank buys its USDC there (#88).
+      { symbol: "USDC", mint: DEVNET_USDC, tokenProgram: SPL_TOKEN, decimals: 6, price: { kind: "dammV2", pool: address("A7sYJqmWsqyKzkyEZg8fQrMWFKdrFpQA4E1Msa9Pnvur") } },
+      // The stand-in xStock, priced as NVDAx (both 8 decimals): DBC takes it once Meteora badges it on devnet (#91).
+      { symbol: "NVDAx", mint: address("Wm7nXsHnoHJm3NemWaLbnxd7QkmeHLALucsFC4qTUNK"), tokenProgram: TOKEN_2022, decimals: 8, price: { kind: "jupiter", mint: NVDAX_MINT } },
+    ],
   },
   mainnet: {
     quote: { mint: WSOL_MINT, symbol: "SOL", decimals: 9 },
@@ -117,10 +184,12 @@ export const CLUSTERS: Record<Cluster, HeatCluster | null> = {
     lookupTable: null,
     rehearsal: null,
     tableQuotes: [],
+    quotes: [SOL, ...(Object.keys(XSTOCKS) as (keyof typeof XSTOCKS)[]).map(xstock)],
   },
 };
 
 export * from "./afterOpen";
+export * from "./band";
 export * from "./claims";
 export * from "./coin";
 export * from "./dbc";
