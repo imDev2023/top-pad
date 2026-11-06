@@ -1062,7 +1062,7 @@ Thin end-to-end slices, in dependency order, each ending in something demonstrab
    - The API answers every amount in the quote's raw units and every price and market cap unscaled, with the coin's `quote` (symbol, decimals, the multiplier in force, labels); pages show them all through that multiplier, the same factor for every candle, so a split rescales a chart and never steps it. Refusals word amounts in the launch's own quote.
    - Quick trade spends the coin's quote, its presets shares of the coin's Graduation Target (0.05, 0.1, 0.5 and 1 SOL on devnet, 0.5, 1, 5 and 10 USDC); a swap names Heat's referral account only once it exists, since DBC refuses a missing one and the window claim opens it a minute into a coin's life.
    - Quote Risk Labels (`quoteLabels` in `@top-pad/chain/quotes`, Stoker's words) sit as a section of their own on the launch form, the coin page and the Fair Open page, never beside the quote's name; `/enforced` says what an xStock's issuer can do that Heat cannot prevent, the start of screen 6 ([#59](https://github.com/imDev2023/top-pad/issues/59)).
-   - Creator Earnings stay in SOL coins only: a creator's claim pays one quote, and earnings per quote are a later ticket.
+   - Creator Earnings stay in SOL coins only: a creator's claim pays one quote, and earnings in every quote are [#99](https://github.com/imDev2023/top-pad/issues/99).
    Demo: a Fair Open and an Instant launch priced in the stand-in xStock, through to Graduation, and a pause handled.
 10. **Fairness and enforcement pages**: the Fairness card and its X image, "How this is enforced", the P&L share card, a review of every screen on phones and desktops in both themes.
    Demo: the screens in section 9 on real devnet data.

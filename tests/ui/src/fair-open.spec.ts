@@ -64,11 +64,11 @@ test("a Fair Open takes deposits and withdrawals from its page, then fails and r
     await connectTestWallet(page, page.getByRole("main").getByRole("button", { name: "Connect wallet" }));
     await expect(page.getByTestId("fair-open-tier")).toHaveText("Unverified · cap 0.1 SOL");
     await snap(page, "fair-open-2-connected");
-    await move(page, "Deposit", "0.05", /Deposited 0\.05 SOL/);
+    await move(page, "Deposit", "0.05", /Deposited 0\.05\sSOL/);
     await expect(page.getByTestId("fair-open-held")).toHaveText("0.05 SOL");
     await expect(page.getByTestId("fair-open-pot")).toHaveText("0.05");
-    await move(page, "Deposit", "0.03", /Deposited 0\.03 SOL/);
-    await move(page, "Withdraw", "0.02", /Took back 0\.02 SOL/);
+    await move(page, "Deposit", "0.03", /Deposited 0\.03\sSOL/);
+    await move(page, "Withdraw", "0.02", /Took back 0\.02\sSOL/);
     await expect(page.getByTestId("fair-open-held")).toHaveText("0.06 SOL");
     await snap(page, "fair-open-3-unverified-seat");
 
@@ -78,7 +78,7 @@ test("a Fair Open takes deposits and withdrawals from its page, then fails and r
     await page.getByLabel("Handle").fill(handle);
     await page.getByRole("button", { name: "Authorize app" }).click();
     await expect(page.getByTestId("fair-open-tier")).toHaveText("Scored · cap 0.5 SOL", { timeout: 30_000 });
-    await move(page, "Deposit", "0.3", /Deposited 0\.3 SOL/);
+    await move(page, "Deposit", "0.3", /Deposited 0\.3\sSOL/);
     await expect(page.getByTestId("fair-open-held")).toHaveText("0.36 SOL");
 
     // Another depositor deposits straight to the program; the page shows the pot grow as it lands.
