@@ -1,6 +1,6 @@
-// The indexer (spec 10.2) as one Durable Object, on the devnet source: a `logsSubscribe` WebSocket on Heat's two
-// configs, its two programs and every DAMM v2 pool a Heat coin graduated into says which transactions to fetch and
-// index at once, and reconciliation from each
+// The indexer (spec 10.2) as one Durable Object, on the devnet source: a `logsSubscribe` WebSocket on Heat's configs
+// (SOL's pair and every pair the band job has kept for another quote, ADR 0007), its two programs and every DAMM v2
+// pool a Heat coin graduated into says which transactions to fetch and index at once, and reconciliation from each
 // account's cursor catches whatever the socket missed. An alarm every 15 s keeps the object awake, reopens a dropped
 // socket and reconciles every minute, or at once while the socket is down; the cron wakes it after a deploy. The
 // socket is only the fast path: a trade the socket never reports is still indexed within a minute.
@@ -13,6 +13,10 @@ import {
   blockPositions,
   fetchRawTransaction,
   heatHandler,
+  loadHeatConfigs,
+  rpcConfigReader,
+  solConfigs,
+  type HeatConfigs,
   indexTransactions,
   jitoApi,
   logsSubscribeRequest,
@@ -33,6 +37,9 @@ import { startKeeper } from "./windowClaims";
 
 const ALARM_MS = 15_000;
 const RECONCILE_MS = 60_000;
+/** How often the list of Heat's configs is read again: the band job adds a pair at most every five minutes. */
+const CONFIGS_MS = 60_000;
+const CONFIGS_SOON_MS = 5_000;
 /** At most this many transactions per account in one reconciliation; the next alarm goes on from there. */
 const RECONCILE_LIMIT = 200;
 /** How long a reported transaction may take to be served by `getTransaction` before reconciliation is left to it. */
@@ -88,14 +95,45 @@ export class Indexer extends DurableObject<Bindings> {
    * indexed: a graduated pool's swaps name neither a config nor our programs (spec 2.3).
    */
   private graduated: Set<string> | null = null;
+  /** Heat's configs as last read, SOL's pair alone until the first read, and when they were read. */
+  private configs: HeatConfigs | null = null;
+  private configsAt = 0;
+
+  /** The configs the handler indexes on now. */
+  private heatConfigs(): HeatConfigs {
+    this.configs ??= solConfigs(config(this.env).heat!);
+    return this.configs;
+  }
 
   /**
-   * The accounts whose transactions are Heat's: both configs (every pool, swap and migration on them), the fee program,
+   * The accounts whose transactions are Heat's: every config (every pool, swap and migration on them), the fee program,
    * the Fair Open program (every launch, deposit, withdrawal and refund), and each graduated pool (its swaps).
    */
   private watching(): string[] {
-    const configs = config(this.env).heat?.configs;
-    return configs ? [configs.instant, configs.fairOpen, FEE_PROGRAM_ADDRESS, FAIR_OPEN_PROGRAM_ADDRESS, ...(this.graduated ?? [])] : [];
+    if (!config(this.env).heat?.configs) return [];
+    return [...this.heatConfigs().addresses(), FEE_PROGRAM_ADDRESS, FAIR_OPEN_PROGRAM_ADDRESS, ...(this.graduated ?? [])];
+  }
+
+  /**
+   * Reads Heat's configs again, at most every minute (or every few seconds when `soon`, for a transaction on a config
+   * not yet known), and watches each new one from now on, on the open socket too.
+   */
+  private async loadConfigs(soon = false): Promise<HeatConfigs> {
+    if (Date.now() - this.configsAt < (soon ? CONFIGS_SOON_MS : CONFIGS_MS)) return this.heatConfigs();
+    const cfg = config(this.env);
+    const { db, close } = createDb(this.env.HYPERDRIVE.connectionString);
+    try {
+      const before = new Set(this.watching());
+      this.configs = await loadHeatConfigs(db, cfg.heat!, rpcConfigReader(cfg.rpcUrl));
+      this.configsAt = Date.now();
+      const watching = this.watching();
+      watching.forEach((account, i) => {
+        if (!before.has(account)) this.socket?.send(logsSubscribeRequest(i + 1, account));
+      });
+    } finally {
+      await close();
+    }
+    return this.heatConfigs();
   }
 
   private async loadGraduated() {
@@ -125,6 +163,8 @@ export class Indexer extends DurableObject<Bindings> {
     const cfg = config(this.env);
     this.handle ??= heatHandler({
       heat: cfg.heat!,
+      configs: () => this.heatConfigs(),
+      refreshConfigs: () => this.loadConfigs(true),
       blockIndexOf: this.positions(),
       onIndexed: (indexed) => this.publish(indexed),
     });
@@ -222,6 +262,11 @@ export class Indexer extends DurableObject<Bindings> {
       this.failed("reading the graduated pools", e);
     }
     try {
+      await this.loadConfigs();
+    } catch (e) {
+      this.failed("reading Heat's configs", e);
+    }
+    try {
       if (!this.socket) await this.openSocket();
     } catch (e) {
       this.failed("opening the logs socket", e);
@@ -270,6 +315,7 @@ export class Indexer extends DurableObject<Bindings> {
 
   /** Indexes the reported transactions in turn, as each is served. */
   private async drain() {
+    await this.loadConfigs().catch((e) => this.failed("reading Heat's configs", e));
     while (this.queue.length) {
       const batch = [...new Set(this.queue.splice(0, this.queue.length))];
       const { db, close } = createDb(this.env.HYPERDRIVE.connectionString);

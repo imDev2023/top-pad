@@ -12,10 +12,10 @@ import {
 } from "@solana/kit";
 import { and, eq, isNull, lt, sql } from "drizzle-orm";
 import { claimablePool, windowClaimMessage, type ClaimablePool } from "@top-pad/chain";
-import { fetchVirtualPool } from "@top-pad/clients/dbc";
+import { fetchPoolConfig, fetchVirtualPool } from "@top-pad/clients/dbc";
 import { fetchAllMaybeCoinRecord, fetchMaybeCoinRecord, findCoinRecordPda } from "@top-pad/clients/fee";
 import { coins, windowClaims, type Db } from "@top-pad/db";
-import { blockPositions, decodeTransaction, fetchRawTransaction, heatHandler, reindexTransactions } from "@top-pad/indexer";
+import { blockPositions, decodeTransaction, fetchRawTransaction, heatConfigs, heatHandler, reindexTransactions, rpcConfigReader } from "@top-pad/indexer";
 import { config, type Bindings, type Config, type SecretBinding } from "./env";
 import { loadKeeper } from "./keeper";
 
@@ -51,7 +51,20 @@ export async function coinWindow(cfg: Config, mint: Address): Promise<{ pool: Cl
   const record = await fetchMaybeCoinRecord(rpc, (await findCoinRecordPda({ mint }))[0], limited());
   if (!record.exists) return null;
   const pool = await fetchVirtualPool(rpc, record.data.pool, limited());
-  return { pool: claimablePool(record.data.pool, pool.data.poolState, heat.quote.mint), windowClaimed: record.data.windowClaimed };
+  // The coin's quote is its config's, SOL or another (ADR 0007); a config never changes, so each is read once.
+  const quoteMint = await quoteMintOfConfig(rpc, pool.data.poolState.config);
+  return { pool: claimablePool(record.data.pool, pool.data.poolState, quoteMint), windowClaimed: record.data.windowClaimed };
+}
+
+const configQuotes = new Map<string, Promise<Address>>();
+function quoteMintOfConfig(rpc: ReturnType<typeof createSolanaRpc>, config: Address): Promise<Address> {
+  let asked = configQuotes.get(config);
+  if (!asked) {
+    asked = fetchPoolConfig(rpc, config, limited()).then((c) => c.data.quoteMint);
+    asked.catch(() => configQuotes.delete(config));
+    configQuotes.set(config, asked);
+  }
+  return asked;
 }
 
 /** When a Heat coin's Tax window ends, in milliseconds since the epoch. */
@@ -178,7 +191,8 @@ export async function sweepWindowClaims(db: Db, env: Bindings): Promise<{ due: n
 async function recordWindowClaim(db: Db, cfg: Config, mint: string, record: Address): Promise<boolean> {
   const heat = cfg.heat;
   if (!heat?.configs) return false;
-  const configs = new Set<string>([heat.configs.instant, heat.configs.fairOpen]);
+  const known = await heatConfigs(db, heat, rpcConfigReader(cfg.rpcUrl));
+  const configs = known.set();
   const rpc = createSolanaRpc(cfg.rpcUrl);
   // A record's transactions are its registration and its window claim.
   const signatures = await rpc.getSignaturesForAddress(record, { limit: 10, commitment: "confirmed" }).send(limited());
@@ -186,7 +200,7 @@ async function recordWindowClaim(db: Db, cfg: Config, mint: string, record: Addr
     if (err) continue;
     const raw = await fetchRawTransaction(cfg.rpcUrl, signature);
     if (!raw || !decodeTransaction(raw, configs).windowClaims.some((claim) => claim.mint === mint)) continue;
-    await reindexTransactions(db, heatHandler({ heat, blockIndexOf: blockPositions(cfg.rpcUrl) }), [raw]);
+    await reindexTransactions(db, heatHandler({ heat, configs: () => known, blockIndexOf: blockPositions(cfg.rpcUrl) }), [raw]);
     return true;
   }
   return false;

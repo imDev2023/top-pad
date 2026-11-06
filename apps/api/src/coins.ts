@@ -8,6 +8,7 @@ import { Address, CandleSeconds, type Coin, type CoinCandles, type CoinTrades, t
 import { candles, coins, creators, fairOpens, graduations, launches, pools, trades, windowClaims, type Db } from "@top-pad/db";
 import { graduatedPoolFeeNumerator } from "@top-pad/meteora";
 import { holderCount } from "@top-pad/indexer";
+import { quoteInfoOf, quoteOf } from "./quotes";
 import { creatorLockOf, taxShareOf } from "./afterOpen";
 import { explorerUrl, type Config } from "./env";
 import type { AppEnv } from "./http";
@@ -70,7 +71,7 @@ async function fairOpenOf(cfg: Config, db: Db, mint: string): Promise<Coin["fair
 
 /** A coin's Graduation as its page shows it, from its pool's row and its Graduation's; null while its curve runs. */
 function graduationOf(cfg: Config, pool: typeof pools.$inferSelect, g: typeof graduations.$inferSelect | null): Coin["graduation"] {
-  if (!g && !pool.curveCompletedAt && !(cfg.heat && pool.quoteReserve >= cfg.heat.graduationTarget)) return null;
+  if (!g && !pool.curveCompletedAt && pool.quoteReserve < pool.graduationTarget) return null;
   const surplus =
     pool.surplusCreatorAmount !== null && pool.surplusTreasuryAmount !== null
       ? { creator: pool.surplusCreatorAmount.toString(), treasury: pool.surplusTreasuryAmount.toString() }
@@ -125,6 +126,7 @@ export async function getCoin(c: Context<AppEnv>) {
   }
 
   const sqrtPrice = BigInt(pool.sqrtPrice);
+  const quote = await quoteInfoOf(cfg, heat, pool.quoteMint);
   const body: Coin = {
     mint,
     pool: pool.pool,
@@ -139,12 +141,12 @@ export async function getCoin(c: Context<AppEnv>) {
     activatedAt: pool.activatedAt.toISOString(),
     supply: COIN_SUPPLY.toString(),
     decimals: COIN_DECIMALS,
-    quote: { symbol: heat.quote.symbol, decimals: heat.quote.decimals },
+    quote,
     market: {
-      price: priceOfSqrtPrice(sqrtPrice, heat.quote.decimals),
-      marketCap: marketCapOfSqrtPrice(sqrtPrice, heat.quote.decimals),
+      price: priceOfSqrtPrice(sqrtPrice, quote.decimals),
+      marketCap: marketCapOfSqrtPrice(sqrtPrice, quote.decimals),
       quoteReserve: pool.quoteReserve.toString(),
-      graduationTarget: heat.graduationTarget.toString(),
+      graduationTarget: pool.graduationTarget.toString(),
       holders,
       lastTradeKey: pool.lastTradeKey,
     },
@@ -206,7 +208,9 @@ const lower = (a: string, b: string) => (scaled(a) <= scaled(b) ? a : b);
 export async function getCoinCandles(c: Context<AppEnv>) {
   const { cfg, db } = c.var;
   const mint = c.req.param("mint")!;
-  if (!cfg.heat || !(await poolOf(db, mint))) return notFound(c);
+  const pool = cfg.heat ? await poolOf(db, mint) : null;
+  const quote = pool && quoteOf(cfg.heat!, pool.quoteMint);
+  if (!pool || !quote) return notFound(c);
   const seconds = CandleSeconds.safeParse(Number(c.req.query("seconds") ?? 60));
   if (!seconds.success) return c.json({ error: "seconds is one of 1, 15, 60, 300, 900, 3600, 14400 and 86400." }, 400);
   const to = Number(c.req.query("to") ?? Math.floor(Date.now() / 1000));
@@ -228,7 +232,7 @@ export async function getCoinCandles(c: Context<AppEnv>) {
         .orderBy(desc(candles.startsAt))
         .limit(1)
     : [];
-  let open = before?.close ?? priceOfSqrtPrice(cfg.heat.sqrtStartPrice, cfg.heat.quote.decimals);
+  let open = before?.close ?? priceOfSqrtPrice(BigInt(pool.startSqrtPrice), quote.decimals);
   const body: CoinCandles = {
     seconds: seconds.data,
     candles: rows.map((r) => {

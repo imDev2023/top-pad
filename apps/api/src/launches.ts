@@ -27,7 +27,7 @@ import {
 } from "@solana/kit";
 import { and, asc, eq, gt, isNull, sql } from "drizzle-orm";
 import type { Context } from "hono";
-import { instantLaunchAccounts, instantLaunchMessage } from "@top-pad/chain";
+import { instantLaunchAccounts, instantLaunchMessage, WSOL_MINT } from "@top-pad/chain";
 import { findCoinRecordPda } from "@top-pad/clients/fee";
 import { LaunchForm, SubmitLaunch, type LaunchRefusal, type LaunchStatus, type PreparedLaunch } from "@top-pad/contract";
 import { coins, creators, creatorWallets, fairOpens, launches, metadataItems, type Db, type DbOrTransaction } from "@top-pad/db";
@@ -35,6 +35,7 @@ import { currentCreatorWallet, sessionCreator } from "./auth";
 import { explorerUrl, instantLaunchSetup, webApp, type Config } from "./env";
 import { prepareFairOpen, startFairOpenKeeperSafely, submitFairOpen } from "./fairOpenLaunches";
 import { indexNow } from "./indexing";
+import { offeredQuote } from "./quotes";
 import { startKeeper } from "./windowClaims";
 import { refuse, type AppEnv } from "./http";
 import { loadKeeper } from "./keeper";
@@ -133,9 +134,14 @@ async function prepareInstant(c: Context<AppEnv>, creator: Creator, body: Form) 
   const setup = instantLaunchSetup(cfg, c.env);
   if (!setup.ok) return refuse(c, 503, { error: `Launching is not open here yet: ${setup.reason}`, code: "unavailable" });
 
-  const form = LaunchForm.safeParse({ mode: body.mode, name: body.name, ticker: body.ticker, wallet: body.wallet });
+  const form = LaunchForm.safeParse({ mode: body.mode, name: body.name, ticker: body.ticker, wallet: body.wallet, quote: body.quote ?? WSOL_MINT });
   if (!form.success) return refuse(c, 400, { error: "The launch form is incomplete: it needs a mode, a name, a ticker and a wallet.", code: "invalid" });
   const { wallet } = form.data;
+  // The coin's quote, read from the chain now: its Instant config is the one its `QuoteSettings` name (ADR 0007).
+  const priced = await offeredQuote(cfg, cfg.heat!, form.data.quote);
+  if ("refusal" in priced) return refuse(c, 422, { error: priced.refusal, code: "quote" });
+  const config = priced.settings.instantConfig as Address;
+  const quoteMint = priced.quote.mint;
 
   const id = crypto.randomUUID();
   const preparing = { creatorId: creator.id, launchId: id };
@@ -161,8 +167,9 @@ async function prepareInstant(c: Context<AppEnv>, creator: Creator, body: Form) 
   const rpc = createSolanaRpc(cfg.rpcUrl);
   const { value: lifetime } = await rpc.getLatestBlockhash({ commitment: "confirmed" }).send(limited());
   const launch = {
-    config: setup.config,
-    quoteMint: setup.quoteMint,
+    config,
+    quoteMint,
+    quoteTokenProgram: priced.quote.tokenProgram,
     creator: createNoopSigner(wallet as Address),
     mint,
     launchKey: createNoopSigner(setup.keeper),
@@ -206,7 +213,8 @@ async function prepareInstant(c: Context<AppEnv>, creator: Creator, body: Form) 
       ticker: coin.ticker,
       mint: mint.address,
       pool,
-      config: setup.config,
+      config,
+      quoteMint,
       metadataUri: items.metadataUri,
       imageUri: items.imageUri,
       imageSha256: verdict.imageSha256,
@@ -478,6 +486,7 @@ async function toStatus(cfg: Config, launch: Launch): Promise<LaunchStatus> {
     mint: launch.mint,
     pool: launch.pool,
     coinRecord,
+    quoteMint: launch.quoteMint,
     metadataUri: launch.metadataUri,
     imageUri: launch.imageUri,
     signature: launch.signature,

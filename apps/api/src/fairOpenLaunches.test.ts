@@ -33,7 +33,7 @@ import { createTestDatabase } from "@top-pad/db/testing";
 import { parseDataItem } from "@top-pad/arweave";
 import { candidateKeys, FOLD_VERSION } from "@top-pad/vamp-shield";
 import { app } from "./index";
-import { decode, Fakes, fairOpenLaunch, lookupTableAccount, MemoryBlobs, ORIGINS, testBindings, testContext, testKeypair } from "./test/fakes";
+import { decode, Fakes, fairOpenLaunch, lookupTableAccount, MemoryBlobs, ORIGINS, seedQuoteSettings, testBindings, testContext, testKeypair } from "./test/fakes";
 import type { Bindings } from "./env";
 
 // The keeper and admission keys the cluster records are swapped for test keys: the real ones live only in Secrets Store.
@@ -79,6 +79,7 @@ beforeEach(async () => {
   vi.stubGlobal("fetch", fakes.fetch);
   table = await fairOpenLookupTableAddresses(devnet);
   fakes.accounts.set(devnet.lookupTable!, lookupTableAccount(table));
+  await seedQuoteSettings(fakes, devnet);
 });
 afterEach(() => vi.unstubAllGlobals());
 
@@ -156,8 +157,7 @@ describe("scheduling a Fair Open", { timeout: 30_000 }, () => {
   it("is offered on the platform with its terms", async () => {
     const platform = Platform.parse(await (await request("/platform")).json());
     expect(platform.launchModes.fairOpen).toBe(true);
-    expect(platform.fairOpen).toMatchObject({ potCap: `${POT_CAP}`, windowSeconds: 600, maxAheadSeconds: 604_800, teaserMaxLength: 80 });
-    expect(platform.fairOpen!.rungs).toEqual(rungs(POT_CAP).map(String));
+    expect(platform.fairOpen).toEqual({ windowSeconds: 600, maxAheadSeconds: 604_800, teaserMaxLength: 80 });
   });
 
   it("prepares the schedule on a nonce our keeper made, and the 64-rung ladder signed by the mint key alone", async () => {

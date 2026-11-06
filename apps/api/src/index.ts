@@ -1,5 +1,5 @@
 import { createSolanaRpc, isSolanaError } from "@solana/kit";
-import { potCapOf, rungs, WINDOW_SECONDS } from "@top-pad/chain";
+import { WINDOW_SECONDS } from "@top-pad/chain";
 import { TEASER_MAX_LENGTH } from "@top-pad/vamp-shield/rules";
 import { and, eq, lt, sql } from "drizzle-orm";
 import { Hono, type Context } from "hono";
@@ -34,6 +34,7 @@ import { sameOriginWrites, withConfig, withDb, type AppEnv } from "./http";
 import { checkKeeperFloat } from "./keeper";
 import { refreshLists, refreshTrending, signImages } from "./protectedSet";
 import { bandQuotes } from "./quoteBand";
+import { getQuotes } from "./quotes";
 import { getLaunch, prepareLaunch, submitLaunch } from "./launches";
 import { IMAGE_TYPES } from "./metadata";
 import { getHoldings, prepareSwap, quote, reportTrade } from "./trading";
@@ -81,17 +82,13 @@ app.get("/health", async (c) => {
 
 app.get("/platform", (c) => {
   const { cfg } = c.var;
-  const potCap = cfg.heat?.configs ? potCapOf(cfg.heat.graduationTarget) : null;
   const platform: Platform = {
     cluster: cfg.cluster,
     xLinking: cfg.x !== null,
     launchModes: { instant: cfg.x !== null && instantLaunchSetup(cfg, c.env).ok, fairOpen: cfg.x !== null && fairOpenLaunchSetup(cfg, c.env).ok },
-    fairOpen:
-      potCap === null
-        ? null
-        : {
-            potCap: `${potCap}`,
-            rungs: rungs(potCap).map((r) => `${r}`),
+    fairOpen: !cfg.heat?.configs
+      ? null
+      : {
             windowSeconds: Number(WINDOW_SECONDS),
             maxAheadSeconds: MAX_AHEAD_SECONDS,
             teaserMaxLength: TEASER_MAX_LENGTH,
@@ -127,6 +124,7 @@ app.post("/launches", prepareLaunch);
 app.post("/launches/:id/submit", submitLaunch);
 app.get("/launches/:id", getLaunch);
 app.post("/launches/:id/renew", renewFairOpen);
+app.get("/quotes", getQuotes);
 app.get("/coins/:mint", getCoin);
 app.get("/coins/:mint/trades", getCoinTrades);
 app.get("/coins/:mint/candles", getCoinCandles);

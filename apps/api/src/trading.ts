@@ -15,7 +15,7 @@ import {
 } from "@solana/kit";
 import { eq } from "drizzle-orm";
 import type { Context } from "hono";
-import { priceOfSqrtPrice, referralAccountOf, swapMessage, tokenAccountOf, type HeatCluster } from "@top-pad/chain";
+import { priceOfSqrtPrice, referralAccountOf, swapMessage, tokenAccountOf, WSOL_MINT, type HeatCluster, type HeatQuote } from "@top-pad/chain";
 import { getPoolDecoder, type Pool as DammPoolState } from "@top-pad/clients/damm-v2";
 import { getPoolConfigDecoder, getVirtualPoolDecoder, type PoolConfig, type PoolState } from "@top-pad/clients/dbc";
 import { TAX_WINDOW_SECONDS } from "@top-pad/clients/fee";
@@ -24,9 +24,10 @@ import { coins, graduations, pools } from "@top-pad/db";
 import { decodeTransaction, fetchRawTransaction, provisionalOrderKey, type GraduatedPoolRef } from "@top-pad/indexer";
 import { quoteDammSwap } from "@top-pad/meteora/damm";
 import { minimumOut, quoteSwap, type Quote } from "@top-pad/meteora/quote";
-import { explorerUrl, type Config } from "./env";
+import { explorerUrl } from "./env";
 import type { AppEnv } from "./http";
 import { indexNow } from "./indexing";
+import { amountText, quoteInfoOf, quoteOf as listedQuoteOf } from "./quotes";
 import { customError, settleSignatures } from "./send";
 
 const RPC_TIMEOUT_MS = 15_000;
@@ -68,25 +69,35 @@ const DAMM_ERRORS: Record<number, string> = {
 type Rpc = ReturnType<typeof createSolanaRpc>;
 type PoolRow = typeof pools.$inferSelect;
 type GraduationRow = typeof graduations.$inferSelect;
-type Wallet = { lamports: bigint; coins: bigint; coinAccountOpen: boolean; quoteAccountOpen: boolean };
+/** What a wallet holds to trade with: its SOL, the coin's quote it can spend (its SOL again in a SOL coin) and the coin. */
+type Wallet = { lamports: bigint; quote: bigint; coins: bigint; coinAccountOpen: boolean; quoteAccountOpen: boolean };
 
 /**
  * What a quote reads, in one call: the curve and its config, or after Graduation the coin's DAMM v2 pool; the chain's
  * clock; and the wallet's balances if asked.
  */
-type Market =
+type Market = (
   | { venue: "curve"; pool: PoolState; config: PoolConfig; chainTime: bigint; wallet: Wallet | null }
-  | { venue: "graduated"; damm: DammPoolState; chainTime: bigint; wallet: Wallet | null };
+  | { venue: "graduated"; damm: DammPoolState; chainTime: bigint; wallet: Wallet | null }
+) & {
+  /**
+   * Whether Heat's referral account, the treasury's account of the quote, exists: a swap names it only then, since DBC
+   * refuses one that does not; the window claim opens it a minute into a coin's life (spec 4).
+   */
+  referralOpen: boolean;
+};
 
 /** An SPL token account's balance: its amount sits after its mint and owner. */
 const tokenAmount = (data: Uint8Array) => new DataView(data.buffer, data.byteOffset).getBigUint64(64, true);
 
 async function readMarket(rpc: Rpc, heat: HeatCluster, row: PoolRow, graduation: GraduationRow | null, wallet: KitAddress | null): Promise<Market> {
-  const walletAccounts = wallet ? [wallet, await tokenAccountOf(wallet, address(row.mint)), await tokenAccountOf(wallet, heat.quote.mint)] : [];
+  const quoteMint = address(row.quoteMint);
+  const walletAccounts = wallet ? [wallet, await tokenAccountOf(wallet, address(row.mint)), await tokenAccountOf(wallet, quoteMint)] : [];
   const market = graduation ? [address(graduation.pool)] : [address(row.pool), address(row.config)];
+  const referral = await referralAccountOf(heat.keys!.treasury, quoteMint);
   const { value } = await rpc
     // At `processed`, the freshest the node has: the price and the second a trade sent now would meet.
-    .getMultipleAccounts([...market, CLOCK_SYSVAR, ...walletAccounts], { encoding: "base64", commitment: "processed" })
+    .getMultipleAccounts([...market, CLOCK_SYSVAR, ...walletAccounts, referral], { encoding: "base64", commitment: "processed" })
     .send(limited());
   const bytes = (i: number) => {
     const account = value[i];
@@ -97,21 +108,26 @@ async function readMarket(rpc: Rpc, heat: HeatCluster, row: PoolRow, graduation:
   if (!clockBytes || market.some((_, i) => !bytes(i))) throw new Error(`the market of ${row.mint} is missing on chain`);
   const chainTime = new DataView(clockBytes.buffer, clockBytes.byteOffset).getBigInt64(32, true);
   const coinBytes = bytes(clock + 2);
+  const quoteBytes = bytes(clock + 3);
+  const lamports = value[clock + 1]?.lamports ?? 0n;
   const held: Wallet | null = wallet
     ? {
-        lamports: value[clock + 1]?.lamports ?? 0n,
+        lamports,
+        quote: quoteMint === WSOL_MINT ? lamports : quoteBytes ? tokenAmount(quoteBytes) : 0n,
         coins: coinBytes ? tokenAmount(coinBytes) : 0n,
         coinAccountOpen: coinBytes !== null,
-        quoteAccountOpen: value[clock + 3] !== null,
+        quoteAccountOpen: quoteBytes !== null,
       }
     : null;
-  if (graduation) return { venue: "graduated", damm: getPoolDecoder().decode(bytes(0)!), chainTime, wallet: held };
+  const referralOpen = value[clock + 1 + walletAccounts.length] !== null;
+  if (graduation) return { venue: "graduated", damm: getPoolDecoder().decode(bytes(0)!), chainTime, wallet: held, referralOpen };
   return {
     venue: "curve",
     pool: getVirtualPoolDecoder().decode(bytes(0)!).poolState,
     config: getPoolConfigDecoder().decode(bytes(1)!),
     chainTime,
     wallet: held,
+    referralOpen,
   };
 }
 
@@ -129,7 +145,7 @@ class Refusal extends Error {
  * The pool of a Heat coin, and its Graduation if it has graduated: quick trades are built only for coins our launch key
  * co-signed (spec 2.4).
  */
-async function heatPool(c: Context<AppEnv>): Promise<{ row: PoolRow; graduation: GraduationRow | null; heat: HeatCluster }> {
+async function heatPool(c: Context<AppEnv>): Promise<{ row: PoolRow; graduation: GraduationRow | null; heat: HeatCluster; quote: HeatQuote }> {
   const { cfg, db } = c.var;
   const mint = c.req.param("mint")!;
   const heat = cfg.heat;
@@ -142,7 +158,9 @@ async function heatPool(c: Context<AppEnv>): Promise<{ row: PoolRow; graduation:
     .where(eq(pools.mint, mint));
   if (!found) throw new Refusal(404, "Heat has no coin at this address.");
   if (!found.coin) throw new Refusal(409, "Heat builds trades only for coins launched through Heat.");
-  return { row: found.pool, graduation: found.graduation, heat };
+  const quote = listedQuoteOf(heat, found.pool.quoteMint);
+  if (!quote) throw new Refusal(404, "Heat has no coin at this address.");
+  return { row: found.pool, graduation: found.graduation, heat, quote };
 }
 
 /** Why a market cannot trade now, if it cannot. */
@@ -242,7 +260,7 @@ export const quote = (c: Context<AppEnv>) =>
     return quoteOrRefuse(await readMarket(createSolanaRpc(c.var.cfg.rpcUrl), heat, row, graduation, null), request).quote;
   });
 
-const sol = (lamports: bigint) => `${(Number(lamports) / 1e9).toLocaleString("en-US", { maximumFractionDigits: 9 })} SOL`;
+const sol = (lamports: bigint) => amountText(lamports, { symbol: "SOL", decimals: 9, multiplier: 1 });
 
 /**
  * `POST /coins/:mint/swap`: the quote and its transaction, for the wallet to sign and send. Refused when the wallet
@@ -252,7 +270,7 @@ export const prepareSwap = (c: Context<AppEnv>) =>
   respond(c, async () => {
     const { cfg } = c.var;
     const request = await body(c, SwapPrepareRequest, `${BAD_REQUEST} Name the wallet that signs.`);
-    const { row, graduation, heat } = await heatPool(c);
+    const { row, graduation, heat, quote: quoteListed } = await heatPool(c);
     const rpc = createSolanaRpc(cfg.rpcUrl);
     const wallet = address(request.wallet);
     const market = await readMarket(rpc, heat, row, graduation, wallet);
@@ -261,9 +279,14 @@ export const prepareSwap = (c: Context<AppEnv>) =>
     // The wrapped SOL account a swap opens is closed in the same transaction, its rent back with the proceeds.
     const rent = await rentOfTokenAccount(rpc);
     const opening = (held.coinAccountOpen ? 0n : rent) + (held.quoteAccountOpen ? 0n : rent);
-    if (request.side === "buy") {
+    if (request.side === "buy" && quoteListed.mint === WSOL_MINT) {
       const needs = first.amountIn + opening + NETWORK_FEE;
       if (held.lamports < needs) throw new Refusal(400, `This wallet holds ${sol(held.lamports)}; the buy needs ${sol(needs)}, with its accounts' rent and the network fee.`);
+    } else if (request.side === "buy") {
+      // A buy in another quote spends that quote, and SOL only for the rent and the fee.
+      const info = await quoteInfoOf(cfg, heat, quoteListed.mint);
+      if (held.quote < first.amountIn) throw new Refusal(400, `This wallet holds ${amountText(held.quote, info)}; the buy spends ${amountText(first.amountIn, info)}.`);
+      if (held.lamports < opening + NETWORK_FEE) throw new Refusal(400, `This wallet needs ${sol(opening + NETWORK_FEE)} for the network fee and its accounts' rent.`);
     } else {
       if (held.coins < BigInt(request.amount)) throw new Refusal(400, "This wallet does not hold that many of the coin.");
       if (held.lamports < opening + NETWORK_FEE) throw new Refusal(400, `This wallet needs ${sol(opening + NETWORK_FEE)} for the network fee and its accounts' rent.`);
@@ -274,13 +297,13 @@ export const prepareSwap = (c: Context<AppEnv>) =>
         config: address(row.config),
         pool: address(row.pool),
         mint: address(row.mint),
-        quoteMint: heat.quote.mint,
+        quoteMint: quoteListed.mint,
         trader: createNoopSigner(wallet),
         side: request.side,
         amountIn: BigInt(request.amount),
         minimumOut: BigInt(quote.minimumOut),
         mode: request.side === "buy" ? "partial_fill" : "exact_in",
-        referralAccount: await referralAccountOf(heat.keys!.treasury, heat.quote.mint),
+        referralAccount: market.referralOpen ? await referralAccountOf(heat.keys!.treasury, quoteListed.mint) : null,
         graduatedPool: graduation ? address(graduation.pool) : null,
       },
       { computeUnitPrice: cfg.computeUnitPrice, lifetime },
@@ -296,18 +319,21 @@ export const getHoldings = (c: Context<AppEnv>) =>
     const mint = c.req.param("mint")!;
     const wallet = c.req.param("wallet")!;
     if (!Address.safeParse(wallet).success) throw new Refusal(400, "That is not a Solana wallet address.");
-    if (!cfg.heat || !Address.safeParse(mint).success || !(await db.select({ mint: pools.mint }).from(pools).where(eq(pools.mint, mint))).length) {
-      throw new Refusal(404, "Heat has no coin at this address.");
-    }
+    const [pool] = cfg.heat && Address.safeParse(mint).success ? await db.select({ quoteMint: pools.quoteMint }).from(pools).where(eq(pools.mint, mint)) : [];
+    if (!pool) throw new Refusal(404, "Heat has no coin at this address.");
     const coinAccount = await tokenAccountOf(address(wallet), address(mint));
-    const { value } = await createSolanaRpc(cfg.rpcUrl).getMultipleAccounts([address(wallet), coinAccount], { encoding: "base64", commitment: "confirmed" }).send(limited());
-    const coinBytes = value[1] ? (base64.encode(value[1].data[0]) as Uint8Array) : null;
-    const holdings: Holdings = { wallet, sol: `${value[0]?.lamports ?? 0n}`, coins: `${coinBytes ? tokenAmount(coinBytes) : 0n}` };
+    const quoteAccount = await tokenAccountOf(address(wallet), address(pool.quoteMint));
+    const { value } = await createSolanaRpc(cfg.rpcUrl)
+      .getMultipleAccounts([address(wallet), coinAccount, quoteAccount], { encoding: "base64", commitment: "confirmed" })
+      .send(limited());
+    const amountAt = (i: number) => (value[i] ? tokenAmount(base64.encode(value[i].data[0]) as Uint8Array) : 0n);
+    const lamports = value[0]?.lamports ?? 0n;
+    const holdings: Holdings = { wallet, sol: `${lamports}`, quote: `${pool.quoteMint === WSOL_MINT ? lamports : amountAt(2)}`, coins: `${amountAt(1)}` };
     return holdings;
   });
 
 /** A swap decoded from a landed transaction, as the page shows a trade, its order key provisional. */
-function provisionalTrade(cfg: Config, swap: ReturnType<typeof decodeTransaction>["swaps"][number], signature: string, slot: number): Trade {
+function provisionalTrade(swap: ReturnType<typeof decodeTransaction>["swaps"][number], signature: string, slot: number, quoteDecimals: number): Trade {
   return {
     signature,
     eventIndex: swap.eventIndex,
@@ -319,7 +345,7 @@ function provisionalTrade(cfg: Config, swap: ReturnType<typeof decodeTransaction
     quoteAmount: `${swap.quoteAmount}`,
     baseAmount: `${swap.baseAmount}`,
     fee: `${swap.fee}`,
-    price: priceOfSqrtPrice(swap.sqrtPrice, cfg.heat!.quote.decimals),
+    price: priceOfSqrtPrice(swap.sqrtPrice, quoteDecimals),
     quoteReserve: `${swap.quoteReserve}`,
   };
 }
@@ -332,7 +358,7 @@ export const reportTrade = (c: Context<AppEnv>) =>
   respond(c, async () => {
     const { cfg } = c.var;
     const { signature } = await body(c, SwapSent, "Send the trade's transaction signature.");
-    const { row, graduation, heat } = await heatPool(c);
+    const { row, graduation, quote: quoteListed } = await heatPool(c);
     const rpc = createSolanaRpc(cfg.rpcUrl);
     const until = Date.now() + SETTLE_WAIT_MS;
     const settled = (await settleSignatures(rpc, [signature], SETTLE_WAIT_MS, SETTLE_POLL_MS)).get(signature)!;
@@ -351,11 +377,12 @@ export const reportTrade = (c: Context<AppEnv>) =>
       raw = await fetchRawTransaction(cfg.rpcUrl, signature).catch(() => null);
     }
     if (!raw) return outcome;
-    const configs = new Set<string>([heat.configs!.instant, heat.configs!.fairOpen]);
+    // The coin's own config is the only one its trades can be on.
+    const configs = new Set<string>([row.config]);
     const graduated = new Map<string, GraduatedPoolRef>(graduation ? [[graduation.pool, { mint: graduation.mint, config: graduation.config }]] : []);
     outcome.trades = decodeTransaction(raw, configs, graduated)
       .swaps.filter((s) => s.mint === row.mint)
-      .map((s) => provisionalTrade(cfg, s, signature, raw.slot));
+      .map((s) => provisionalTrade(s, signature, raw.slot, quoteListed.decimals));
     return outcome;
   });
 

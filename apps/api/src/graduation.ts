@@ -67,9 +67,10 @@ export async function readCurve(cfg: Config, mint: Address): Promise<CurveState 
   const record = await fetchMaybeCoinRecord(rpc, (await findCoinRecordPda({ mint }))[0], limited());
   if (!record.exists) return null;
   const { poolState: state } = (await fetchVirtualPool(rpc, record.data.pool, limited())).data;
-  const { migrationQuoteThreshold } = (await fetchPoolConfig(rpc, state.config, limited())).data;
+  // The coin's quote is its config's, SOL or another (ADR 0007).
+  const { migrationQuoteThreshold, quoteMint } = (await fetchPoolConfig(rpc, state.config, limited())).data;
   return {
-    pool: graduating(record.data.pool, state, heat.quote.mint),
+    pool: graduating(record.data.pool, state, quoteMint),
     state,
     graduationTarget: migrationQuoteThreshold,
     complete: state.quoteReserve >= migrationQuoteThreshold,
@@ -192,7 +193,7 @@ export async function sweepGraduations(db: Db, env: Bindings): Promise<{ due: nu
     .leftJoin(graduations, eq(graduations.mint, coins.mint))
     .where(
       and(
-        sql`(${pools.curveCompletedAt} is not null or ${pools.quoteReserve} >= ${heat.graduationTarget})`,
+        sql`(${pools.curveCompletedAt} is not null or ${pools.quoteReserve} >= ${pools.graduationTarget})`,
         sql`(${graduations.mint} is null or ${graduations.leftoverSignature} is null or ${pools.surplusSignature} is null)`,
       ),
     );
@@ -232,12 +233,12 @@ export async function claimHeatLpFees(db: Db, env: Bindings): Promise<{ graduate
   const heat = cfg.heat;
   if (!heat?.keys || !env.KEEPER_KEY) return { graduated: 0, claimed: 0 };
   const keeperKey = typeof env.KEEPER_KEY === "string" ? { get: async () => env.KEEPER_KEY as string } : env.KEEPER_KEY;
-  const rows = await db.select().from(graduations);
+  const rows = await db.select({ graduation: graduations, quoteMint: pools.quoteMint }).from(graduations).innerJoin(pools, eq(pools.mint, graduations.mint));
   const rpc = createSolanaRpc(cfg.rpcUrl);
   let claimed = 0;
   let keeper: Keeper | null = null;
-  for (const row of rows) {
-    const { heat: position } = await positionsOf(row, heat.quote.mint);
+  for (const { graduation: row, quoteMint } of rows) {
+    const { heat: position } = await positionsOf(row, quoteMint as Address);
     if ((await unclaimedLpFees(rpc, position)) < LP_FEE_CLAIM_MINIMUM) continue;
     keeper ??= await keeperOf(cfg, keeperKey);
     await keeperSends(cfg, rpc, keeper, await lpFeeClaimInstructions({ heat: position, treasury: heat.keys.treasury, payer: keeper.signer, computeUnitPrice: cfg.computeUnitPrice }));

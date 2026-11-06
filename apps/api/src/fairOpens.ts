@@ -70,6 +70,7 @@ import { admit, AdmissionRefused, loadAdmissionKey, personOf, refusalOf, tierNam
 import { closedSeatOf, creatorLockOf, deliveredSeats, taxShareOf } from "./afterOpen";
 import { sessionCreator } from "./auth";
 import { explorerUrl, fairOpenLaunchSetup, fairOpenSetup } from "./env";
+import { amountText, quoteInfoOf } from "./quotes";
 import { launchRow } from "./fairOpenKeeper";
 import { loadKeeper } from "./keeper";
 import { keeperSignatureOn, wireOf } from "./rungs";
@@ -91,7 +92,6 @@ const iso = (seconds: bigint) => new Date(Number(seconds) * 1000).toISOString();
 const now = () => BigInt(Math.floor(Date.now() / 1000));
 const hex = (bytes: ArrayLike<number>) => Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 const refuse = (c: Context<AppEnv>, status: 400 | 404 | 409 | 403 | 503, body: FairOpenRefusal) => c.json(body, status);
-const sol = (lamports: bigint) => `${(Number(lamports) / 1e9).toFixed(2)} SOL`;
 
 /** What a new seat prepays beyond its deposit, by the cluster's rent: the same every time, so asked once. */
 let rentAsked: Promise<{ seat: bigint; coinAccount: bigint }> | null = null;
@@ -236,7 +236,7 @@ export async function getFairOpen(c: Context<AppEnv>) {
     phase,
     failure,
     serverTime: new Date().toISOString(),
-    quote: { symbol: heat.quote.symbol, decimals: heat.quote.decimals },
+    quote: await quoteInfoOf(cfg, heat, launch?.quoteMint ?? row!.quoteMint),
     step: `${terms.step}`,
     potCap: `${terms.potCap}`,
     minRaise: `${terms.minRaise}`,
@@ -366,8 +366,11 @@ export async function prepareDeposit(c: Context<AppEnv>) {
   const { address, launch } = found;
   const at = now();
   if (fairOpenPhase(launch, at).phase !== "window") return outsideWindow(c, launch, at);
+  // Every amount a refusal names is in the launch's own quote, as its page shows it.
+  const quoteInfo = await quoteInfoOf(cfg, cfg.heat!, launch.quoteMint);
+  const money = (raw: bigint) => amountText(raw, quoteInfo);
   const amount = stepAmount(move.data.amount, launch.step);
-  if (amount === null) return refuse(c, 400, { error: `Deposits move in steps of ${sol(launch.step)}.`, code: "invalid" });
+  if (amount === null) return refuse(c, 400, { error: `Deposits move in steps of ${money(launch.step)}.`, code: "invalid" });
 
   const wallet = move.data.wallet as KitAddress;
   const person = await personOf(db, wallet, await sessionCreator(c));
@@ -384,7 +387,7 @@ export async function prepareDeposit(c: Context<AppEnv>) {
   const held = seat.exists ? getSeatDecoder().decode(seat.data).deposit : 0n;
   if (held + amount > admitted.admission.cap) {
     const room = admitted.admission.cap - held;
-    const error = room > 0n ? `You can add at most ${sol(room)}: your cap is ${sol(admitted.admission.cap)}.` : `Your seat holds your whole cap, ${sol(admitted.admission.cap)}.`;
+    const error = room > 0n ? `You can add at most ${money(room)}: your cap is ${money(admitted.admission.cap)}.` : `Your seat holds your whole cap, ${money(admitted.admission.cap)}.`;
     return refuse(c, 409, { error, code: "over_cap" });
   }
   const instructions = await depositInstructions({
@@ -416,7 +419,9 @@ export async function prepareWithdrawal(c: Context<AppEnv>) {
   if (!seat) return refuse(c, 404, { error: "This wallet holds no seat in this Fair Open.", code: "no_seat" });
   const amount = stepAmount(move.data.amount, launch.step);
   if (amount === null || amount > seat.seat.deposit) {
-    return refuse(c, 400, { error: `You can take back up to ${sol(seat.seat.deposit)}, in steps of ${sol(launch.step)}.`, code: "invalid" });
+    const quoteInfo = await quoteInfoOf(cfg, cfg.heat!, launch.quoteMint);
+    const money = (raw: bigint) => amountText(raw, quoteInfo);
+    return refuse(c, 400, { error: `You can take back up to ${money(seat.seat.deposit)}, in steps of ${money(launch.step)}.`, code: "invalid" });
   }
   const quote = await fetchQuoteToken(rpc, launch.quoteMint);
   const instructions = await withdrawInstructions({ launch: address, seat: seat.address, wallet: createNoopSigner(wallet), amount, computeUnitPrice: cfg.computeUnitPrice, quote });

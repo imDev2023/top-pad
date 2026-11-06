@@ -23,7 +23,7 @@ import { coins, createDb, creatorWallets, launches, protectedCoins, type Db } fr
 import { createTestDatabase } from "@top-pad/db/testing";
 import { candidateKeys, FOLD_VERSION } from "@top-pad/vamp-shield";
 import { app } from "./index";
-import { decode, Fakes, MemoryBlobs, ORIGINS, testBindings, testContext, testKeypair } from "./test/fakes";
+import { decode, Fakes, MemoryBlobs, ORIGINS, seedQuoteSettings, splMintAccount, testBindings, testContext, testKeypair } from "./test/fakes";
 import type { Bindings } from "./env";
 
 // The keeper key the cluster records is swapped for a test key: the real one lives only in Secrets Store (spec 10.3).
@@ -57,11 +57,13 @@ let fakes: Fakes;
 let blobs: MemoryBlobs;
 /** What the launch service handed the indexer's fast path. */
 let indexedNow: string[];
-beforeEach(() => {
+beforeEach(async () => {
   indexedNow = [];
   fakes = new Fakes();
   blobs = new MemoryBlobs();
   vi.stubGlobal("fetch", fakes.fetch);
+  // SOL's settings, as the band job keeps them on devnet: the launch service reads its config from them.
+  await seedQuoteSettings(fakes, CLUSTERS.devnet!);
 });
 afterEach(() => vi.unstubAllGlobals());
 
@@ -86,7 +88,7 @@ async function linkX(user: { id: string; username: string }) {
   return session;
 }
 
-type Coin = { name?: string; ticker?: string; wallet: Address; image?: Blob | null };
+type Coin = { name?: string; ticker?: string; wallet: Address; image?: Blob | null; quote?: Address };
 
 function prepare(cookie: string, coin: Coin, headers: Record<string, string> = { origin: ORIGINS.web }) {
   const form = new FormData();
@@ -94,6 +96,7 @@ function prepare(cookie: string, coin: Coin, headers: Record<string, string> = {
   form.set("name", coin.name ?? "Lumen");
   form.set("ticker", coin.ticker ?? "LUMEN");
   form.set("wallet", coin.wallet);
+  if (coin.quote) form.set("quote", coin.quote);
   if (coin.image !== null) form.set("image", coin.image ?? new File([PNG], "lumen.png", { type: "image/png" }));
   return request("/launches", { method: "POST", body: form, headers: { ...headers, cookie } });
 }
@@ -117,6 +120,39 @@ async function refusal(res: Response) {
 }
 
 const instructionsOf = (tx: Transaction) => decompileTransactionMessage(getCompiledTransactionMessageDecoder().decode(tx.messageBytes)).instructions;
+
+describe("an Instant launch in another quote (ADR 0007)", () => {
+  // Devnet USDC's settings as the band job named them on 2026-11-06.
+  const USDC = CLUSTERS.devnet!.quotes.find((q) => q.symbol === "USDC")!;
+  const INSTANT = "9aibHAP7PyCc5LKgEznkED7BteFbd7hrLiJehMWeFav6" as Address;
+  const FAIR_OPEN = "2tD6tB8HTbrhgaRbFfWXDDCZiZbyoHiniYhmCUGNmDSA" as Address;
+  const usdc = async () => {
+    fakes.accounts.set(USDC.mint, splMintAccount(6, "6Jz2YZ6CwqjUhNbmYLyw2bFxPxXMp4kh8z8qzdrbyv1R" as Address));
+    await seedQuoteSettings(fakes, CLUSTERS.devnet!, { quoteMint: USDC.mint, fairOpenConfig: FAIR_OPEN, instantConfig: INSTANT, step: 99_980n, graduationTarget: 84_983_000n });
+  };
+
+  it("is built on the Instant config the quote's settings name, in the quote, and remembers its quote", async () => {
+    await usdc();
+    const cookie = await linkX({ id: "2101", username: "lumen_usdc" });
+    const wallet = (await testKeypair()).signer;
+    const launch = await prepared(await prepare(cookie, { wallet: wallet.address, quote: USDC.mint }));
+    const createPool = instructionsOf(decode(launch.transaction)).find((i) => i.programAddress === DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS)!;
+    const pool = parseInitializeVirtualPoolWithSplTokenInstruction(createPool as never);
+    expect(pool.accounts.config.address).toBe(INSTANT);
+    expect(pool.accounts.quoteMint.address).toBe(USDC.mint);
+    const [stored] = await db.select().from(launches).where(eq(launches.id, launch.id));
+    expect(stored).toMatchObject({ config: INSTANT, quoteMint: USDC.mint });
+  });
+
+  it("is refused in a quote whose settings are not named yet, or that Heat does not list, the reason shown", async () => {
+    const cookie = await linkX({ id: "2102", username: "lumen_wait" });
+    const wallet = (await testKeypair()).signer;
+    fakes.accounts.set(USDC.mint, splMintAccount(6));
+    expect(await refusal(await prepare(cookie, { wallet: wallet.address, quote: USDC.mint }))).toMatchObject({ status: 422, code: "quote", error: expect.stringContaining("A coin cannot be priced in USDC now") });
+    const other = (await testKeypair()).signer.address;
+    expect(await refusal(await prepare(cookie, { wallet: wallet.address, quote: other }))).toMatchObject({ status: 422, code: "quote" });
+  });
+});
 
 describe("an Instant launch", () => {
   it("is prepared as DBC's pool creation on the Instant config and the coin's registration, signed only by the mint", async () => {

@@ -161,9 +161,12 @@ export function config(env: Bindings): Config {
 /** The first web origin is the web app's own: where X linking sends the browser back to. */
 export const webApp = (cfg: Config) => cfg.webOrigins[0]!;
 
-/** What an Instant launch needs on this cluster, or why it cannot run here. */
+/**
+ * What an Instant launch needs on this cluster, or why it cannot run here. Its config is its quote's, read from the
+ * quote's `QuoteSettings` as it is prepared (./quotes).
+ */
 export function instantLaunchSetup(cfg: Config, env: Bindings):
-  | { ok: true; config: Address; quoteMint: Address; keeper: Address; keeperKey: SecretBinding; blobs: BlobStore }
+  | { ok: true; keeper: Address; keeperKey: SecretBinding; blobs: BlobStore }
   | { ok: false; reason: string } {
   const heat = cfg.heat;
   if (!heat?.configs || !heat.keys) return { ok: false, reason: `Heat has no launch configs on ${cfg.cluster}.` };
@@ -172,22 +175,21 @@ export function instantLaunchSetup(cfg: Config, env: Bindings):
   if (!env.BLOBS) return { ok: false, reason: "The blob store is not bound to this deployment." };
   return {
     ok: true,
-    config: heat.configs.instant,
-    quoteMint: heat.quote.mint,
     keeper: address(heat.keys.keeper),
     keeperKey: typeof keeperKey === "string" ? { get: async () => keeperKey } : keeperKey,
     blobs: env.BLOBS,
   };
 }
 
-/** What scheduling a Fair Open needs on this cluster, or why it cannot be scheduled here. */
+/**
+ * What scheduling a Fair Open needs on this cluster, or why it cannot be scheduled here. Its config and step are its
+ * quote's, read from the quote's `QuoteSettings` as it is prepared (./quotes).
+ */
 export function fairOpenLaunchSetup(cfg: Config, env: Bindings):
   | {
       ok: true;
-      config: Address;
       /** Heat's SOL Fair Open config, which the program config names and every quote's Fair Open config is shaped as. */
       referenceConfig: Address;
-      quoteMint: Address;
       lookupTable: Address;
       keeper: Address;
       keeperKey: SecretBinding;
@@ -199,7 +201,7 @@ export function fairOpenLaunchSetup(cfg: Config, env: Bindings):
   const heat = cfg.heat!;
   if (!heat.lookupTable) return { ok: false, reason: `Heat has no shared lookup table on ${cfg.cluster}.` };
   if (!heat.keys?.admission || !env.ADMISSION_KEY) return { ok: false, reason: "Fair Open deposits are not taken on this deployment." };
-  return { ...instant, config: heat.configs!.fairOpen, referenceConfig: heat.configs!.fairOpen, lookupTable: heat.lookupTable };
+  return { ...instant, referenceConfig: heat.configs!.fairOpen, lookupTable: heat.lookupTable };
 }
 
 /** What Fair Open deposits need on this cluster, or why they cannot be taken here. */

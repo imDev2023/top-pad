@@ -18,10 +18,10 @@ import {
   type Transaction,
 } from "@solana/kit";
 import { parseDataItem } from "@top-pad/arweave";
-import { DBC_LAYOUT, DEPOSIT_STEP, DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS, FAIR_OPEN_PROGRAM_ADDRESS, FEE_PROGRAM_ADDRESS, lowestRung, Tier } from "@top-pad/chain";
-import { getVirtualPoolSize, VIRTUAL_POOL_DISCRIMINATOR } from "@top-pad/clients/dbc";
+import { DBC_LAYOUT, DEPOSIT_STEP, DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS, FAIR_OPEN_PROGRAM_ADDRESS, FEE_PROGRAM_ADDRESS, lowestRung, Tier, type HeatCluster } from "@top-pad/chain";
+import { getPoolConfigDecoder, getPoolConfigEncoder, getPoolConfigSize, getVirtualPoolSize, POOL_CONFIG_DISCRIMINATOR, VIRTUAL_POOL_DISCRIMINATOR } from "@top-pad/clients/dbc";
 import { getCoinRecordEncoder, LaunchMode } from "@top-pad/clients/fee";
-import { getLaunchEncoder, getSeatEncoder, LaunchStatus, type LaunchArgs } from "@top-pad/clients/fair-open";
+import { findQuoteSettingsPda, getLaunchEncoder, getQuoteSettingsEncoder, getSeatEncoder, LaunchStatus, type LaunchArgs } from "@top-pad/clients/fair-open";
 import type { RawTransaction } from "@top-pad/indexer";
 import type { BlobStore, Bindings } from "../env";
 import type { FetchedSignatures, Signatures, VisionAnswer, VisionService } from "../vision";
@@ -487,4 +487,49 @@ export function testContext() {
     ctx: { waitUntil: (p: Promise<unknown>) => void pending.push(p), passThroughOnException: () => {}, props: {} } as unknown as ExecutionContext,
     settle: () => Promise.allSettled(pending),
   };
+}
+
+/** A DBC config as DBC lays it out, with the fields Heat reads of it: its quote, its target and its start; the rest zero. */
+export function poolConfigAccount(p: { quoteMint: Address; graduationTarget: bigint; sqrtStartPrice: bigint }) {
+  const zero = new Uint8Array(getPoolConfigSize());
+  zero.set(POOL_CONFIG_DISCRIMINATOR, 0);
+  const data = getPoolConfigEncoder().encode({
+    ...getPoolConfigDecoder().decode(zero),
+    quoteMint: p.quoteMint,
+    migrationQuoteThreshold: p.graduationTarget,
+    sqrtStartPrice: p.sqrtStartPrice,
+  });
+  return { owner: DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS as string, data: new Uint8Array(data) };
+}
+
+/**
+ * A quote's `QuoteSettings` in the Fair Open program, as the band job writes them (ADR 0007 decision 4), and the two
+ * configs they name, each holding the pair's target; SOL's by default, naming Heat's SOL configs and the 0.01 SOL step.
+ */
+export async function seedQuoteSettings(
+  fakes: Fakes,
+  heat: HeatCluster,
+  q: { quoteMint?: Address; fairOpenConfig?: Address; instantConfig?: Address; step?: bigint; graduationTarget?: bigint; sqrtStartPrice?: bigint } = {},
+) {
+  const quoteMint = q.quoteMint ?? heat.quote.mint;
+  const fairOpenConfig = q.fairOpenConfig ?? heat.configs!.fairOpen;
+  const instantConfig = q.instantConfig ?? heat.configs!.instant;
+  const [settings, bump] = await findQuoteSettingsPda({ quoteMint });
+  const data = getQuoteSettingsEncoder().encode({ quoteMint, fairOpenConfig, instantConfig, step: q.step ?? DEPOSIT_STEP, updatedAt: 0n, bump });
+  fakes.accounts.set(settings, { owner: FAIR_OPEN_PROGRAM_ADDRESS, data: new Uint8Array(data) });
+  const config = poolConfigAccount({ quoteMint, graduationTarget: q.graduationTarget ?? heat.graduationTarget, sqrtStartPrice: q.sqrtStartPrice ?? heat.sqrtStartPrice });
+  for (const address of [fairOpenConfig, instantConfig]) if (!fakes.accounts.has(address)) fakes.accounts.set(address, config);
+}
+
+/** An SPL Token mint as the Token program lays it out (82 bytes): initialized, of `decimals`, with a freeze authority if given. */
+export function splMintAccount(decimals: number, freezeAuthority?: Address) {
+  const data = new Uint8Array(82);
+  const view = new DataView(data.buffer);
+  data[44] = decimals;
+  data[45] = 1;
+  if (freezeAuthority) {
+    view.setUint32(46, 1, true);
+    data.set(getAddressEncoder().encode(freezeAuthority), 50);
+  }
+  return { owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", data };
 }

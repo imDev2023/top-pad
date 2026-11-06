@@ -45,6 +45,7 @@ import {
   scheduleInstructions,
   signLadder,
   WINDOW_SECONDS,
+  WSOL_MINT,
   type LookupTable,
 } from "@top-pad/chain";
 import { LaunchForm, SubmitLaunch, type PreparedLaunch } from "@top-pad/contract";
@@ -72,6 +73,7 @@ import {
   type Launch,
 } from "./launches";
 import { signItems, storeItems } from "./metadata";
+import { amountText, offeredQuote } from "./quotes";
 import { keeperSignatureOn, wireOf } from "./rungs";
 import { sendAndConfirm } from "./send";
 import { checkTeaser, firstRefusal, judgeLaunch, judgeLaunchText } from "./vampShield";
@@ -88,7 +90,6 @@ type Rpc = ReturnType<typeof createSolanaRpc>;
 const base64 = getBase64Encoder();
 const toBase64 = (bytes: Uint8Array) => getBase64Decoder().decode(bytes);
 const base58 = getBase58Decoder();
-const sol = (lamports: bigint) => `${(Number(lamports) / 1e9).toLocaleString("en-US", { maximumFractionDigits: 9 })} SOL`;
 
 /** Heat's shared lookup table is frozen (spec 2.1 step 6), so each Worker reads it once. */
 let tableAsked: Promise<LookupTable> | null = null;
@@ -118,6 +119,7 @@ export async function prepareFairOpen(c: Context<AppEnv>, creator: Creator, body
     name: body.name,
     ticker: body.ticker,
     wallet: body.wallet,
+    quote: body.quote ?? WSOL_MINT,
     depositsOpenAt: body.depositsOpenAt,
     minRaise: body.minRaise ?? "0",
     teaser: body.teaser ?? "",
@@ -126,6 +128,12 @@ export async function prepareFairOpen(c: Context<AppEnv>, creator: Creator, body
     return refuse(c, 400, { error: "The launch form is incomplete: a Fair Open needs a name, a ticker, a wallet and its window's start.", code: "invalid" });
   }
   const { wallet } = form.data;
+  // The coin's quote, read from the chain now: its Fair Open config and the launch's step are the ones its
+  // `QuoteSettings` name, which `create_launch` reads again (ADR 0007 decision 4); the pot's cap is 20% of its target.
+  const priced = await offeredQuote(cfg, cfg.heat!, form.data.quote);
+  if ("refusal" in priced) return refuse(c, 422, { error: priced.refusal, code: "quote" });
+  const dbcConfig = priced.settings.fairOpenConfig as Address;
+  const quote = priced.quote;
 
   const id = crypto.randomUUID();
   const preparing = { creatorId: creator.id, launchId: id };
@@ -138,9 +146,9 @@ export async function prepareFairOpen(c: Context<AppEnv>, creator: Creator, body
   const depositsOpenAt = BigInt(form.data.depositsOpenAt);
   if (depositsOpenAt < now - BigInt(START_SLACK_SECONDS)) return refuse(c, 422, { error: "The window must start now or later.", code: "schedule" });
   if (depositsOpenAt > now + BigInt(MAX_AHEAD_SECONDS)) return refuse(c, 422, { error: "The window can start at most 7 days ahead.", code: "schedule" });
-  const potCap = potCapOf(cfg.heat!.graduationTarget);
+  const potCap = potCapOf(BigInt(priced.settings.graduationTarget));
   const minRaise = BigInt(form.data.minRaise);
-  if (minRaise > potCap) return refuse(c, 422, { error: `The minimum raise can be at most the pot's cap, ${sol(potCap)}.`, code: "schedule" });
+  if (minRaise > potCap) return refuse(c, 422, { error: `The minimum raise can be at most the pot's cap, ${amountText(potCap, priced.info)}.`, code: "schedule" });
 
   const image = await readImage(c, body);
   if ("error" in image) return refuse(c, 422, image);
@@ -175,13 +183,14 @@ export async function prepareFairOpen(c: Context<AppEnv>, creator: Creator, body
   const [nonceRent, table, pool] = await Promise.all([
     rpc.getMinimumBalanceForRentExemption(NONCE_ACCOUNT_SPACE).send(limited()),
     lookupTable(rpc, setup.lookupTable),
-    dbcPoolAddress(setup.config, mint.address, setup.quoteMint),
+    dbcPoolAddress(dbcConfig, mint.address, quote.mint),
   ]);
   const terms = {
     creator: createNoopSigner(wallet as Address),
     keeper: createNoopSigner(keeper.signer.address),
-    dbcConfig: setup.config,
-    quoteMint: setup.quoteMint,
+    dbcConfig,
+    quoteMint: quote.mint,
+    quoteTokenProgram: quote.tokenProgram,
     referenceConfig: setup.referenceConfig,
     depositsOpenAt,
     minRaise,
@@ -229,7 +238,8 @@ export async function prepareFairOpen(c: Context<AppEnv>, creator: Creator, body
         ticker: coin.ticker,
         mint: mint.address,
         pool,
-        config: setup.config,
+        config: dbcConfig,
+        quoteMint: quote.mint,
         metadataUri: items.metadataUri,
         imageUri: items.imageUri,
         imageSha256: verdict.imageSha256,
@@ -271,8 +281,10 @@ export async function prepareFairOpen(c: Context<AppEnv>, creator: Creator, body
   }
   const ladder = await signLadder({
     launch,
-    dbcConfig: setup.config,
-    quoteMint: setup.quoteMint,
+    dbcConfig,
+    quoteMint: quote.mint,
+    quoteTokenProgram: quote.tokenProgram,
+    quoteBadge: priced.badge,
     creator: terms.creator,
     keeper: terms.keeper,
     mint,
@@ -366,8 +378,10 @@ export async function renewFairOpen(c: Context<AppEnv>) {
   const instructions = await scheduleInstructions({
     creator: createNoopSigner(row.wallet as Address),
     keeper: createNoopSigner(setup.keeper),
-    dbcConfig: setup.config,
-    quoteMint: setup.quoteMint,
+    // The launch's own config and quote, as prepared: the renewed schedule names what its ladder was signed on.
+    dbcConfig: row.config as Address,
+    quoteMint: row.quoteMint as Address,
+    quoteTokenProgram: (cfg.heat!.quotes.find((q) => q.mint === row.quoteMint) ?? { tokenProgram: undefined }).tokenProgram,
     referenceConfig: setup.referenceConfig,
     depositsOpenAt,
     minRaise: row.minRaise!,
