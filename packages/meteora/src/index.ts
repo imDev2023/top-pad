@@ -5,6 +5,7 @@
 // the SDK's maths; DAMM v2's join with Graduation (#51).
 
 export * from "./configs";
+export * from "./createConfig";
 
 /** The SDK releases the pinned IDLs and the maths come from, so a refresh is a deliberate change (spec 5.1). */
 export const SDK_VERSIONS = {
