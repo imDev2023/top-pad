@@ -4,7 +4,7 @@
 // rewrites USDC's `QuoteSettings` with the quote manager key and records both pairs, the summary going to `job_runs` as
 // the cron's does. The old configs still serve: a coin made on the old Instant config after the move takes a buy in
 // USDC. Then the job runs at the live price and brings USDC back inside the band, unless the deployed cron did first.
-// Heat's bank pays, about 0.07 devnet SOL (four configs' rent, a coin's pool, a buy of 0.01 USDC at the sniper tax) and
+// Heat's bank pays, about 0.05 devnet SOL (four configs' rent, a coin's pool, a buy of 0.01 USDC at the sniper tax; 0.046 on 2026-11-06) and
 // signs with the quote manager key only this Mac holds (~/.config/top-pad/devnet); it needs the devnet database's
 // DATABASE_URL (`direnv exec "<main checkout>"`) and is skipped without them.
 import { existsSync, readFileSync } from "node:fs";
