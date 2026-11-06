@@ -38,13 +38,15 @@ import { admitted, closeNonce, deposit, depositorsOf, markFailed, newPerson, quo
 
 const keys = ["keeper.json", "admission.json", "bank.json"].every((name) => existsSync(join(homedir(), ".config/top-pad/devnet", name)));
 const API = process.env.HEAT_API_URL || "https://top-pad-api-devnet.imdev2023.workers.dev";
+// The API takes writes only from Heat's own pages (`sameOriginWrites`), so the test names the page's origin as a browser would.
+const WEB = process.env.HEAT_WEB_URL || "https://top-pad-web-devnet.imdev2023.workers.dev";
 const USDC: QuoteToken = { mint: DEVNET_USDC, tokenProgram: TOKEN_PROGRAM_ADDRESS };
 const SOL = 1_000_000_000n;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** A transaction the API prepared for `wallet`, signed by it and sent; its signature once confirmed. */
 async function throughApi(path: string, wallet: KeyPairSigner, body: Record<string, string>): Promise<string> {
-  const response = await fetch(`${API}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ wallet: wallet.address, ...body }) });
+  const response = await fetch(`${API}${path}`, { method: "POST", headers: { "content-type": "application/json", origin: WEB }, body: JSON.stringify({ wallet: wallet.address, ...body }) });
   const answer = (await response.json()) as { transaction?: string; error?: string };
   if (!response.ok || !answer.transaction) throw new Error(`${path} answered ${response.status}: ${answer.error}`);
   const signed = await signTransaction([wallet.keyPair], getTransactionDecoder().decode(getBase64Encoder().encode(answer.transaction)));
