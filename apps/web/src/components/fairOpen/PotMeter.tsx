@@ -1,14 +1,16 @@
 "use client";
 
 import type { FairOpen } from "@top-pad/contract";
-import { sol } from "@/lib/format";
+import { quoteAmount, quoteText } from "@/lib/format";
 import styles from "./FairOpen.module.css";
+import { stepPlaces } from "./FairOpenPage";
 
 /**
  * The pot filling against its cap (spec 9, screen 2): Unverified deposits from the left, everyone else's after them,
  * anything past the cap hatched, refunded at the open, and the dashed line past which Unverified deposits stop counting:
  * together they buy at most a quarter of what the pot spends (spec 2.1 step 9). Once the launch cannot open, it buys
- * nothing, and the pot shows only the deposits still to go back. Past the cap, the bar runs to the total.
+ * nothing, and the pot shows only the deposits still to go back. Past the cap, the bar runs to the total. Every figure is
+ * in the launch's quote.
  */
 export function PotMeter({ view }: { view: FairOpen }) {
   const ended = view.phase === "failing" || view.phase === "failed" || view.phase === "closed";
@@ -23,6 +25,12 @@ export function PotMeter({ view }: { view: FairOpen }) {
   const line = allocation.unverified.limited ? BigInt(allocation.unverified.filled) : BigInt(allocation.spend) / 4n;
   const over = total > cap ? total - cap : 0n;
   const target = (cap * 100n) / 20n;
+  const { quote } = view;
+  // Deposits are whole steps, shown to every place they need; the cap, the line, the target and what passes the cap to a
+  // step's places.
+  const exact = (raw: bigint) => quoteAmount(raw, quote, quote.decimals);
+  const places = stepPlaces(view.step, quote);
+  const capText = quoteAmount(cap, quote, places);
 
   return (
     <section className={`panel ${styles.pot}`} aria-labelledby="pot-title">
@@ -31,13 +39,13 @@ export function PotMeter({ view }: { view: FairOpen }) {
           The pot
         </h2>
         <span className="note">
-          <span className="num">{sol(total, 2)}</span> of <span className="num">{sol(cap, 2)}</span> SOL
+          <span className="num">{exact(total)}</span> of <span className="num">{capText}</span> {quote.symbol}
         </span>
       </div>
       <div
         className={styles.track}
         role="img"
-        aria-label={`${sol(total, 2)} SOL deposited against a ${sol(cap, 2)} SOL cap${ended ? "" : `; Unverified deposits count up to ${sol(line, 2)} SOL`}.`}
+        aria-label={`${quoteText(total, quote, quote.decimals)} deposited against a ${quoteText(cap, quote, places)} cap${ended ? "" : `; Unverified deposits count up to ${quoteText(line, quote, places)}`}.`}
       >
         <i className={styles.fillUnverified} style={{ width: at(unverified) }} />
         <i className={styles.fillOthers} style={{ left: at(unverified), width: at(others) }} />
@@ -50,11 +58,11 @@ export function PotMeter({ view }: { view: FairOpen }) {
         <span className="num">0</span>
         {over > 0n ? (
           <span>
-            <span className="num">{sol(total, 2)}</span> SOL
+            <span className="num">{exact(total)}</span> {quote.symbol}
           </span>
         ) : (
           <span>
-            <span className="num">{sol(cap, 2)}</span> SOL cap
+            <span className="num">{capText}</span> {quote.symbol} cap
           </span>
         )}
       </div>
@@ -62,20 +70,20 @@ export function PotMeter({ view }: { view: FairOpen }) {
         <li>
           <i className={styles.swatchUnverified} aria-hidden="true" />
           <span>
-            Unverified <b className="num">{sol(unverified, 2)}</b> SOL
+            Unverified <b className="num">{exact(unverified)}</b> {quote.symbol}
           </span>
         </li>
         <li>
           <i className={styles.swatchOthers} aria-hidden="true" />
           <span>
-            Scored and Verified <b className="num">{sol(others, 2)}</b> SOL
+            Scored and Verified <b className="num">{exact(others)}</b> {quote.symbol}
           </span>
         </li>
         {!ended && (
           <li>
             <i className={styles.swatchLine} aria-hidden="true" />
             <span>
-              Unverified deposits count up to <b className="num">{sol(line, 2)}</b> SOL: together they buy at most a quarter of what the pot spends
+              Unverified deposits count up to <b className="num">{quoteAmount(line, quote, places)}</b> {quote.symbol}: together they buy at most a quarter of what the pot spends
             </span>
           </li>
         )}
@@ -83,14 +91,14 @@ export function PotMeter({ view }: { view: FairOpen }) {
           <li>
             <i className={styles.swatchOver} aria-hidden="true" />
             <span>
-              Past the cap <b className="num">{sol(over, 2)}</b> SOL, refunded
+              Past the cap <b className="num">{quoteAmount(over, quote, places)}</b> {quote.symbol}, refunded
             </span>
           </li>
         )}
       </ul>
       {!ended && (
         <p className={`note ${styles.target}`}>
-          The pot buys at most 20% of the <span className="num">{sol(target, 2)}</span> SOL Graduation Target, so the public opens at most 1.25 times above the
+          The pot buys at most 20% of the <span className="num">{quoteAmount(target, quote, places)}</span> {quote.symbol} Graduation Target, so the public opens at most 1.25 times above the
           pot&apos;s price.
         </p>
       )}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ago, coinAmount, compactNumber, ordinal, rawAmountOf, shareOf, solAmount, span, tickLabels, typedAmount } from "./format";
+import { ago, coinAmount, compactNumber, marketCapBars, ordinal, quoteAmount, quoteText, rawAmountOf, rawQuoteOf, scaledFigure, shareOf, SOL_UNIT, solAmount, span, tickLabels, typedAmount, typedQuote, type QuoteUnit } from "./format";
 
 const sub = (n: number) => String.fromCodePoint(0x2080 + n);
 
@@ -99,5 +99,48 @@ describe("shares and places", () => {
 
   it("name places as English does", () => {
     expect([1, 2, 3, 4, 11, 12, 13, 21, 22, 104].map(ordinal)).toEqual(["1st", "2nd", "3rd", "4th", "11th", "12th", "13th", "21st", "22nd", "104th"]);
+  });
+});
+
+describe("amounts in a coin's quote", () => {
+  const USDC: QuoteUnit = { symbol: "USDC", decimals: 6, multiplier: 1 };
+  const SPLIT: QuoteUnit = { symbol: "NVDAx", decimals: 8, multiplier: 2.5 };
+
+  it("read raw units in the quote's own decimals, with its symbol", () => {
+    expect(quoteText(99_980n, USDC, 6)).toBe("0.09998\u{a0}USDC");
+    expect(quoteText(8_500_000_000n, SOL_UNIT, 2)).toBe("8.5\u{a0}SOL");
+    expect(quoteAmount(84_983_000n, USDC, 2)).toBe("84.98");
+  });
+
+  it("show a stock's raw units through its multiplier, as a wallet shows them", () => {
+    expect(quoteAmount(100_000_000n, SPLIT)).toBe("2.5");
+    expect(scaledFigure("0.000000004", SPLIT)).toBeCloseTo(0.00000001, 15);
+  });
+
+  it("take a typed amount back to raw units, rounded down, through the multiplier", () => {
+    expect(rawQuoteOf("0.5", USDC)).toBe(500_000n);
+    expect(rawQuoteOf("2.5", SPLIT)).toBe(100_000_000n);
+    expect(rawQuoteOf("0.0000001", USDC)).toBeNull();
+    expect(typedQuote(100_000_000n, SPLIT)).toBe("2.5");
+    expect(typedQuote(99_980n, USDC)).toBe("0.09998");
+  });
+});
+
+describe("a chart through the quote's multiplier", () => {
+  const candles = [
+    { time: 60, open: "0.000000004", high: "0.000000006", low: "0.000000004", close: "0.000000005" },
+    { time: 120, open: "0.000000005", high: "0.000000009", low: "0.000000005", close: "0.000000008" },
+  ];
+  const before: QuoteUnit = { symbol: "NVDAx", decimals: 8, multiplier: 1 };
+  const split: QuoteUnit = { ...before, multiplier: 10.02 };
+
+  it("rescales every candle alike when the multiplier changes, so no candle steps against another", () => {
+    const a = marketCapBars(candles, 1_000_000_000, before);
+    const b = marketCapBars(candles, 1_000_000_000, split);
+    expect(a[0]!.close).toBeCloseTo(5, 9);
+    for (const [i, bar] of b.entries()) {
+      for (const k of ["open", "high", "low", "close"] as const) expect(bar[k] / a[i]![k]).toBeCloseTo(10.02, 9);
+    }
+    expect(b[1]!.close / b[0]!.close).toBeCloseTo(a[1]!.close / a[0]!.close, 12);
   });
 });

@@ -12,7 +12,7 @@ import {
 } from "lightweight-charts";
 import { useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
 import { getCoinCandles } from "@/lib/api";
-import { compactNumber, tickLabels } from "@/lib/format";
+import { compactNumber, marketCapBars, tickLabels, type QuoteUnit } from "@/lib/format";
 import styles from "./Coin.module.css";
 
 /** The candle lengths a trader picks from, finest first. */
@@ -47,20 +47,25 @@ function palette() {
 
 /**
  * The coin's market cap in candles (TradingView Lightweight Charts v5, spec 9): the price after each trade times the
- * fixed supply, so the axis reads in SOL rather than in billionths of a lamport.
+ * fixed supply, so the axis reads in whole units of the quote rather than in billionths of one. Every candle is shown
+ * through the quote's multiplier in force now (ADR 0007 decision 5), the same for all of them, so a split or a dividend
+ * rescales the chart as a whole and never puts a step in it.
  */
 export function CandleChart({
   mint,
   ageSeconds,
   supply,
+  quote,
   ref,
 }: {
   mint: string;
   ageSeconds: number;
   /** Whole coins: the market cap is the price times this. */
   supply: number;
+  quote: QuoteUnit;
   ref: Ref<ChartFeed>;
 }) {
+  const scale = supply * quote.multiplier;
   const box = useRef<HTMLDivElement>(null);
   const chart = useRef<IChartApi | null>(null);
   const series = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -121,13 +126,7 @@ export function CandleChart({
     getCoinCandles(mint, seconds)
       .then(({ candles }) => {
         if (!current || !series.current) return;
-        const bars = candles.map((c) => ({
-          time: c.time as UTCTimestamp,
-          open: Number(c.open) * supply,
-          high: Number(c.high) * supply,
-          low: Number(c.low) * supply,
-          close: Number(c.close) * supply,
-        }));
+        const bars = marketCapBars(candles, supply, quote).map((b) => ({ ...b, time: b.time as UTCTimestamp }));
         series.current.setData(bars);
         newest.current = bars.at(-1) ?? null;
         chart.current?.timeScale().scrollToRealTime();
@@ -137,7 +136,7 @@ export function CandleChart({
     return () => {
       current = false;
     };
-  }, [mint, seconds, supply, reloads]);
+  }, [mint, seconds, supply, quote, scale, reloads]);
 
   useImperativeHandle(ref, () => ({
     add(trades) {
@@ -149,7 +148,7 @@ export function CandleChart({
           setReloads((n) => n + 1);
           return;
         }
-        const value = Number(trade.price) * supply;
+        const value = Number(trade.price) * scale;
         const time = (Math.floor(Date.parse(trade.at) / 1000 / seconds) * seconds) as UTCTimestamp;
         // A trade older than the newest candle comes in late; the next load places it.
         if (time < last.time) continue;
@@ -168,7 +167,7 @@ export function CandleChart({
   return (
     <section className={`panel ${styles.chartPanel}`} aria-label="Chart">
       <div className={styles.chartHead}>
-        <span className="eyebrow">Market cap, SOL</span>
+        <span className="eyebrow">Market cap, {quote.symbol}</span>
         <div className={styles.lengths} role="group" aria-label="Candle length">
           {LENGTHS.map((l) => (
             <button key={l.seconds} type="button" className={styles.length} aria-pressed={l.seconds === seconds} onClick={() => setSeconds(l.seconds)}>

@@ -1,4 +1,4 @@
-import { sol } from "@/lib/format";
+import { quoteText, type QuoteUnit } from "@/lib/format";
 import styles from "./Launch.module.css";
 import { when } from "./Schedule";
 
@@ -48,6 +48,7 @@ export function SealedCard({
   opensAt,
   minRaise,
   potCap,
+  quote,
   scheduled = false,
 }: {
   handle: string | null;
@@ -58,6 +59,8 @@ export function SealedCard({
   opensAt: number | null;
   minRaise: bigint;
   potCap: string | null;
+  /** The quote the pot fills in, which its cap and minimum raise read in. */
+  quote: QuoteUnit;
 }) {
   return (
     <div className={`${styles.coinCard} ${styles.sealedCard}`}>
@@ -71,8 +74,8 @@ export function SealedCard({
         </span>
         <span className="row">
           <span className="chip chip-neutral">10-minute window</span>
-          {potCap && <span className="chip chip-neutral">pot up to {sol(potCap, 2)} SOL</span>}
-          {minRaise > 0n && <span className="chip chip-neutral">min {sol(minRaise, 2)} SOL</span>}
+          {potCap && <span className="chip chip-neutral">pot up to {quoteText(potCap, quote, 2)}</span>}
+          {minRaise > 0n && <span className="chip chip-neutral">min {quoteText(minRaise, quote, 2)}</span>}
           {handle && <span className="chip chip-info">@{handle}</span>}
         </span>
       </div>

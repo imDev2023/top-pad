@@ -6,14 +6,25 @@ import type { UiWalletAccount } from "@wallet-standard/react";
 import type { Coin, Holdings, QuoteStep, SwapOutcome, SwapQuote, Trade } from "@top-pad/contract";
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { ApiProblem, getHoldings, getSwapQuote, prepareSwap, reportTrade } from "@/lib/api";
-import { coinAmount, rawAmountOf, sol, solAmount, typedAmount } from "@/lib/format";
+import { coinAmount, quoteSmall, quoteText, quoteValue, rawAmountOf, rawQuoteOf, typedAmount, type QuoteUnit } from "@/lib/format";
 import { WalletButton } from "../WalletButton";
 import { useWallet, type SolanaChain } from "../WalletProvider";
 import styles from "./QuickTrade.module.css";
 
 const SIGN_AND_SEND = "solana:signAndSendTransaction";
-const SOL_DECIMALS = 9;
-const BUY_PRESETS = ["0.05", "0.1", "0.5", "1"] as const;
+/**
+ * A buy's presets as shares of the coin's Graduation Target, in its quote: on devnet's 8.5 SOL target 0.05, 0.1, 0.5
+ * and 1 SOL, and as much of USDC or a stock (ADR 0007), each to one significant figure.
+ */
+const BUY_SHARES = [1 / 170, 1 / 85, 1 / 17, 2 / 17] as const;
+const oneFigure = (value: number) => {
+  const magnitude = 10 ** Math.floor(Math.log10(value));
+  return Number((Math.round(value / magnitude) * magnitude).toPrecision(1));
+};
+function buyPresets(target: string, quote: QuoteUnit): string[] {
+  const whole = quoteValue(target, quote);
+  return BUY_SHARES.map((share) => String(oneFigure(whole * share)));
+}
 const SELL_PRESETS = [25, 50, 100] as const;
 const SLIPPAGES = [50, 100, 300] as const;
 /**
@@ -56,10 +67,11 @@ export function QuickTrade({ coin, onTraded }: { coin: Coin; onTraded: (trades: 
   const [sending, setSending] = useState<Sending>({ phase: "idle" });
   const busy = sending.phase === "preparing" || sending.phase === "signing" || sending.phase === "confirming";
 
-  const decimals = side === "buy" ? SOL_DECIMALS : coin.decimals;
-  const amount = rawAmountOf(text, decimals);
+  // A buy spends the coin's quote, typed as a wallet shows it (through its multiplier); a sell spends the coin.
+  const quote = coin.quote;
+  const amount = side === "buy" ? rawQuoteOf(text, quote) : rawAmountOf(text, coin.decimals);
   const typed = text.trim() !== "";
-  const held = holdings && holdings.wallet === account?.address ? (side === "buy" ? BigInt(holdings.sol) : BigInt(holdings.coins)) : null;
+  const held = holdings && holdings.wallet === account?.address ? (side === "buy" ? BigInt(holdings.quote) : BigInt(holdings.coins)) : null;
   const tooMuch = amount !== null && held !== null && amount > held;
 
   const loadHoldings = useCallback(async () => {
@@ -134,7 +146,7 @@ export function QuickTrade({ coin, onTraded }: { coin: Coin; onTraded: (trades: 
         onTraded(outcome.trades);
         const ran = outcome.trades[0] ? Date.parse(outcome.trades[0].at) / 1000 : null;
         if (clicked !== null && ran !== null) setLanding((l) => Math.min(MAX_LANDING_SECONDS, Math.max(0, (l + (ran - clicked)) / 2)));
-        setSending({ phase: "done", ...doneText(outcome, ticker, coin.decimals), explorer: outcome.explorer });
+        setSending({ phase: "done", ...doneText(outcome, ticker, coin.decimals, quote), explorer: outcome.explorer });
         setText("");
       } else {
         setSending({
@@ -192,7 +204,7 @@ export function QuickTrade({ coin, onTraded }: { coin: Coin; onTraded: (trades: 
             <label htmlFor="quick-trade-amount">{side === "buy" ? "Spend" : "Sell"}</label>
             {held !== null && (
               <span className="note" data-testid="quick-trade-held">
-                You have <span className="num">{side === "buy" ? `${sol(held, 4)} SOL` : `${coinAmount(held, coin.decimals)} ${ticker}`}</span>
+                You have <span className="num">{side === "buy" ? quoteText(held, quote, 4) : `${coinAmount(held, coin.decimals)} ${ticker}`}</span>
               </span>
             )}
           </div>
@@ -211,13 +223,13 @@ export function QuickTrade({ coin, onTraded }: { coin: Coin; onTraded: (trades: 
                 if (sending.phase === "done" || sending.phase === "failed") setSending({ phase: "idle" });
               }}
             />
-            <span className={styles.unit}>{side === "buy" ? "SOL" : ticker}</span>
+            <span className={styles.unit}>{side === "buy" ? quote.symbol : ticker}</span>
           </div>
-          <div className={styles.presets} role="group" aria-label={side === "buy" ? "Amounts of SOL" : "Shares of your coins"}>
+          <div className={styles.presets} role="group" aria-label={side === "buy" ? `Amounts of ${quote.symbol}` : "Shares of your coins"}>
             {side === "buy"
-              ? BUY_PRESETS.map((p) => (
+              ? buyPresets(coin.market.graduationTarget, quote).map((p) => (
                   <button key={p} type="button" className={styles.preset} aria-pressed={text === p} onClick={() => setText(p)}>
-                    {p} SOL
+                    {p} {quote.symbol}
                   </button>
                 ))
               : SELL_PRESETS.map((share) => {
@@ -233,17 +245,17 @@ export function QuickTrade({ coin, onTraded }: { coin: Coin; onTraded: (trades: 
           <span id="quick-trade-amount-note" className={`note ${invalid || quoteProblem ? styles.problem : ""}`} role={quoteProblem ? "alert" : undefined}>
             {typed && amount === null
               ? side === "buy"
-                ? "Enter SOL, to at most 9 decimal places."
+                ? `Enter ${quote.symbol}, to at most ${quote.decimals} decimal places.`
                 : `Enter ${ticker}, to at most ${coin.decimals} decimal places.`
               : tooMuch
                 ? side === "buy"
-                  ? "That is more SOL than this wallet holds."
+                  ? `That is more ${quote.symbol} than this wallet holds.`
                   : `That is more ${ticker} than this wallet holds.`
                 : quoteProblem}
           </span>
         </div>
 
-        <Summary quoted={quoted} step={step} side={side} ticker={ticker} decimals={coin.decimals} now={now} pending={amount !== null && !quoteProblem} />
+        <Summary quoted={quoted} step={step} side={side} ticker={ticker} decimals={coin.decimals} unit={quote} now={now} pending={amount !== null && !quoteProblem} />
 
         <div className={styles.slippage}>
           <span className="label" id="quick-trade-slippage">
@@ -268,7 +280,7 @@ export function QuickTrade({ coin, onTraded }: { coin: Coin; onTraded: (trades: 
           <>
           <BindSend account={account} chain={chain} into={send} />
           <button type="submit" className={`btn ${side === "buy" ? "btn-go" : styles.sellButton}`} disabled={busy || amount === null || tooMuch || !step}>
-            {busy ? (side === "buy" ? "Buying…" : "Selling…") : buttonText(side, amount, ticker, coin.decimals)}
+            {busy ? (side === "buy" ? "Buying…" : "Selling…") : buttonText(side, amount, ticker, coin.decimals, quote)}
           </button>
           </>
         )}
@@ -300,18 +312,18 @@ function stepAt({ quote, at }: Quoted, now: number, landing: number): QuoteStep 
   return found;
 }
 
-function buttonText(side: Side, amount: bigint | null, ticker: string, decimals: number) {
+function buttonText(side: Side, amount: bigint | null, ticker: string, decimals: number, unit: QuoteUnit) {
   if (amount === null) return side === "buy" ? `Buy ${ticker}` : `Sell ${ticker}`;
-  return side === "buy" ? `Buy ${ticker} with ${sol(amount, 9)} SOL` : `Sell ${coinAmount(amount, decimals)} ${ticker}`;
+  return side === "buy" ? `Buy ${ticker} with ${quoteText(amount, unit, unit.decimals)}` : `Sell ${coinAmount(amount, decimals)} ${ticker}`;
 }
 
-function doneText(outcome: SwapOutcome, ticker: string, decimals: number) {
+function doneText(outcome: SwapOutcome, ticker: string, decimals: number, unit: QuoteUnit) {
   const t = outcome.trades[0];
   if (!t) return { text: "Your trade landed.", detail: "It shows in the trades below once Heat has read it." };
-  const detail = `Fee ${solAmount(t.fee)} SOL (${percent(t.fee, t.quoteAmount)}).`;
+  const detail = `Fee ${quoteSmall(t.fee, unit)} ${unit.symbol} (${percent(t.fee, t.quoteAmount)}).`;
   return t.side === "buy"
-    ? { text: `Bought ${coinAmount(t.baseAmount, decimals)} ${ticker} for ${sol(t.quoteAmount, 9)} SOL`, detail }
-    : { text: `Sold ${coinAmount(t.baseAmount, decimals)} ${ticker} for ${sol(BigInt(t.quoteAmount) - BigInt(t.fee), 9)} SOL`, detail };
+    ? { text: `Bought ${coinAmount(t.baseAmount, decimals)} ${ticker} for ${quoteText(t.quoteAmount, unit, unit.decimals)}`, detail }
+    : { text: `Sold ${coinAmount(t.baseAmount, decimals)} ${ticker} for ${quoteText(BigInt(t.quoteAmount) - BigInt(t.fee), unit, unit.decimals)}`, detail };
 }
 
 /** What the trade pays and gets, before signing. */
@@ -321,6 +333,7 @@ function Summary({
   side,
   ticker,
   decimals,
+  unit,
   now,
   pending,
 }: {
@@ -329,6 +342,8 @@ function Summary({
   side: Side;
   ticker: string;
   decimals: number;
+  /** The coin's quote, which a buy spends and a sell returns. */
+  unit: QuoteUnit;
   now: number;
   pending: boolean;
 }) {
@@ -348,7 +363,7 @@ function Summary({
   }
   const { quote } = quoted;
   const taxed = step.from < quote.taxEndsAt;
-  const out = (raw: string) => (side === "buy" ? `${coinAmount(raw, decimals)} ${ticker}` : `${sol(raw, 6)} SOL`);
+  const out = (raw: string) => (side === "buy" ? `${coinAmount(raw, decimals)} ${ticker}` : quoteText(raw, unit, 6));
   const left = BigInt(quote.amountLeft);
   const endsIn = Math.max(0, quote.taxEndsAt - (quote.chainTime + Math.floor((now - quoted.at) / 1000)));
   return (
@@ -358,7 +373,10 @@ function Summary({
           <dt>{taxed ? "Sniper tax" : "Fee"}</dt>
           <dd className={taxed ? styles.taxed : undefined} data-testid="quick-trade-fee">
             <span className="num">{percent(step.fee, step.quoteAmount)}</span>
-            <span className={`num ${styles.feeSol}`}> · {solAmount(step.fee)} SOL</span>
+            <span className={`num ${styles.feeSol}`}>
+              {" "}
+              · {quoteSmall(step.fee, unit)} {unit.symbol}
+            </span>
           </dd>
         </div>
         <div>
@@ -381,8 +399,8 @@ function Summary({
       )}
       {left > 0n && (
         <div className="verdict verdict-caution">
-          <b>Only {sol(quote.amountIn, 9)} SOL of it fills</b>
-          <span className="note">The curve completes at Graduation first: the other {sol(left, 9)} SOL stays in your wallet.</span>
+          <b>Only {quoteText(quote.amountIn, unit, unit.decimals)} of it fills</b>
+          <span className="note">The curve completes at Graduation first: the other {quoteText(left, unit, unit.decimals)} stays in your wallet.</span>
         </div>
       )}
     </>

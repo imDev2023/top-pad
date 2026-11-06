@@ -1,7 +1,7 @@
 "use client";
 
 import type { Trade } from "@top-pad/contract";
-import { ago, coinAmount, shortAddress, solAmount } from "@/lib/format";
+import { ago, coinAmount, quoteSmall, shortAddress, type QuoteUnit } from "@/lib/format";
 import styles from "./Coin.module.css";
 
 /** A trade's fee as a share of what it moved before the fee. */
@@ -18,6 +18,7 @@ export function TradeList({
   now,
   taxEnds,
   decimals,
+  quote,
   explorerTx,
 }: {
   trades: Trade[];
@@ -29,6 +30,8 @@ export function TradeList({
   /** When the sniper tax's minute ended, in milliseconds: a trade before it paid the tax. */
   taxEnds: number;
   decimals: number;
+  /** What the coin is priced in: each trade's amount and fee read in it. */
+  quote: QuoteUnit;
   explorerTx: (signature: string) => string;
 }) {
   if (!trades.length) return <p className={`note ${styles.empty}`}>No trades yet.</p>;
@@ -40,7 +43,7 @@ export function TradeList({
             <th scope="col">When</th>
             <th scope="col">Side</th>
             <th scope="col" className={styles.right}>
-              SOL
+              {quote.symbol}
             </th>
             <th scope="col" className={`${styles.right} ${styles.wide}`}>
               Coins
@@ -66,10 +69,10 @@ export function TradeList({
                   </a>
                 </td>
                 <td className={t.side === "buy" ? styles.buy : styles.sell}>{t.side === "buy" ? "Buy" : "Sell"}</td>
-                <td className={`num ${styles.right}`}>{solAmount(t.quoteAmount)}</td>
+                <td className={`num ${styles.right}`}>{quoteSmall(t.quoteAmount, quote)}</td>
                 <td className={`num ${styles.right} ${styles.wide}`}>{coinAmount(t.baseAmount, decimals)}</td>
                 <td className={`num ${styles.right} ${tone}`}>
-                  {(rate * 100).toFixed(2)}% <span className={styles.feeSol}>· {solAmount(t.fee)}</span>
+                  {(rate * 100).toFixed(2)}% <span className={styles.feeSol}>· {quoteSmall(t.fee, quote)}</span>
                 </td>
                 <td className={`mono ${styles.wide}`}>{shortAddress(t.trader)}</td>
               </tr>

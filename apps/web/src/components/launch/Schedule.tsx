@@ -4,13 +4,13 @@
 // optional minimum raise; and the one-line teaser the calendar shows while the coin is sealed.
 import type { Platform } from "@top-pad/contract";
 import { teaserVerdict } from "@top-pad/vamp-shield/rules";
-import { sol } from "@/lib/format";
+import { quoteText, rawQuoteOf, type QuoteUnit } from "@/lib/format";
 import styles from "./Launch.module.css";
 
 export type ScheduleDraft = {
   /** "now", or a local date and time as a datetime-local input holds it. */
   start: "now" | string;
-  /** SOL as typed, or empty for none. */
+  /** The coin's quote as typed, as a wallet shows it, or empty for none. */
   minRaise: string;
   teaser: string;
 };
@@ -18,6 +18,9 @@ export type ScheduleDraft = {
 export const EMPTY_SCHEDULE: ScheduleDraft = { start: "now", minRaise: "", teaser: "" };
 
 type Terms = NonNullable<Platform["fairOpen"]>;
+
+/** The pot a Fair Open in a quote can fill: its cap, in the quote's raw units, and the quote it is in (ADR 0007). */
+export type Pot = { potCap: string; quote: QuoteUnit };
 
 /** A datetime-local value for a moment, in this browser's time zone, to the minute. */
 export function localInput(ms: number) {
@@ -37,8 +40,11 @@ export function span(from: number, to: number) {
   return `${when(from)} to ${end}`;
 }
 
-/** What the draft schedules, or the first reason it cannot: the window's start in Unix seconds, and the minimum raise in lamports. */
-export function readSchedule(draft: ScheduleDraft, terms: Terms, now: number):
+/**
+ * What the draft schedules, or the first reason it cannot: the window's start in Unix seconds, and the minimum raise in
+ * the quote's raw units.
+ */
+export function readSchedule(draft: ScheduleDraft, terms: Terms, pot: Pot, now: number):
   | { ok: true; depositsOpenAt: number; minRaise: bigint; teaser: string }
   | { ok: false; field: "start" | "minRaise" | "teaser"; reason: string } {
   const start = draft.start === "now" ? now : Date.parse(draft.start);
@@ -47,18 +53,17 @@ export function readSchedule(draft: ScheduleDraft, terms: Terms, now: number):
   if (start > now + terms.maxAheadSeconds * 1000) return { ok: false, field: "start", reason: "The window can start at most 7 days ahead." };
   let minRaise = 0n;
   if (draft.minRaise.trim() !== "") {
-    if (!/^\d+(\.\d{1,2})?$/.test(draft.minRaise.trim())) return { ok: false, field: "minRaise", reason: "Enter SOL to two decimal places, such as 0.5." };
-    const [whole, fraction = ""] = draft.minRaise.trim().split(".");
-    minRaise = BigInt(whole!) * 1_000_000_000n + BigInt(fraction.padEnd(2, "0")) * 10_000_000n;
-    if (minRaise > BigInt(terms.potCap)) return { ok: false, field: "minRaise", reason: `At most the pot's cap, ${sol(terms.potCap)} SOL.` };
+    if (!/^\d+(\.\d{1,2})?$/.test(draft.minRaise.trim())) return { ok: false, field: "minRaise", reason: `Enter ${pot.quote.symbol} to two decimal places, such as 0.5.` };
+    minRaise = rawQuoteOf(draft.minRaise, pot.quote) ?? 0n;
+    if (minRaise > BigInt(pot.potCap)) return { ok: false, field: "minRaise", reason: `At most the pot's cap, ${quoteText(pot.potCap, pot.quote, 2)}.` };
   }
   const teaser = teaserVerdict(draft.teaser);
   if (!teaser.ok) return { ok: false, field: "teaser", reason: teaser.reason };
   return { ok: true, depositsOpenAt: Math.floor(start / 1000), minRaise, teaser: teaser.teaser };
 }
 
-export function Schedule({ draft, terms, now, onChange }: { draft: ScheduleDraft; terms: Terms; now: number; onChange: (draft: ScheduleDraft) => void }) {
-  const read = readSchedule(draft, terms, now);
+export function Schedule({ draft, terms, pot, now, onChange }: { draft: ScheduleDraft; terms: Terms; pot: Pot; now: number; onChange: (draft: ScheduleDraft) => void }) {
+  const read = readSchedule(draft, terms, pot, now);
   const problem = (field: "start" | "minRaise" | "teaser") => (!read.ok && read.field === field ? read.reason : null);
   const startMs = draft.start === "now" ? now : Date.parse(draft.start);
   const windowMinutes = Math.round(terms.windowSeconds / 60);
@@ -124,7 +129,7 @@ export function Schedule({ draft, terms, now, onChange }: { draft: ScheduleDraft
 
       <div className={styles.fields}>
         <div className="field">
-          <label htmlFor="min-raise">Minimum raise (SOL, optional)</label>
+          <label htmlFor="min-raise">Minimum raise ({pot.quote.symbol}, optional)</label>
           <input
             id="min-raise"
             className="input num"
@@ -136,7 +141,7 @@ export function Schedule({ draft, terms, now, onChange }: { draft: ScheduleDraft
             onChange={(e) => set({ minRaise: e.target.value.replace(",", ".") })}
           />
           <span id="min-raise-help" className={problem("minRaise") ? styles.fieldProblem : "note"}>
-            {problem("minRaise") ?? `If the pot holds less at the open, the launch fails and every deposit comes back. The pot buys at most ${sol(terms.potCap)} SOL.`}
+            {problem("minRaise") ?? `If the pot holds less at the open, the launch fails and every deposit comes back. The pot buys at most ${quoteText(pot.potCap, pot.quote, 2)}.`}
           </span>
         </div>
         <div className="field">

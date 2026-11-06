@@ -112,7 +112,7 @@ test("a Fair Open takes deposits and withdrawals from its page, then fails and r
     await untilChainTime(data.opensAt + (LATE ? 900n : 0n));
     await expect(page.getByTestId("fair-open-phase")).toContainText("This Fair Open cannot open", { timeout: 60_000 });
     await snap(page, "fair-open-7-failing");
-    await page.getByRole("button", { name: "Mark it failed and take back my SOL" }).click();
+    await page.getByRole("button", { name: "Mark it failed and take back my deposit" }).click();
     await expect(page.getByTestId("fair-open-done")).toContainText("Marked failed, and your deposit and both rents are back", { timeout: 90_000 });
     await expect(page.getByTestId("fair-open-phase")).toContainText("This Fair Open failed");
     await snap(page, "fair-open-8-failed");

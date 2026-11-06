@@ -1,16 +1,18 @@
 "use client";
 
-// The launch flow (spec 9, screen 4): link X, choose the launch mode, enter the coin with Vamp Shield's live verdicts,
+// The launch flow (spec 9, screen 4): link X, choose the launch mode and the quote the coin is priced in (ADR 0007), with
+// the quote's Quote Risk Labels, enter the coin with Vamp Shield's live verdicts,
 // then for a Fair Open, the default, its schedule and one approval that signs its open in advance (spec 2.1 steps 2 to
 // 8), or for an Instant launch its one signature; done.
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ImageVerdict, LaunchRefusal, LaunchStatus, Me, Platform, VampShieldVerdict } from "@top-pad/contract";
+import type { ImageVerdict, LaunchRefusal, LaunchStatus, ListedQuote, Me, Platform, VampShieldVerdict } from "@top-pad/contract";
 import { canonicalTicker, nameVerdict, NAME_MAX_BYTES, teaserVerdict, tickerVerdict } from "@top-pad/vamp-shield/rules";
-import { checkImage, checkVampShield, getMe, getPlatform, linkXUrl, logout } from "@/lib/api";
-import { shortAddress, sol } from "@/lib/format";
+import { checkImage, checkVampShield, getMe, getPlatform, getQuotes, linkXUrl, logout } from "@/lib/api";
+import { quoteText, shortAddress, SOL_UNIT } from "@/lib/format";
 import type { FittedImage } from "@/lib/image";
+import { QuoteLabels } from "../quote/QuoteLabels";
 import { WalletButton } from "../WalletButton";
 import { useWallet } from "../WalletProvider";
 import { CoinCard, SealedCard } from "./CoinCard";
@@ -59,6 +61,9 @@ export function LaunchFlow({ linkOutcome: arrived }: { linkOutcome: LinkOutcome 
   const [refusal, setRefusal] = useState<{ refusal: LaunchRefusal; image: FittedImage | null } | null>(null);
   const [landed, setLanded] = useState<LaunchStatus | null>(null);
   const [schedule, setSchedule] = useState<ScheduleDraft>(EMPTY_SCHEDULE);
+  // The quotes a coin can be priced in here, as the chain holds them, and the one chosen: SOL until another is.
+  const [quotes, setQuotes] = useState<ListedQuote[] | null>(null);
+  const [quoteMint, setQuoteMint] = useState<string | null>(null);
   const [scheduleProblem, setScheduleProblem] = useState<string | null>(null);
   // The clock the schedule is judged by, moved on every 15 s so "now" stays now.
   const [now, setNow] = useState(() => Date.now());
@@ -71,10 +76,12 @@ export function LaunchFlow({ linkOutcome: arrived }: { linkOutcome: LinkOutcome 
   const moved = useRef(false);
 
   useEffect(() => {
-    Promise.all([getPlatform(), getMe()])
-      .then(([p, m]) => {
+    Promise.all([getPlatform(), getMe(), getQuotes().catch(() => null)])
+      .then(([p, m, q]) => {
         setPlatform(p);
         setMe(m);
+        setQuotes(q?.quotes ?? []);
+        setQuoteMint((chosen) => chosen ?? q?.quotes.find((quote) => quote.offered)?.mint ?? q?.quotes[0]?.mint ?? null);
         if (m) setStep(1);
       })
       .catch((e: Error) => {
@@ -198,10 +205,20 @@ export function LaunchFlow({ linkOutcome: arrived }: { linkOutcome: LinkOutcome 
   const steps = STEPS[mode];
   const at: StepName = steps[step]!;
   const terms = platform?.fairOpen ?? null;
-  const scheduled = terms ? readSchedule(schedule, terms, now) : null;
+  const quote = quotes?.find((q) => q.mint === quoteMint) ?? null;
+  const pot = quote?.settings ? { potCap: quote.settings.potCap, quote } : null;
+  const scheduled = terms && pot ? readSchedule(schedule, terms, pot, now) : null;
   const modeOpen = platform ? (mode === "instant" ? platform.launchModes.instant : platform.launchModes.fairOpen) : false;
   const canContinue =
-    at === "Link X" ? !!me : at === "Launch mode" ? modeOpen : at === "Coin" ? coinReady : at === "Schedule" ? scheduled?.ok === true : false;
+    at === "Link X"
+      ? !!me
+      : at === "Launch mode"
+        ? modeOpen && quote?.offered === true
+        : at === "Coin"
+          ? coinReady
+          : at === "Schedule"
+            ? scheduled?.ok === true
+            : false;
   const signStep = steps.indexOf("Sign" as never);
   // The calendar preview shows what is valid so far: a refused teaser is not shown as if it would go out.
   const teaserRule = teaserVerdict(schedule.teaser);
@@ -336,6 +353,16 @@ export function LaunchFlow({ linkOutcome: arrived }: { linkOutcome: LinkOutcome 
                   {mode === "fairOpen" ? "Fair Opens are" : "Instant launches are"} not open on this deployment yet. Choose the other mode to launch now.
                 </p>
               )}
+              <QuotePicker
+                quotes={quotes}
+                chosen={quoteMint}
+                onChoose={(mint) => {
+                  setQuoteMint(mint);
+                  // A minimum raise typed in one quote means nothing in another.
+                  setSchedule((d) => ({ ...d, minRaise: "" }));
+                }}
+              />
+              {quote && <QuoteLabels quote={quote} place="launch" />}
             </>
           )}
 
@@ -406,7 +433,7 @@ export function LaunchFlow({ linkOutcome: arrived }: { linkOutcome: LinkOutcome 
                 Deposits run for {Math.round(terms.windowSeconds / 60)} minutes, then the coin opens and everyone in the pot buys at one price. Until then
                 your coin stays sealed: only the teaser, the time and you show on the calendar.
               </p>
-              <Schedule draft={schedule} terms={terms} now={now} onChange={(d) => (setSchedule(d), setScheduleProblem(null))} />
+              {pot && <Schedule draft={schedule} terms={terms} pot={pot} now={now} onChange={(d) => (setSchedule(d), setScheduleProblem(null))} />}
               {scheduleProblem && (
                 <div className="verdict verdict-stop" role="alert">
                   <b>Refused</b>
@@ -416,7 +443,7 @@ export function LaunchFlow({ linkOutcome: arrived }: { linkOutcome: LinkOutcome 
             </>
           )}
 
-          {at === "Sign" && mode === "fairOpen" && image && terms && scheduled?.ok && (
+          {at === "Sign" && mode === "fairOpen" && image && terms && quote?.settings && scheduled?.ok && (
             <>
               <h2 id="step-heading" ref={heading} tabIndex={-1}>
                 Sign your open in advance
@@ -428,7 +455,8 @@ export function LaunchFlow({ linkOutcome: arrived }: { linkOutcome: LinkOutcome 
                     chain={chain}
                     coin={{ name: nameRule.ok ? nameRule.name : name, ticker, depositsOpenAt: scheduled.depositsOpenAt, minRaise: scheduled.minRaise, teaser: scheduled.teaser }}
                     image={image}
-                    rungs={terms.rungs}
+                    quote={quote}
+                    rungs={quote.settings.rungs}
                     onScheduled={(status) => {
                       setLanded(status);
                       goTo(doneStep);
@@ -446,7 +474,7 @@ export function LaunchFlow({ linkOutcome: arrived }: { linkOutcome: LinkOutcome 
             </>
           )}
 
-          {at === "Sign" && mode === "instant" && image && (
+          {at === "Sign" && mode === "instant" && image && quote && (
             <>
               <h2 id="step-heading" ref={heading} tabIndex={-1}>
                 Sign the launch
@@ -463,6 +491,7 @@ export function LaunchFlow({ linkOutcome: arrived }: { linkOutcome: LinkOutcome 
                     chain={chain}
                     coin={{ name: nameRule.ok ? nameRule.name : name, ticker }}
                     image={image}
+                    quote={quote.mint}
                     onLanded={(status) => {
                       setLanded(status);
                       goTo(doneStep);
@@ -507,7 +536,7 @@ export function LaunchFlow({ linkOutcome: arrived }: { linkOutcome: LinkOutcome 
                 </div>
                 <div>
                   <dt>Minimum raise</dt>
-                  <dd>{landed.fairOpen.minRaise === "0" ? "None" : `${sol(landed.fairOpen.minRaise)} SOL`}</dd>
+                  <dd>{landed.fairOpen.minRaise === "0" ? "None" : quoteText(landed.fairOpen.minRaise, quotes?.find((q) => q.mint === landed.quoteMint) ?? SOL_UNIT)}</dd>
                 </div>
                 <div>
                   <dt>Sealed coin</dt>
@@ -609,7 +638,8 @@ export function LaunchFlow({ linkOutcome: arrived }: { linkOutcome: LinkOutcome 
             teaser={teaserPreview}
             opensAt={opensAtPreview}
             minRaise={scheduled?.ok ? scheduled.minRaise : 0n}
-            potCap={terms?.potCap ?? null}
+            potCap={quote?.settings?.potCap ?? null}
+            quote={quote ?? SOL_UNIT}
             scheduled={!!landed?.fairOpen}
           />
         )}
@@ -703,5 +733,40 @@ function Linked({ me, onUnlink }: { me: Me; onUnlink: () => void }) {
         </button>
       </span>
     </div>
+  );
+}
+
+/**
+ * The quote the coin is priced in (ADR 0007): SOL, or another quote Heat lists here once the band job has named its
+ * configs. A quote that waits can still be chosen, to read its labels, and says what it waits for; the flow goes on only
+ * with one that is offered.
+ */
+function QuotePicker({ quotes, chosen, onChoose }: { quotes: ListedQuote[] | null; chosen: string | null; onChoose: (mint: string) => void }) {
+  if (quotes === null) return <p className="note">Loading the quotes a coin can be priced in…</p>;
+  if (quotes.length === 0) return <p className="note">The quotes a coin can be priced in could not be read just now. Reload the page to try again.</p>;
+  const sol = quotes.find((q) => q.symbol === "SOL")?.settings ?? null;
+  const note = (q: ListedQuote) => {
+    if (!q.offered || !q.settings) return q.waiting;
+    if (q.symbol === "SOL") return `Graduates at ${quoteText(q.settings.graduationTarget, q, 2)}.`;
+    const worth = sol ? `, ${quoteText(sol.graduationTarget, SOL_UNIT, 2)}'s worth when its configs were made` : "";
+    return `Graduates at ${quoteText(q.settings.graduationTarget, q, 2)}${worth}. Trades, deposits and payouts are all in ${q.symbol}.`;
+  };
+  return (
+    <fieldset className={styles.quotes} data-testid="quote-picker">
+      <legend className="label">Priced in</legend>
+      <div className={styles.quoteOptions}>
+        {quotes.map((q) => (
+          <label key={q.mint} className={`${styles.option} ${q.offered ? "" : styles.quoteWaiting}`}>
+            <input type="radio" name="quote" value={q.mint} checked={q.mint === chosen} onChange={() => onChoose(q.mint)} aria-describedby={`quote-note-${q.mint}`} />
+            <span>
+              <b>{q.symbol}</b>
+              <span className="note" id={`quote-note-${q.mint}`}>
+                {note(q)}
+              </span>
+            </span>
+          </label>
+        ))}
+      </div>
+    </fieldset>
   );
 }

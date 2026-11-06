@@ -14,6 +14,7 @@ import {
   LaunchStatus,
   Me,
   Platform,
+  QuoteList,
   PreparedClaim,
   PreparedFairOpenTransaction,
   PreparedLaunch,
@@ -85,6 +86,9 @@ async function call<T extends z.ZodType>(schema: T, path: string, init: RequestI
 const postJson = (body: unknown): RequestInit => ({ method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 
 export const getPlatform = () => call(Platform, "/platform");
+
+/** `GET /quotes`: every quote a coin can be priced in here, each offered or saying what it waits for (ADR 0007). */
+export const getQuotes = () => call(QuoteList, "/quotes");
 
 /** The platform as the server renders a page, or null when the API does not answer in time. */
 export async function getPlatformOrNull(): Promise<Platform | null> {

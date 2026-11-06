@@ -1,7 +1,7 @@
 "use client";
 
 import type { Coin } from "@top-pad/contract";
-import { sol, span } from "@/lib/format";
+import { quoteText, span } from "@/lib/format";
 import styles from "./Coin.module.css";
 
 /** The sniper tax `elapsed` seconds after the open, as a fraction: the config's linear fee scheduler (spec 3.2). */
@@ -43,7 +43,7 @@ export function TaxBand({ coin, now }: { coin: Coin; now: number }) {
           {coin.launchMode !== "fair_open" &&
             (claim ? (
               <>
-                Heat&apos;s treasury was paid <b className="num">{sol(claim.amount, 9)}&nbsp;SOL</b> for that minute, claimed {span(late)} after it
+                Heat&apos;s treasury was paid <b className="num">{quoteText(claim.amount, coin.quote, 9)}</b> for that minute, claimed {span(late)} after it
                 ended (
                 <a href={claim.explorer} target="_blank" rel="noreferrer">
                   see the claim
@@ -57,7 +57,7 @@ export function TaxBand({ coin, now }: { coin: Coin; now: number }) {
             (coin.fairOpen.taxShare.toTreasury ? (
               <>
                 The creator was the only depositor, so Heat&apos;s treasury was paid it,{" "}
-                <b className="num">{sol(coin.fairOpen.taxShare.total, 9)}&nbsp;SOL</b> (
+                <b className="num">{quoteText(coin.fairOpen.taxShare.total, coin.quote, 9)}</b> (
                 <a href={coin.fairOpen.taxShare.explorer} target="_blank" rel="noreferrer">
                   see the claim
                 </a>
@@ -67,7 +67,7 @@ export function TaxBand({ coin, now }: { coin: Coin; now: number }) {
               <>Nobody traded in that minute, so no sniper tax was paid. </>
             ) : (
               <>
-                The depositors&apos; Tax Share came to <b className="num">{sol(coin.fairOpen.taxShare.total, 9)}&nbsp;SOL</b> (
+                The depositors&apos; Tax Share came to <b className="num">{quoteText(coin.fairOpen.taxShare.total, coin.quote, 9)}</b> (
                 <a href={coin.fairOpen.taxShare.explorer} target="_blank" rel="noreferrer">
                   see the claim
                 </a>

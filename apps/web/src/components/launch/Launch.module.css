@@ -324,6 +324,31 @@
   outline-offset: 2px;
 }
 
+/* The quote picker (ADR 0007): the start options' cards, one per quote, a waiting one dimmed but still chosen to read. */
+.quotes {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.quotes > legend {
+  margin-bottom: 8px;
+  padding: 0;
+}
+
+.quoteOptions {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.quoteWaiting b {
+  color: var(--muted);
+}
+
 .startChoice input[type="datetime-local"] {
   color-scheme: inherit;
 }

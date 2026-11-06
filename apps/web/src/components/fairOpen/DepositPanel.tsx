@@ -6,7 +6,7 @@ import type { UiWalletAccount } from "@wallet-standard/react";
 import type { FairOpen, FairOpenOutcome } from "@top-pad/contract";
 import { useState } from "react";
 import { ApiProblem, linkXUrl, prepareFairOpen, reportFairOpen } from "@/lib/api";
-import { coinAmount, sol } from "@/lib/format";
+import { coinAmount, quoteAmount, quoteText, rawQuoteOf, sol, typedQuote, type QuoteUnit } from "@/lib/format";
 import { WalletButton } from "../WalletButton";
 import { useWallet, type SolanaChain } from "../WalletProvider";
 import styles from "./FairOpen.module.css";
@@ -18,13 +18,18 @@ const declined = (e: unknown) => {
   return error?.code === 4001 || /reject|declin|cancel|denied/i.test(error?.message ?? "");
 };
 
-/** SOL as typed, in whole 0.01 SOL steps: its lamports, or null when it is not such an amount. */
-export function lamportsOf(text: string): bigint | null {
-  const match = /^(\d{0,6})(?:\.(\d{0,2}))?$/.exec(text.trim());
-  if (!match || (match[1] === "" && !match[2])) return null;
-  const lamports = BigInt(match[1] || "0") * 1_000_000_000n + BigInt((match[2] ?? "").padEnd(2, "0")) * 10_000_000n;
-  return lamports > 0n ? lamports : null;
+/**
+ * An amount as typed, in the launch's quote as a wallet shows it, as raw units and rounded down to whole deposit steps,
+ * the only amounts the program moves: `typed` is what was typed, `amount` what moves, 0 when that is under one step.
+ * Null when it is not an amount of the quote.
+ */
+export function stepsOf(text: string, quote: QuoteUnit, step: bigint): { typed: bigint; amount: bigint } | null {
+  const typed = rawQuoteOf(text, quote);
+  return typed === null ? null : { typed, amount: (typed / step) * step };
 }
+
+/** Raw units of the launch's quote with its symbol, to every place they need: deposits and caps are whole steps. */
+const exact = (raw: bigint | string, quote: QuoteUnit) => quoteText(raw, quote, quote.decimals);
 
 /** The program's refusals a page can meet, in its words (programs/fair_open, `FairOpenError`). */
 const REFUSALS: Record<number, string> = {
@@ -45,27 +50,38 @@ function refusalOf(outcome: FairOpenOutcome) {
 }
 
 /** What connecting a wallet is for, as the launch stands. */
-const CONNECT: Record<FairOpen["phase"], string> = {
-  scheduled: "Connect a wallet to deposit. Your tier sets your cap: Unverified 0.1 SOL, Scored 0.5 SOL, Verified 2 SOL.",
-  window: "Connect a wallet to deposit. Your tier sets your cap: Unverified 0.1 SOL, Scored 0.5 SOL, Verified 2 SOL.",
-  due: "The window has closed. Connect a wallet to see your seat.",
-  opened: "Connect a wallet to see your coins and refund.",
-  failing: "Connect a wallet to see your seat and take back your SOL.",
-  failed: "Connect a wallet to see your seat and take back your SOL.",
-  closed: "Every deposit and rent has gone back.",
-};
+function connectText(view: FairOpen) {
+  const { tierCaps, quote } = view;
+  switch (view.phase) {
+    case "scheduled":
+    case "window":
+      return (
+        `Connect a wallet to deposit. Your tier sets your cap: Unverified ${exact(tierCaps.unverified, quote)}, ` +
+        `Scored ${exact(tierCaps.scored, quote)}, Verified ${exact(tierCaps.verified, quote)}.`
+      );
+    case "due":
+      return "The window has closed. Connect a wallet to see your seat.";
+    case "opened":
+      return "Connect a wallet to see your coins and refund.";
+    case "failing":
+    case "failed":
+      return "Connect a wallet to see your seat and take back your deposit.";
+    case "closed":
+      return "Every deposit and rent has gone back.";
+  }
+}
 
 type Action = "deposit" | "withdraw" | "mark-failed" | "refund" | "claim";
 
 /** What a landed transaction did, in words. */
-function doneText(action: Action, lamports: bigint | undefined, seated: boolean) {
+function doneText(action: Action, amount: bigint | undefined, quote: QuoteUnit, seated: boolean) {
   switch (action) {
     case "deposit":
-      return `Deposited ${sol(lamports ?? 0n, 2)} SOL.`;
+      return `Deposited ${exact(amount ?? 0n, quote)}.`;
     case "withdraw":
-      return `Took back ${sol(lamports ?? 0n, 2)} SOL.`;
+      return `Took back ${exact(amount ?? 0n, quote)}.`;
     case "mark-failed":
-      return seated ? "Marked failed, and your deposit and both rents are back in your wallet." : "Marked failed: every depositor can now take their SOL back.";
+      return seated ? "Marked failed, and your deposit and both rents are back in your wallet." : "Marked failed: every depositor can now take their deposit back.";
     case "refund":
       return "Your deposit and both rents are back in your wallet.";
     case "claim":
@@ -78,9 +94,10 @@ const TIER_NAMES = { unverified: "Unverified", scored: "Scored", verified: "Veri
 
 /**
  * The visitor's deposit (spec 2.1 step 9): their Depositor tier and cap, what their seat holds and the rent it keeps,
- * and deposits or withdrawals in 0.01 SOL steps while the window is open; after it, marking a launch that cannot open
- * failed, and taking everything back once it has. Heat's API builds each transaction, a deposit with its admission, and
- * the wallet signs and sends it.
+ * and deposits or withdrawals in whole steps of the launch's quote while the window is open (0.01 SOL's worth when its
+ * config pair was made); after it, marking a launch that cannot open failed, and taking everything back once it has.
+ * Heat's API builds each transaction, a deposit with its admission, and the wallet signs and sends it. Deposits, caps,
+ * refunds and the Tax Share are in the quote; rent is SOL whatever the quote.
  */
 export function DepositPanel({ view, onChanged }: { view: FairOpen; onChanged: () => Promise<void> }) {
   const { account, chain } = useWallet();
@@ -92,13 +109,13 @@ export function DepositPanel({ view, onChanged }: { view: FairOpen; onChanged: (
         </h2>
         {view.you?.admission.admitted && (
           <span className="chip chip-info" data-testid="fair-open-tier">
-            {TIER_NAMES[view.you.admission.tier]} · cap {sol(view.you.admission.cap, 2)} SOL
+            {TIER_NAMES[view.you.admission.tier]} · cap {exact(view.you.admission.cap, view.quote)}
           </span>
         )}
       </div>
       {!account ? (
         <>
-          <p className="muted">{CONNECT[view.phase]}</p>
+          <p className="muted">{connectText(view)}</p>
           {view.phase !== "closed" && <WalletButton variant="inline" />}
         </>
       ) : !view.you || view.you.wallet !== account.address ? (
@@ -118,6 +135,9 @@ function Seated({ view, account, chain, onChanged }: { view: FairOpen; account: 
   const signAndSend = useSignAndSendTransaction(account, chain);
   const [mode, setMode] = useState<"deposit" | "withdraw">("deposit");
   const [text, setText] = useState("");
+  // What Max put in the field, in raw units: under a Scaled UI multiplier, reading its text back can fall a raw unit
+  // short, which rounding down to whole steps would turn into a whole step short.
+  const [picked, setPicked] = useState<{ text: string; raw: bigint } | null>(null);
   const [sending, setSending] = useState<Sending>({ phase: "idle" });
   const busy = sending.phase === "preparing" || sending.phase === "signing" || sending.phase === "confirming";
   // A deposit's or withdrawal's outcome belongs to the window: once it closes, what the panel offers is another phase's.
@@ -128,16 +148,34 @@ function Seated({ view, account, chain, onChanged }: { view: FairOpen; account: 
     if (!busy) setSending({ phase: "idle" });
   }
 
+  const quote = view.quote;
+  const step = BigInt(view.step);
+  const stepFigure = quoteAmount(step, quote, quote.decimals);
   const held = seat ? BigInt(seat.deposit) : 0n;
   const cap = you.admission.admitted ? BigInt(you.admission.cap) : 0n;
-  const max = mode === "deposit" ? (cap > held ? cap - held : 0n) : held;
-  const amount = lamportsOf(text);
-  const invalid = text !== "" && (amount === null || amount > max);
+  const max = ((mode === "deposit" ? (cap > held ? cap - held : 0n) : held) / step) * step;
+  // The amount moves in whole steps, rounded down from what was typed, so the button says exactly what moves.
+  const parsed = picked !== null && picked.text === text ? { typed: picked.raw, amount: picked.raw } : stepsOf(text, quote, step);
+  const amount = parsed && parsed.amount > 0n ? parsed.amount : null;
+  const problem =
+    text === ""
+      ? null
+      : parsed === null
+        ? `Enter ${quote.symbol} in steps of ${stepFigure}.`
+        : parsed.amount === 0n
+          ? `The smallest ${mode} is one step, ${exact(step, quote)}.`
+          : parsed.amount > max
+            ? mode === "deposit"
+              ? `You can add at most ${exact(max, quote)}.`
+              : `Your seat holds ${exact(max, quote)}.`
+            : null;
+  const invalid = problem !== null;
+  const rounded = !invalid && parsed !== null && parsed.typed !== parsed.amount;
 
-  async function send(action: Action, lamports?: bigint) {
+  async function send(action: Action, raw?: bigint) {
     try {
       setSending({ phase: "preparing", action });
-      const prepared = await prepareFairOpen(view.launch, action, { wallet: account.address, ...(lamports ? { amount: `${lamports}` } : {}) });
+      const prepared = await prepareFairOpen(view.launch, action, { wallet: account.address, ...(raw ? { amount: `${raw}` } : {}) });
       setSending({ phase: "signing", action });
       let signature: Uint8Array;
       try {
@@ -151,7 +189,7 @@ function Seated({ view, account, chain, onChanged }: { view: FairOpen; account: 
       if (outcome.status !== "landed") {
         setSending({ phase: "failed", text: refusalOf(outcome) });
       } else {
-        setSending({ phase: "done", text: doneText(action, lamports, seat !== null), explorer: outcome.explorer });
+        setSending({ phase: "done", text: doneText(action, raw, quote, seat !== null), explorer: outcome.explorer });
         setText("");
       }
       await onChanged();
@@ -171,7 +209,7 @@ function Seated({ view, account, chain, onChanged }: { view: FairOpen; account: 
           <div>
             <dt className="eyebrow">{view.phase === "opened" ? "You deposited" : "Your seat holds"}</dt>
             <dd className={styles.held} data-testid="fair-open-held">
-              <span className="num">{sol(seat.deposit, 2)}</span> SOL
+              <span className="num">{quoteAmount(seat.deposit, quote, quote.decimals)}</span> {quote.symbol}
             </dd>
           </div>
           {!seat.closed && (
@@ -209,6 +247,7 @@ function Seated({ view, account, chain, onChanged }: { view: FairOpen; account: 
                 onClick={() => {
                   setMode(m);
                   setText("");
+                  setPicked(null);
                 }}
               >
                 {m === "deposit" ? "Deposit" : "Withdraw"}
@@ -216,7 +255,7 @@ function Seated({ view, account, chain, onChanged }: { view: FairOpen; account: 
             ))}
           </div>
           <div className="field">
-            <label htmlFor="fair-open-amount">Amount (SOL, in steps of 0.01)</label>
+            <label htmlFor="fair-open-amount">Amount ({quote.symbol}, in steps of {stepFigure})</label>
             <div className={styles.amount}>
               <input
                 id="fair-open-amount"
@@ -228,18 +267,24 @@ function Seated({ view, account, chain, onChanged }: { view: FairOpen; account: 
                 aria-invalid={invalid}
                 onChange={(e) => setText(e.target.value)}
               />
-              <button type="button" className="btn btn-sm" disabled={max === 0n} onClick={() => setText(sol(max, 2))}>
+              <button
+                type="button"
+                className="btn btn-sm"
+                disabled={max === 0n}
+                onClick={() => {
+                  const typed = typedQuote(max, quote);
+                  setText(typed);
+                  setPicked({ text: typed, raw: max });
+                }}
+              >
                 Max
               </button>
             </div>
-            {invalid && (
-              <span className={`note ${styles.invalid}`}>
-                {amount === null ? "Enter SOL in steps of 0.01." : mode === "deposit" ? `You can add at most ${sol(max, 2)} SOL.` : `Your seat holds ${sol(max, 2)} SOL.`}
-              </span>
-            )}
+            {problem !== null && <span className={`note ${styles.invalid}`}>{problem}</span>}
+            {rounded && <span className="note">Rounded down to whole steps of {exact(step, quote)}.</span>}
           </div>
           <button type="submit" className={`btn ${mode === "deposit" ? "btn-go" : ""}`} disabled={busy || amount === null || invalid}>
-            {busy ? (mode === "deposit" ? "Depositing…" : "Withdrawing…") : `${mode === "deposit" ? "Deposit" : "Withdraw"}${amount && !invalid ? ` ${sol(amount, 2)} SOL` : ""}`}
+            {busy ? (mode === "deposit" ? "Depositing…" : "Withdrawing…") : `${mode === "deposit" ? "Deposit" : "Withdraw"}${amount && !invalid ? ` ${exact(amount, quote)}` : ""}`}
           </button>
           {mode === "deposit" && !seat && (
             <p className="note">Your first deposit also puts up {sol(rent, 6)} SOL of rent for your seat and the coin account the open fills. All of it comes back.</p>
@@ -258,7 +303,7 @@ function Seated({ view, account, chain, onChanged }: { view: FairOpen; account: 
           <div>
             <dt className="eyebrow">Your refund</dt>
             <dd>
-              <span className="num">{sol(seat.refund, 9)}</span> SOL
+              <span className="num">{quoteAmount(seat.refund, quote, quote.decimals)}</span> {quote.symbol}
             </dd>
           </div>
           {you.wallet !== view.creator.wallet && (
@@ -267,7 +312,7 @@ function Seated({ view, account, chain, onChanged }: { view: FairOpen; account: 
               <dd data-testid="fair-open-your-tax-share">
                 {seat.taxShare !== null ? (
                   <>
-                    <span className="num">{sol(seat.taxShare, 9)}</span> SOL
+                    <span className="num">{quoteAmount(seat.taxShare, quote, quote.decimals)}</span> {quote.symbol}
                   </>
                 ) : (
                   <span className="note">{view.open?.taxShare ? "On its way" : "Paid after the first minute"}</span>
@@ -304,12 +349,12 @@ function Seated({ view, account, chain, onChanged }: { view: FairOpen; account: 
       )}
       {view.phase === "failing" && (
         <button type="button" className="btn btn-go" disabled={busy} onClick={() => void send("mark-failed")}>
-          {seat ? "Mark it failed and take back my SOL" : "Mark it failed"}
+          {seat ? "Mark it failed and take back my deposit" : "Mark it failed"}
         </button>
       )}
       {view.phase === "failed" && seat && (
         <button type="button" className="btn btn-go" disabled={busy} onClick={() => void send("refund")}>
-          Take back {sol(BigInt(seat.deposit) + seatRent, 6)} SOL
+          Take back {exact(seat.deposit, quote)} and {sol(seatRent, 6)}&nbsp;SOL of rent
         </button>
       )}
 
@@ -331,11 +376,12 @@ function Tier({ view }: { view: FairOpen }) {
   }
   // Once deposits are over, what a tier could deposit is no longer the visitor's business.
   if (view.phase !== "scheduled" && view.phase !== "window") return null;
+  const { tierCaps, quote } = view;
   if (admission.tier === "unverified") {
     return (
       <p className="note">
-        Unverified wallets deposit up to 0.1 SOL, and all of them together get at most a quarter of the pot&apos;s buy.{" "}
-        <a href={linkXUrl(`/fair-open/${view.launch}`)}>Link X</a> to deposit up to 0.5 SOL.
+        Unverified wallets deposit up to {exact(tierCaps.unverified, quote)}, and all of them together get at most a quarter of the pot&apos;s buy.{" "}
+        <a href={linkXUrl(`/fair-open/${view.launch}`)}>Link X</a> to deposit up to {exact(tierCaps.scored, quote)}.
       </p>
     );
   }
@@ -343,7 +389,8 @@ function Tier({ view }: { view: FairOpen }) {
   return (
     <p className="note">
       {TIER_NAMES[admission.tier]} through {how}
-      {admission.handle ? ` @${admission.handle}` : ""}. Verifying once, for up to 2 SOL in every Fair Open, comes in a later build.
+      {admission.handle ? ` @${admission.handle}` : ""}. Verifying once, for up to {exact(tierCaps.verified, quote)} in every Fair Open, comes in a later
+      build.
     </p>
   );
 }

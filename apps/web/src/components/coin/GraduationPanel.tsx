@@ -1,7 +1,7 @@
 "use client";
 
 import type { Coin } from "@top-pad/contract";
-import { coinAmount, shortAddress, sol, solAmount } from "@/lib/format";
+import { coinAmount, quoteSmall, quoteText, shortAddress } from "@/lib/format";
 import styles from "./Coin.module.css";
 
 /**
@@ -11,6 +11,7 @@ import styles from "./Coin.module.css";
  */
 export function GraduationPanel({ coin }: { coin: Coin }) {
   const target = coin.market.graduationTarget;
+  const quote = coin.quote;
   const graduation = coin.graduation;
   const graduated = graduation?.graduated ?? null;
 
@@ -24,7 +25,7 @@ export function GraduationPanel({ coin }: { coin: Coin }) {
           <div>
             <b>Graduated</b>
             <p className="note">
-              At {sol(target, 2)} SOL on {day} UTC the coin moved to a Meteora DAMM v2 pool, where it trades now.
+              At {quoteText(target, quote, 2)} on {day} UTC the coin moved to a Meteora DAMM v2 pool, where it trades now.
             </p>
           </div>
         </div>
@@ -81,7 +82,7 @@ export function GraduationPanel({ coin }: { coin: Coin }) {
       <div className="spread">
         <b>{graduating ? "Graduating" : "To Graduation"}</b>
         <span className="num note">
-          {Number(reserve) === 0 ? "0" : solAmount(reserve, 3)} of {sol(target, 2)} SOL
+          {Number(reserve) === 0 ? "0" : quoteSmall(reserve, quote, 3)} of {quoteText(target, quote, 2)}
         </span>
       </div>
       <div className={styles.gradBar} role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress * 100)} aria-label="Toward Graduation">
@@ -93,7 +94,7 @@ export function GraduationPanel({ coin }: { coin: Coin }) {
       <p className="note">
         {graduating
           ? "The curve is complete. Heat's keeper is moving the coin to its Meteora pool, its liquidity locked forever; trading resumes there in moments."
-          : `At ${sol(target, 2)} SOL the coin moves to a Meteora pool, its liquidity locked forever.`}
+          : `At ${quoteText(target, quote, 2)} the coin moves to a Meteora pool, its liquidity locked forever.`}
       </p>
     </section>
   );

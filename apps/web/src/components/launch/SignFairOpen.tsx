@@ -8,7 +8,7 @@ import type { UiWalletAccount } from "@wallet-standard/react";
 import { useState } from "react";
 import type { LaunchRefusal, LaunchStatus, PreparedLaunch } from "@top-pad/contract";
 import { ApiProblem, getLaunch, prepareLaunch, renewLaunch, submitLaunch } from "@/lib/api";
-import { sol } from "@/lib/format";
+import { quoteText, sol, type QuoteUnit } from "@/lib/format";
 import type { FittedImage } from "@/lib/image";
 import type { SolanaChain } from "../WalletProvider";
 import styles from "./Launch.module.css";
@@ -31,6 +31,7 @@ export function SignFairOpen({
   chain,
   coin,
   image,
+  quote,
   rungs,
   onScheduled,
   onRefused,
@@ -39,7 +40,9 @@ export function SignFairOpen({
   chain: SolanaChain;
   coin: FairOpenRequest;
   image: FittedImage;
-  /** The ladder's rungs, largest first, in lamports, from the platform's terms. */
+  /** The quote the coin is priced in: its mint, which the launch names, and how its amounts read. */
+  quote: QuoteUnit & { mint: string };
+  /** The ladder's rungs, largest first, in the quote's raw units, from its settings. */
   rungs: string[];
   onScheduled: (status: LaunchStatus) => void;
   onRefused: (refusal: LaunchRefusal) => void;
@@ -66,7 +69,7 @@ export function SignFairOpen({
       const ready = prepared
         ? await renewLaunch(prepared.id)
         : await prepareLaunch(
-            { mode: "fair_open", ...coin, wallet: account.address, depositsOpenAt: `${coin.depositsOpenAt}`, minRaise: `${coin.minRaise}` },
+            { mode: "fair_open", ...coin, wallet: account.address, quote: quote.mint, depositsOpenAt: `${coin.depositsOpenAt}`, minRaise: `${coin.minRaise}` },
             image.blob,
             image.name,
           );
@@ -160,7 +163,7 @@ export function SignFairOpen({
                 <li key={r}>
                   <span className="muted">Open {i + 1}</span>
                   <span>
-                    the pot buys <span className="num">{sol(r, 4)}</span> SOL
+                    the pot buys <span className="num">{quoteText(r, quote, 4)}</span>
                   </span>
                 </li>
               ))}

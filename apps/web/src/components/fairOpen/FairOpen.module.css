@@ -112,6 +112,12 @@
   min-width: 0;
 }
 
+/* The quote's Quote Risk Labels, under the deposit they bear on */
+.quoteLabels {
+  display: grid;
+  min-width: 0;
+}
+
 .sectionTitle {
   font-size: 1.05rem;
   text-transform: uppercase;
@@ -532,7 +538,9 @@
     display: contents;
   }
 
-  .deposit {
+  /* The quote's labels keep to the deposit, which they come after in the page. */
+  .deposit,
+  .quoteLabels {
     order: 1;
   }
 

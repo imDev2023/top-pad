@@ -3,7 +3,8 @@
 import type { Coin, LiveBatch, Trade } from "@top-pad/contract";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { coinLiveUrl, getCoin, getCoinTrades } from "@/lib/api";
-import { ago, coinAmount, compactNumber, shortAddress } from "@/lib/format";
+import { ago, coinAmount, compactNumber, scaledFigure, shortAddress } from "@/lib/format";
+import { QuoteLabels } from "../quote/QuoteLabels";
 import { CandleChart, type ChartFeed } from "./CandleChart";
 import styles from "./Coin.module.css";
 import { GraduationPanel } from "./GraduationPanel";
@@ -221,11 +222,15 @@ export function CoinPage({ initial }: { initial: Coin }) {
         <dl className={styles.stats}>
           <div>
             <dt>Price</dt>
-            <dd className="num">{compactNumber(Number(coin.market.price))} SOL</dd>
+            <dd className="num">
+              {compactNumber(scaledFigure(coin.market.price, coin.quote))} {coin.quote.symbol}
+            </dd>
           </div>
           <div>
             <dt>Market cap</dt>
-            <dd className="num">{compactNumber(Number(coin.market.marketCap))} SOL</dd>
+            <dd className="num">
+              {compactNumber(scaledFigure(coin.market.marketCap, coin.quote))} {coin.quote.symbol}
+            </dd>
           </div>
           <div>
             <dt>Holders</dt>
@@ -251,13 +256,13 @@ export function CoinPage({ initial }: { initial: Coin }) {
         </div>
       )}
 
-      {coin.heat && <RadarFlags mint={mint} ticker={coin.ticker} decimals={decimals} version={radarVersion} />}
+      {coin.heat && <RadarFlags mint={mint} ticker={coin.ticker} decimals={decimals} quote={coin.quote} version={radarVersion} />}
 
       <TaxBand coin={coin} now={now + offsetMs} />
 
       <div className={styles.layout}>
         <div className={styles.main}>
-          <CandleChart mint={mint} ageSeconds={(now + offsetMs - opened) / 1000} supply={supply} ref={chart} />
+          <CandleChart mint={mint} ageSeconds={(now + offsetMs - opened) / 1000} supply={supply} quote={coin.quote} ref={chart} />
           <GraduationPanel coin={coin} />
         </div>
 
@@ -325,6 +330,7 @@ export function CoinPage({ initial }: { initial: Coin }) {
             </span>
           </div>
         </aside>
+          <QuoteLabels quote={coin.quote} place="coin" />
         </div>
       </div>
 
@@ -338,7 +344,16 @@ export function CoinPage({ initial }: { initial: Coin }) {
         {trades === null ? (
           <p className={`note ${styles.empty}`}>Loading trades…</p>
         ) : (
-          <TradeList trades={trades} fresh={fresh} pending={pending} now={now + offsetMs} taxEnds={taxEnds} decimals={decimals} explorerTx={explorerTx} />
+          <TradeList
+            trades={trades}
+            fresh={fresh}
+            pending={pending}
+            now={now + offsetMs}
+            taxEnds={taxEnds}
+            decimals={decimals}
+            quote={coin.quote}
+            explorerTx={explorerTx}
+          />
         )}
       </section>
     </div>

@@ -35,6 +35,7 @@ export function SignLaunch({
   chain,
   coin,
   image,
+  quote,
   onLanded,
   onRefused,
 }: {
@@ -42,6 +43,8 @@ export function SignLaunch({
   chain: SolanaChain;
   coin: { name: string; ticker: string };
   image: FittedImage;
+  /** The quote the coin is priced in, by mint, one `GET /quotes` offers. */
+  quote: string;
   onLanded: (status: LaunchStatus) => void;
   onRefused: (refusal: LaunchRefusal) => void;
 }) {
@@ -55,7 +58,7 @@ export function SignLaunch({
     setProblem(null);
     try {
       setPhase("preparing");
-      const ready = await prepareLaunch({ mode: "instant", name: coin.name, ticker: coin.ticker, wallet: account.address }, image.blob, image.name);
+      const ready = await prepareLaunch({ mode: "instant", name: coin.name, ticker: coin.ticker, wallet: account.address, quote }, image.blob, image.name);
       setPrepared(ready);
       setPhase("signing");
       let signed: Uint8Array;

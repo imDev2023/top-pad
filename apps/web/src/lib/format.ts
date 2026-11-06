@@ -103,3 +103,57 @@ export function shareOf(part: bigint | string, whole: bigint | string) {
 
 /** A place in English: 1st, 2nd, 3rd, 4th, 11th, 22nd. */
 export const ordinal = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? "th" : (["th", "st", "nd", "rd"][n % 10] ?? "th")}`;
+
+/**
+ * A coin's quote as its amounts read (ADR 0007): its symbol, decimals and the Scaled UI Amount multiplier in force now,
+ * 1 for SOL and any mint without one. The API answers raw units and unscaled prices; pages show both through it.
+ */
+export type QuoteUnit = { symbol: string; decimals: number; multiplier: number };
+
+/** SOL as a quote unit, for the amounts every launch and trade pays in SOL whatever its quote: rent and fees. */
+export const SOL_UNIT: QuoteUnit = { symbol: "SOL", decimals: 9, multiplier: 1 };
+
+/** Raw units of a quote as a number of whole units shown, through its multiplier. */
+export const quoteValue = (raw: bigint | string, quote: QuoteUnit) => (Number(BigInt(raw)) / 10 ** quote.decimals) * quote.multiplier;
+
+/** Raw units of a quote as people read them, through its multiplier, to as many places as it needs, at most `max`. */
+export function quoteAmount(raw: bigint | string, quote: QuoteUnit, max = 4) {
+  return quoteValue(raw, quote).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: Math.min(max, quote.decimals) });
+}
+
+/** The same with its symbol: "0.0999 USDC". */
+export const quoteText = (raw: bigint | string, quote: QuoteUnit, max = 4) => `${quoteAmount(raw, quote, max)}\u{a0}${quote.symbol}`;
+
+/** Raw units of a quote for a figure that can be tiny, such as a fee: 0.000025 rather than 0. */
+export const quoteSmall = (raw: bigint | string, quote: QuoteUnit, significant = 4) => compactNumber(quoteValue(raw, quote), significant);
+
+/** An unscaled price or market cap, as the API answers it, through the quote's multiplier. */
+export const scaledFigure = (decimal: string, quote: QuoteUnit) => Number(decimal) * quote.multiplier;
+
+/**
+ * An amount of a quote as typed, which is what a wallet shows (through the multiplier), as raw units, rounded down to a
+ * whole raw unit; null when it is not a positive amount the quote can hold.
+ */
+export function rawQuoteOf(text: string, quote: QuoteUnit): bigint | null {
+  const shown = rawAmountOf(text, quote.decimals);
+  if (shown === null) return null;
+  if (quote.multiplier === 1) return shown;
+  const raw = BigInt(Math.floor(Number(shown) / quote.multiplier));
+  return raw > 0n ? raw : null;
+}
+
+/** Raw units of a quote as an amount to type back into a field, through its multiplier. */
+export function typedQuote(raw: bigint, quote: QuoteUnit): string {
+  if (quote.multiplier === 1) return typedAmount(raw, quote.decimals);
+  return String(Number(quoteValue(raw, quote).toFixed(quote.decimals)));
+}
+
+/**
+ * A coin's candles as its chart plots them, in market cap: each unscaled price times the fixed supply, through the
+ * quote's multiplier in force now, the same factor for every candle. So a split or a dividend, which changes only the
+ * multiplier, rescales the whole chart and leaves its shape, every candle's move against the one before, as it was.
+ */
+export function marketCapBars<T extends { time: number; open: string; high: string; low: string; close: string }>(candles: T[], supply: number, quote: QuoteUnit) {
+  const scale = supply * quote.multiplier;
+  return candles.map((c) => ({ time: c.time, open: Number(c.open) * scale, high: Number(c.high) * scale, low: Number(c.low) * scale, close: Number(c.close) * scale }));
+}

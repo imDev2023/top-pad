@@ -1,9 +1,9 @@
 "use client";
 
-import type { BundleRadar, RadarBuy, RadarTransfer, RadarWallet } from "@top-pad/contract";
+import type { BundleRadar, QuoteInfo, RadarBuy, RadarTransfer, RadarWallet } from "@top-pad/contract";
 import { useEffect, useId, useState } from "react";
 import { getCoinRadar } from "@/lib/api";
-import { coinAmount, ordinal, shareOf, shortAddress, sol, solAmount, span } from "@/lib/format";
+import { coinAmount, ordinal, quoteSmall, quoteText, shareOf, shortAddress, sol, span } from "@/lib/format";
 import styles from "./Radar.module.css";
 
 const WRAPPED_SOL = "So11111111111111111111111111111111111111112";
@@ -18,7 +18,7 @@ type Flag = "linked" | "early";
  * labels, Heat's judgement with the evidence shown, and never move a coin in Heat's listings (spec 8). Read again
  * whenever the coin's room says its labels may have changed.
  */
-export function RadarFlags({ mint, ticker, decimals, version }: { mint: string; ticker: string; decimals: number; version: number }) {
+export function RadarFlags({ mint, ticker, decimals, quote, version }: { mint: string; ticker: string; decimals: number; quote: QuoteInfo; version: number }) {
   const [radar, setRadar] = useState<BundleRadar | null>(null);
   const [failed, setFailed] = useState(false);
   const [open, setOpen] = useState<Flag | null>(null);
@@ -109,7 +109,7 @@ export function RadarFlags({ mint, ticker, decimals, version }: { mint: string; 
             </p>
             <ul className={styles.wallets}>
               {linked.map((w) => (
-                <WalletRow key={w.wallet} wallet={w} radar={radar} ticker={ticker} decimals={decimals} />
+                <WalletRow key={w.wallet} wallet={w} radar={radar} ticker={ticker} decimals={decimals} quote={quote} />
               ))}
             </ul>
             <p className="note">Labels are Heat&apos;s judgement, with the evidence linked. They never move a coin in Heat&apos;s listings.</p>
@@ -129,7 +129,7 @@ export function RadarFlags({ mint, ticker, decimals, version }: { mint: string; 
             </p>
             <ul className={styles.wallets}>
               {early.map((w) => (
-                <WalletRow key={w.wallet} wallet={w} radar={radar} ticker={ticker} decimals={decimals} />
+                <WalletRow key={w.wallet} wallet={w} radar={radar} ticker={ticker} decimals={decimals} quote={quote} />
               ))}
             </ul>
           </div>
@@ -140,7 +140,7 @@ export function RadarFlags({ mint, ticker, decimals, version }: { mint: string; 
 }
 
 /** One wallet and the evidence behind its labels, every transaction linked. */
-function WalletRow({ wallet: w, radar, ticker, decimals }: { wallet: RadarWallet; radar: BundleRadar; ticker: string; decimals: number }) {
+function WalletRow({ wallet: w, radar, ticker, decimals, quote }: { wallet: RadarWallet; radar: BundleRadar; ticker: string; decimals: number; quote: QuoteInfo }) {
   const opened = Date.parse(radar.openedAt);
   const when = (iso: string) => {
     const seconds = (Date.parse(iso) - opened) / 1000;
@@ -149,7 +149,13 @@ function WalletRow({ wallet: w, radar, ticker, decimals }: { wallet: RadarWallet
     return seconds < 1 ? "in the open's first second" : `${span(seconds)} after the open`;
   };
   const asset = (t: RadarTransfer) =>
-    t.asset === "SOL" || t.asset === WRAPPED_SOL ? `${sol(t.amount)} SOL` : t.asset === radar.mint ? `${coinAmount(t.amount, decimals)} ${ticker}` : `${t.amount} units of ${shortAddress(t.asset)}`;
+    t.asset === "SOL" || t.asset === WRAPPED_SOL
+      ? `${sol(t.amount)} SOL`
+      : t.asset === radar.mint
+        ? `${coinAmount(t.amount, decimals)} ${ticker}`
+        : t.asset === quote.mint
+          ? quoteText(t.amount, quote)
+          : `${t.amount} units of ${shortAddress(t.asset)}`;
   const buyLine = (b: RadarBuy) => {
     const fee = Number(b.fee) / Number(b.quoteAmount);
     const where = [
@@ -160,7 +166,7 @@ function WalletRow({ wallet: w, radar, ticker, decimals }: { wallet: RadarWallet
     ].filter(Boolean);
     return (
       <>
-        Bought <span className="num">{coinAmount(b.baseAmount, decimals)}</span> {ticker} for <span className="num">{solAmount(b.quoteAmount)}</span> SOL,{" "}
+        Bought <span className="num">{coinAmount(b.baseAmount, decimals)}</span> {ticker} for <span className="num">{quoteSmall(b.quoteAmount, quote)}</span> {quote.symbol},{" "}
         {where.join(", ")}; fee <span className="num">{(fee * 100).toFixed(fee >= 0.1 ? 0 : 2)}%</span>
       </>
     );
@@ -194,7 +200,7 @@ function WalletRow({ wallet: w, radar, ticker, decimals }: { wallet: RadarWallet
         {w.deposits.map((d) => (
           <li key={d.signature}>
             <span>
-              Deposited <span className="num">{sol(d.amount)}</span> SOL in the pot{d.creatorSigned ? ", signed or paid for by the Creator wallet" : ""}
+              Deposited <span className="num">{quoteText(d.amount, quote)}</span> in the pot{d.creatorSigned ? ", signed or paid for by the Creator wallet" : ""}
               {BigInt(w.potCoins) > 0n ? `; its seat bought ${coinAmount(w.potCoins, decimals)} ${ticker}` : ""}
             </span>
             <a href={d.explorer} target="_blank" rel="noreferrer">

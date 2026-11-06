@@ -3,8 +3,9 @@
 import type { CreatorLock, FairOpen, LiveBatch } from "@top-pad/contract";
 import { useCallback, useEffect, useState } from "react";
 import { fairOpenLiveUrl, getFairOpen } from "@/lib/api";
-import { coinAmount, compactNumber, shortAddress, sol } from "@/lib/format";
+import { coinAmount, compactNumber, quoteAmount, quoteValue, shortAddress, SOL_UNIT, typedQuote, type QuoteUnit } from "@/lib/format";
 import { useLiveRoom } from "../coin/useLiveRoom";
+import { QuoteLabels } from "../quote/QuoteLabels";
 import { useWallet } from "../WalletProvider";
 import { DepositPanel } from "./DepositPanel";
 import styles from "./FairOpen.module.css";
@@ -12,6 +13,17 @@ import { PotMeter } from "./PotMeter";
 import { SignOpenPanel } from "./SignOpenPanel";
 
 const REFRESH_MS = 15_000;
+const WRAPPED_SOL = "So11111111111111111111111111111111111111112";
+
+/**
+ * How many places a launch's figures that are not whole deposit steps (the pot's cap, the Unverified line, the minimum
+ * raise, the Graduation Target) are shown to: as many as one step needs, 2 for SOL's 0.01 and 5 for devnet USDC's
+ * 0.09998. Whole steps (deposits, tier caps, what the pot holds) are shown to every place they need, which is never more.
+ */
+export function stepPlaces(step: bigint | string, quote: QuoteUnit) {
+  const typed = typedQuote(BigInt(step), quote);
+  return typed.includes("e") ? quote.decimals : (typed.split(".")[1]?.length ?? 0);
+}
 
 /** A countdown as a clock reads it: 4:07 under an hour, 2 h 05 min under a day, then days and hours. */
 export function countdown(ms: number) {
@@ -49,7 +61,7 @@ function headline(view: FairOpen, now: number) {
     case "failing":
       return { label: "This Fair Open cannot open", value: "Failing", note: `It fails because ${FAILURES[view.failure!]}. Anyone can mark it failed now.` };
     case "failed":
-      return { label: "This Fair Open failed", value: "Failed", note: `No coin was created: ${FAILURES[view.failure!]}. Every depositor takes their SOL back.` };
+      return { label: "This Fair Open failed", value: "Failed", note: `No coin was created: ${FAILURES[view.failure!]}. Every depositor takes their deposit back.` };
     case "closed":
       return { label: "This Fair Open is closed", value: "Closed", note: "It failed, and every deposit and rent has gone back." };
   }
@@ -112,6 +124,8 @@ export function FairOpenPage({ initial }: { initial: FairOpen }) {
   const people = view.pot.seats;
   const open = view.open;
   const coin = open?.coin ?? null;
+  const quote = view.quote;
+  const places = stepPlaces(view.step, quote);
   const hash = (
     <span className={`mono ${styles.hash}`} title="SHA-256 of the coin's name, ticker and metadata URI, which fixes its image too">
       {view.identityHash.slice(0, 16).replace(/(.{4})/g, "$1\u{a0}").trim()}…
@@ -168,6 +182,12 @@ export function FairOpenPage({ initial }: { initial: FairOpen }) {
             <SignOpenPanel view={view} account={account} chain={chain} at={at} onSigned={load} />
           )}
           <DepositPanel view={view} onChanged={load} />
+          {/* Further information about the quote, after the deposit it bears on, never a chip beside its name (ADR 0007). */}
+          {quote.labels.length > 0 && (
+            <div className={styles.quoteLabels}>
+              <QuoteLabels quote={quote} place="deposit" />
+            </div>
+          )}
           {!ended && !open?.closed && <IfClosedNow view={view} />}
         </aside>
 
@@ -183,12 +203,12 @@ export function FairOpenPage({ initial }: { initial: FairOpen }) {
                 <span className="eyebrow">The pot bought with</span>
                 <span className={styles.big}>
                   <span className="num" data-testid="fair-open-spent">
-                    {sol(open.spent, 4)}
+                    {quoteAmount(open.spent, quote, 4)}
                   </span>
-                  <span className={styles.unit}> SOL</span>
+                  <span className={styles.unit}> {quote.symbol}</span>
                 </span>
                 <span className="note">
-                  of the <span className="num">{sol(open.deposited, 2)}</span>&nbsp;SOL {open.seats} {open.seats === 1 ? "person" : "people"} deposited; the rest
+                  of the <span className="num">{quoteAmount(open.deposited, quote, quote.decimals)}</span>&nbsp;{quote.symbol} {open.seats} {open.seats === 1 ? "person" : "people"} deposited; the rest
                   was refunded
                 </span>
               </div>
@@ -197,14 +217,14 @@ export function FairOpenPage({ initial }: { initial: FairOpen }) {
               <span className="eyebrow">In the pot</span>
               <span className={styles.big}>
                 <span className="num" data-testid="fair-open-pot">
-                  {sol(view.pot.total, 2)}
+                  {quoteAmount(view.pot.total, quote, quote.decimals)}
                 </span>
-                <span className={styles.unit}> SOL</span>
+                <span className={styles.unit}> {quote.symbol}</span>
               </span>
               <span className="note">
                 {!ended ? (
                   <>
-                    from {people} {people === 1 ? "person" : "people"}, buying up to <span className="num">{sol(view.potCap, 2)}</span>&nbsp;SOL
+                    from {people} {people === 1 ? "person" : "people"}, buying up to <span className="num">{quoteAmount(view.potCap, quote, places)}</span>&nbsp;{quote.symbol}
                   </>
                 ) : people > 0 ? (
                   `from ${people} ${people === 1 ? "person" : "people"}, still to go back`
@@ -224,8 +244,8 @@ export function FairOpenPage({ initial }: { initial: FairOpen }) {
               ) : (
                 <>
                   <span className={`${styles.big} ${reached ? styles.reached : ""}`}>
-                    <span className="num">{sol(minRaise, 2)}</span>
-                    <span className={styles.unit}> SOL{reached ? " \u{2713}" : ""}</span>
+                    <span className="num">{quoteAmount(minRaise, quote, places)}</span>
+                    <span className={styles.unit}> {quote.symbol}{reached ? " \u{2713}" : ""}</span>
                   </span>
                   <span className="note">
                     {reached
@@ -303,7 +323,9 @@ function OpenSteps({ view, at }: { view: FairOpen; at: number }) {
 function AfterOpen({ view, at }: { view: FairOpen; at: number }) {
   const open = view.open!;
   const coins = Number(BigInt(open.coins)) / 10 ** open.coinDecimals;
-  const price = coins > 0 ? Number(BigInt(open.spent)) / 1e9 / coins : 0;
+  const quote = view.quote;
+  // The price each depositor paid, in the quote as wallets show it.
+  const price = coins > 0 ? quoteValue(open.spent, quote) / coins : 0;
   const seats = open.seats;
   const name = open.coin?.ticker ?? "coins";
   return (
@@ -319,10 +341,10 @@ function AfterOpen({ view, at }: { view: FairOpen; at: number }) {
         <li>
           <b>
             The pot bought <span className="num">{coinAmount(open.coins, open.coinDecimals)}</span> {name} with{" "}
-            <span className="num">{sol(open.spent, 4)}</span>&nbsp;SOL.
+            <span className="num">{quoteAmount(open.spent, quote, 4)}</span>&nbsp;{quote.symbol}.
           </b>{" "}
           <span className="muted">
-            Everyone in the pot paid the same price, <span className="num">{compactNumber(price)}</span>&nbsp;SOL a coin, and got back what the pot did not
+            Everyone in the pot paid the same price, <span className="num">{compactNumber(price)}</span>&nbsp;{quote.symbol} a coin, and got back what the pot did not
             spend of their deposit.
           </span>
         </li>
@@ -335,10 +357,10 @@ function AfterOpen({ view, at }: { view: FairOpen; at: number }) {
           <span className="muted">Heat&apos;s keeper sends them to each depositor&apos;s wallet; anyone can, and a depositor can claim their own here.</span>
         </li>
         <li data-testid="fair-open-lock">
-          <CreatorLockStep lock={open.lock} ticker={name} decimals={open.coinDecimals} at={at} />
+          <CreatorLockStep lock={open.lock} ticker={name} decimals={open.coinDecimals} quote={quote} at={at} />
         </li>
         <li data-testid="fair-open-tax-share">
-          <TaxShareStep open={open} at={at} />
+          <TaxShareStep open={open} quote={quote} at={at} />
         </li>
       </ol>
       <a className={`btn btn-go ${styles.trade}`} href={`/coin/${open.mint}`}>
@@ -349,7 +371,7 @@ function AfterOpen({ view, at }: { view: FairOpen; at: number }) {
 }
 
 /** The Creator lock (spec 2.1 step 13), as a step of what happened at the open. */
-export function CreatorLockStep({ lock, ticker, decimals, at }: { lock: CreatorLock; ticker: string; decimals: number; at: number }) {
+export function CreatorLockStep({ lock, ticker, decimals, quote, at }: { lock: CreatorLock; ticker: string; decimals: number; quote: QuoteUnit; at: number }) {
   if (lock.status === "locked" && lock.coins && lock.cliffAt && lock.endsAt) {
     return (
       <>
@@ -357,7 +379,13 @@ export function CreatorLockStep({ lock, ticker, decimals, at }: { lock: CreatorL
           The creator&apos;s <span className="num">{coinAmount(lock.coins, decimals)}</span> {ticker} are locked until {clock(lock.cliffAt, at)}.
         </b>{" "}
         <span className="muted">
-          Bought in the pot{lock.deposit ? <> with their <span className="num">{sol(lock.deposit, 2)}</span>&nbsp;SOL deposit</> : null}, at everyone&apos;s
+          Bought in the pot
+          {lock.deposit ? (
+            <>
+              {" "}
+              with their <span className="num">{quoteAmount(lock.deposit, quote, quote.decimals)}</span>&nbsp;{quote.symbol} deposit
+            </>
+          ) : null}, at everyone&apos;s
           price, they sit in a Jupiter Lock escrow and are released second by second until {clock(lock.endsAt, at)}. Nobody can cancel it, Heat included.{" "}
           {lock.explorer && (
             <a href={lock.explorer} target="_blank" rel="noreferrer">
@@ -375,7 +403,7 @@ export function CreatorLockStep({ lock, ticker, decimals, at }: { lock: CreatorL
         <span className="muted">
           {lock.status === "pending" && lock.deposit ? (
             <>
-              They bought in the pot with their <span className="num">{sol(lock.deposit, 2)}</span>&nbsp;SOL deposit, at everyone&apos;s price.{" "}
+              They bought in the pot with their <span className="num">{quoteAmount(lock.deposit, quote, quote.decimals)}</span>&nbsp;{quote.symbol} deposit, at everyone&apos;s price.{" "}
             </>
           ) : null}
           Nothing is released for 7 days, then they come free second by second until day 30. Heat&apos;s keeper locks them right after the open.
@@ -392,7 +420,7 @@ export function CreatorLockStep({ lock, ticker, decimals, at }: { lock: CreatorL
 }
 
 /** The Tax Share (spec 2.1 step 14), as a step of what happened at the open. */
-function TaxShareStep({ open, at }: { open: NonNullable<FairOpen["open"]>; at: number }) {
+function TaxShareStep({ open, quote, at }: { open: NonNullable<FairOpen["open"]>; quote: QuoteUnit; at: number }) {
   const share = open.taxShare;
   if (!share) {
     return (
@@ -409,7 +437,7 @@ function TaxShareStep({ open, at }: { open: NonNullable<FairOpen["open"]>; at: n
     return (
       <>
         <b>
-          The first minute&apos;s sniper tax, <span className="num">{sol(share.total, 9)}</span>&nbsp;SOL, went to Heat&apos;s treasury.
+          The first minute&apos;s sniper tax, <Amount raw={share.total} unit={quote} />, went to Heat&apos;s treasury.
         </b>{" "}
         <span className="muted">
           The creator was the only depositor, and the creator&apos;s seat gets no Tax Share.{" "}
@@ -427,7 +455,7 @@ function TaxShareStep({ open, at }: { open: NonNullable<FairOpen["open"]>; at: n
       <b>
         {taxed ? (
           <>
-            <span className="num">{sol(share.total, 9)}</span>&nbsp;SOL of sniper tax is the depositors&apos; Tax Share.
+            <Amount raw={share.total} unit={quote} /> of sniper tax is the depositors&apos; Tax Share.
           </>
         ) : (
           "Nobody paid sniper tax in the first minute."
@@ -435,8 +463,7 @@ function TaxShareStep({ open, at }: { open: NonNullable<FairOpen["open"]>; at: n
       </b>{" "}
       {!taxed && (
         <span className="muted">
-          The lamports the open&apos;s rounding left over, <span className="num">{sol(share.total, 9)}</span>&nbsp;SOL, are the depositors&apos; Tax Share
-          instead.{" "}
+          What the open&apos;s rounding left over, <Amount raw={share.total} unit={quote} />, is the depositors&apos; Tax Share instead.{" "}
         </span>
       )}
       <span className="muted">
@@ -491,6 +518,7 @@ function IfClosedNow({ view }: { view: FairOpen }) {
   const seat = view.you?.seat ?? null;
   const rent = BigInt(view.rent.seat) + BigInt(view.rent.coinAccount);
   const share = !others.limited && !unverified.limited ? null : others.limited ? others.level : unverified.level;
+  const quote = view.quote;
   return (
     <section className={`panel ${styles.ifClosed}`} aria-labelledby="if-closed">
       <h2 id="if-closed" className={styles.sectionTitle}>
@@ -499,34 +527,34 @@ function IfClosedNow({ view }: { view: FairOpen }) {
       <dl className={styles.facts}>
         <div>
           <dt>Each person&apos;s share</dt>
-          <dd data-testid="fair-open-level">{share === null ? "All they asked" : <Sol lamports={share} />}</dd>
+          <dd data-testid="fair-open-level">{share === null ? "All they asked" : <Amount raw={share} unit={quote} />}</dd>
         </div>
         {twoLevels && (
           <div>
             <dt>Each Unverified person&apos;s</dt>
             <dd>
-              <Sol lamports={unverified.level} />
+              <Amount raw={unverified.level} unit={quote} />
             </dd>
           </div>
         )}
         <div>
           <dt>The pot {opened ? "bought" : "would buy"} with</dt>
-          <dd data-testid="fair-open-rung">{rung === null ? "Nothing: too little" : <Sol lamports={rung} />}</dd>
+          <dd data-testid="fair-open-rung">{rung === null ? "Nothing: too little" : <Amount raw={rung} unit={quote} />}</dd>
         </div>
         {(seat || view.phase === "scheduled" || view.phase === "window") && (
           <>
             <div>
               <dt>Your deposit {opened ? "bought" : "buys"} with</dt>
-              <dd data-testid="fair-open-fill">{seat ? <Sol lamports={seat.fill} /> : "No deposit yet"}</dd>
+              <dd data-testid="fair-open-fill">{seat ? <Amount raw={seat.fill} unit={quote} /> : "No deposit yet"}</dd>
             </div>
             <div>
               <dt>Your refund</dt>
-              <dd>{seat ? <Sol lamports={seat.refund} /> : "None"}</dd>
+              <dd>{seat ? <Amount raw={seat.refund} unit={quote} /> : "None"}</dd>
             </div>
             <div>
               <dt>Rent for your seat and coin account, all returned</dt>
               <dd>
-                <Sol lamports={seat ? BigInt(seat.seatRent) + BigInt(seat.coinRent) : rent} digits={6} />
+                <Amount raw={seat ? BigInt(seat.seatRent) + BigInt(seat.coinRent) : rent} unit={SOL_UNIT} digits={6} />
               </dd>
             </div>
           </>
@@ -539,31 +567,35 @@ function IfClosedNow({ view }: { view: FairOpen }) {
           <p className="note">
             {opened ? (
               <>
-                The open buys in 5% steps down from the pot&apos;s cap, so it spent <span className="num">{sol(rung, 9)}</span> of the{" "}
-                <span className="num">{sol(spend, 9)}</span> SOL the shares added up to: every share was scaled down alike, and the rest refunded.
+                The open buys in 5% steps down from the pot&apos;s cap, so it spent <span className="num">{quoteAmount(rung, quote, quote.decimals)}</span> of the{" "}
+                <Amount raw={spend} unit={quote} /> the shares added up to: every share was scaled down alike, and the rest refunded.
               </>
             ) : (
               <>
-                The open buys in 5% steps down from the pot&apos;s cap, so it would spend <span className="num">{sol(rung, 9)}</span> of the{" "}
-                <span className="num">{sol(spend, 9)}</span> SOL the shares add up to: every share is scaled down alike, and the rest is refunded.
+                The open buys in 5% steps down from the pot&apos;s cap, so it would spend <span className="num">{quoteAmount(rung, quote, quote.decimals)}</span> of the{" "}
+                <Amount raw={spend} unit={quote} /> the shares add up to: every share is scaled down alike, and the rest is refunded.
               </>
             )}
           </p>
         )
       )}
+      {/* The rule reads most plainly in round figures, so a launch in another quote keeps SOL's and says so. */}
       <p className="note">
-        Worked example: a 15 SOL pot with 30 people asking 0.1 SOL and 50 asking 0.5 to 2 SOL. The 30 get 0.1 each, the 50 get 0.24 each, and the rest is
-        refunded.
+        Worked example{quote.mint === WRAPPED_SOL ? "" : ", for a launch in SOL"}: a 15 SOL pot with 30 people asking 0.1 SOL and 50 asking 0.5 to 2 SOL. The
+        30 get 0.1 each, the 50 get 0.24 each, and the rest is refunded.
       </p>
     </section>
   );
 }
 
-/** An amount of SOL, its figure in the numbers' face and its unit in the text's. */
-function Sol({ lamports, digits = 9 }: { lamports: bigint | string; digits?: number }) {
+/**
+ * An amount in raw units of `unit`, the launch's quote or SOL for rent, its figure in the numbers' face and its unit in
+ * the text's: to every place it needs unless `digits` says fewer.
+ */
+function Amount({ raw, unit, digits = unit.decimals }: { raw: bigint | string; unit: QuoteUnit; digits?: number }) {
   return (
     <>
-      <span className="num">{sol(lamports, digits)}</span> SOL
+      <span className="num">{quoteAmount(raw, unit, digits)}</span>&nbsp;{unit.symbol}
     </>
   );
 }
