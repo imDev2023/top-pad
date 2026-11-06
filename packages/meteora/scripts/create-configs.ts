@@ -6,7 +6,8 @@
 // `tests/devnet` graduates coins for a few hundredths of a SOL rather than 8.5 (spec 11.4). With --quote <mint>
 // --target <raw units> it builds a Fair Open and Instant pair in another quote at that Graduation Target, every other
 // setting the SOL configs' (ADR 0007, #88), for its `QuoteSettings` (`quote-settings --quote`); the addresses live there,
-// on chain, not in `@top-pad/chain`, and the band job makes such pairs as prices move (#89). The payer is Heat's bank (`BANK_KEYPAIR`, or
+// on chain and in the API's `quote_config_pairs`, not in `@top-pad/chain`, and the band job (`@top-pad/quotes`, #89) makes
+// such pairs itself as prices move, through the same `heatConfigInstruction`. The payer is Heat's bank (`BANK_KEYPAIR`, or
 // ~/.config/top-pad/<cluster>/bank.json); the RPC is `DEVNET_RPC_URL`, or the public endpoint (spec 10.5).
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -21,18 +22,16 @@ import {
   createTransactionMessage,
   generateKeyPairSigner,
   getBase64EncodedWireTransaction,
-  getProgramDerivedAddress,
   getSignatureFromTransaction,
-  getUtf8Encoder,
   pipe,
   sendAndConfirmTransactionFactory,
   setTransactionMessageFeePayerSigner,
   setTransactionMessageLifetimeUsingBlockhash,
   signTransactionMessageWithSigners,
 } from "@solana/kit";
-import { CLUSTERS, FEE_CLAIMER_ADDRESS, REHEARSAL_GRADUATION_TARGET } from "@top-pad/chain";
-import { DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS, getCreateConfig2Instruction } from "@top-pad/clients/dbc";
-import { heatConfigParameters, type LaunchMode } from "../src/configs";
+import { CLUSTERS, REHEARSAL_GRADUATION_TARGET } from "@top-pad/chain";
+import { type LaunchMode } from "../src/configs";
+import { heatConfigInstruction } from "../src/createConfig";
 
 const [cluster, ...flags] = process.argv.slice(2);
 const send = flags.includes("--send");
@@ -61,10 +60,6 @@ const rpcUrl = process.env.DEVNET_RPC_URL || "https://api.devnet.solana.com";
 const rpc = createSolanaRpc(rpcUrl);
 const keypairPath = process.env.BANK_KEYPAIR || join(homedir(), ".config/top-pad", cluster, "bank.json");
 const payer = await createKeyPairSignerFromBytes(Uint8Array.from(JSON.parse(readFileSync(keypairPath, "utf8"))));
-const [eventAuthority] = await getProgramDerivedAddress({
-  programAddress: DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS,
-  seeds: [getUtf8Encoder().encode("__event_authority")],
-});
 
 const modes: LaunchMode[] = rehearsal ? ["instant"] : ["fairOpen", "instant"];
 const target = otherTarget ? BigInt(otherTarget) : rehearsal ? REHEARSAL_GRADUATION_TARGET : heat.graduationTarget;
@@ -73,17 +68,7 @@ console.log(`Configs in ${quoteMint} at a Graduation Target of ${target} raw uni
 const built = [];
 for (const mode of modes) {
   const config = await generateKeyPairSigner();
-  const instruction = getCreateConfig2Instruction({
-    config,
-    feeClaimer: FEE_CLAIMER_ADDRESS,
-    leftoverReceiver: FEE_CLAIMER_ADDRESS,
-    quoteMint,
-    payer,
-    eventAuthority,
-    program: DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS,
-    configParameters: heatConfigParameters(mode, target),
-    transferFeeParameters: null,
-  });
+  const instruction = await heatConfigInstruction({ mode, quoteMint, graduationTarget: target, config, payer });
   const { value: blockhash } = await rpc.getLatestBlockhash({ commitment: "confirmed" }).send();
   const transaction = await signTransactionMessageWithSigners(
     pipe(
