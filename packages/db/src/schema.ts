@@ -870,3 +870,30 @@ export const bundleCases = pgTable(
   },
   (t) => [index("bundle_cases_creator_wallet_idx").on(t.creatorWallet), index("bundle_cases_status_idx").on(t.status, t.openedAt)],
 );
+
+/**
+ * Every DBC config pair Heat has made or adopted for a quote other than SOL's own (ADR 0007, the band): the band job
+ * makes a pair at the live price whenever a quote's settings drift past the band, and names it in the quote's
+ * `QuoteSettings` with the quote manager key. A config can never be changed or closed, so the pairs a quote has left
+ * keep serving the coins made on them, and this table is how Heat still knows them: the chain names only the current
+ * pair. A pair the chain named before the job knew it, such as #88's hand-made USDC pair, is adopted.
+ */
+export const quoteConfigPairs = pgTable(
+  "quote_config_pairs",
+  {
+    fairOpenConfig: text("fair_open_config").primaryKey(),
+    instantConfig: text("instant_config").notNull().unique(),
+    quoteMint: text("quote_mint").notNull(),
+    /** Both configs' Graduation Target and the pair's deposit step, in the quote's raw units. */
+    graduationTarget: bigint("graduation_target", { mode: "bigint" }).notNull(),
+    step: bigint("step", { mode: "bigint" }).notNull(),
+    /** The price the job made the pair at, raw units of the quote a lamport; null for an adopted pair. */
+    price: text("price"),
+    origin: text("origin", { enum: ["made", "adopted"] }).notNull(),
+    madeAt: timestamp("made_at", { withTimezone: true }).notNull().defaultNow(),
+    /** When the quote's `QuoteSettings` last came to name this pair, and when they moved on from it. */
+    namedAt: timestamp("named_at", { withTimezone: true }),
+    retiredAt: timestamp("retired_at", { withTimezone: true }),
+  },
+  (t) => [index("quote_config_pairs_quote_idx").on(t.quoteMint, t.madeAt)],
+);
