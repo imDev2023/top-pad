@@ -136,6 +136,7 @@ export function prepareLaunch(form: LaunchForm, image: Blob, imageName: string) 
   body.set("name", form.name);
   body.set("ticker", form.ticker);
   body.set("wallet", form.wallet);
+  body.set("quote", form.quote);
   if (form.mode === "fair_open") {
     body.set("depositsOpenAt", form.depositsOpenAt);
     body.set("minRaise", form.minRaise);
