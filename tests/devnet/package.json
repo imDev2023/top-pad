@@ -22,8 +22,11 @@
     "@top-pad/contract": "workspace:*",
     "@top-pad/db": "workspace:*",
     "@top-pad/indexer": "workspace:*",
+    "@top-pad/jobs": "workspace:*",
     "@top-pad/meteora": "workspace:*",
+    "@top-pad/quotes": "workspace:*",
     "@types/node": "^24.19.2",
+    "drizzle-orm": "^0.45.4",
     "vitest": "^5.0.5"
   }
 }
