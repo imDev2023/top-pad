@@ -88,13 +88,25 @@ export async function send(payer: TransactionSigner, instructions: Instruction[]
   for (let poll = 1; ; poll++) {
     await sleep(poll === 1 ? 400 : 1_000);
     const { value: [status] } = await rpc.getSignatureStatuses([signature]).send();
-    if (status?.err) throw new Error(`transaction ${signature} failed: ${JSON.stringify(status.err, (_k, v) => (typeof v === "bigint" ? String(v) : v))}`);
+    if (status?.err) {
+      // A program's error code rides as `cause.context.code`, where Kit puts a preflight refusal's, so a caller reads both alike.
+      const code = customCode(status.err);
+      const failed = `transaction ${signature} failed: ${JSON.stringify(status.err, (_k, v) => (typeof v === "bigint" ? String(v) : v))}`;
+      throw code === null ? new Error(failed) : new Error(failed, { cause: { context: { code } } });
+    }
     if (status?.confirmationStatus === "confirmed" || status?.confirmationStatus === "finalized") return signature;
     // A blockhash lives about a minute: the transaction's expiry need not be asked about on every poll.
     if (poll % 10 === 0 && (await rpc.getBlockHeight({ commitment: "confirmed" }).send()) > lifetime.lastValidBlockHeight) {
       throw new Error(`transaction ${signature} expired unconfirmed`);
     }
   }
+}
+
+/** The custom program error a landed transaction failed with, if it failed with one. */
+function customCode(err: unknown): number | null {
+  const failure = (err as { InstructionError?: [unknown, unknown] } | null)?.InstructionError?.[1];
+  const custom = (failure as { Custom?: number | bigint } | undefined)?.Custom;
+  return custom === undefined ? null : Number(custom);
 }
 
 /**
