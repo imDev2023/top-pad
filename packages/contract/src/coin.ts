@@ -2,6 +2,7 @@ import { z } from "zod";
 import { WindowClaim } from "./earnings";
 import { CreatorLock, TaxShare } from "./fairOpen";
 import { Address, RawAmount } from "./launch";
+import { QuoteInfo } from "./quote";
 import { LooksLike } from "./vampShield";
 
 /** An exact decimal number, such as a price or a market cap in whole quote units. */
@@ -94,12 +95,13 @@ export const Coin = z.object({
   /** The coin's fixed supply in raw units, and its decimals (spec 3.1). */
   supply: RawAmount,
   decimals: z.number().int().nonnegative(),
-  quote: z.object({ symbol: z.string(), decimals: z.number().int().nonnegative() }),
+  /** What the coin is priced in (ADR 0007): every price and market cap here is unscaled, shown through its multiplier. */
+  quote: QuoteInfo,
   market: z.object({
     price: Decimal,
     marketCap: Decimal,
     quoteReserve: RawAmount,
-    /** Graduation's quote reserve (spec 2.3): 8.5 SOL on devnet. */
+    /** Graduation's quote reserve (spec 2.3), its config's: 8.5 SOL, or that much SOL's worth of the quote, on devnet. */
     graduationTarget: RawAmount,
     /** Wallets holding the coin outside its pool, counted at most a minute ago; null until first counted. */
     holders: z.number().int().nonnegative().nullable(),

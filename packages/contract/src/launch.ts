@@ -16,13 +16,9 @@ export const Platform = z.object({
   xLinking: z.boolean(),
   /** Whether a coin can be launched here now, by mode. */
   launchModes: z.object({ instant: z.boolean(), fairOpen: z.boolean() }),
-  /** A Fair Open's fixed terms here (spec 2.1 step 4, 12), or null where Heat runs none. */
+  /** A Fair Open's fixed terms here (spec 2.1 step 4, 12), or null where Heat runs none; its pot's cap is its quote's. */
   fairOpen: z
     .object({
-      /** The most a pot spends, in lamports: 20% of the Graduation Target. */
-      potCap: RawAmount,
-      /** The ladder's rungs, largest first, in lamports (spec 2.1 step 6). */
-      rungs: z.array(RawAmount),
       windowSeconds: z.number().int().positive(),
       /** How far ahead a window may start. */
       maxAheadSeconds: z.number().int().positive(),
@@ -70,6 +66,7 @@ export const LaunchRefusal = ApiError.extend({
     "send_failed",
     "metadata_upload_failed",
     "ticker_reserved",
+    "quote",
     "teaser",
     "schedule",
   ]),
@@ -85,16 +82,18 @@ export type LaunchRefusal = z.infer<typeof LaunchRefusal>;
 export const UnixSeconds = z.string().regex(/^\d{1,12}$/);
 
 /**
- * `POST /launches`, a multipart form with `mode`, `name`, `ticker`, `wallet` and the `image` file, and for a Fair Open
- * its schedule (spec 2.1 step 4): when its window starts, its minimum raise in lamports, and the calendar's teaser.
+ * `POST /launches`, a multipart form with `mode`, `name`, `ticker`, `wallet`, the `quote` mint the coin is priced in (one
+ * `GET /quotes` offers; SOL's wrapped mint when left out) and the `image` file, and for a Fair Open its schedule (spec
+ * 2.1 step 4): when its window starts, its minimum raise in the quote's raw units, and the calendar's teaser.
  */
 export const LaunchForm = z.discriminatedUnion("mode", [
-  z.object({ mode: z.literal("instant"), name: z.string().max(256), ticker: z.string().max(64), wallet: Address }),
+  z.object({ mode: z.literal("instant"), name: z.string().max(256), ticker: z.string().max(64), wallet: Address, quote: Address }),
   z.object({
     mode: z.literal("fair_open"),
     name: z.string().max(256),
     ticker: z.string().max(64),
     wallet: Address,
+    quote: Address,
     depositsOpenAt: UnixSeconds,
     minRaise: RawAmount,
     teaser: z.string().max(1024),
@@ -160,6 +159,8 @@ export const LaunchStatus = z.object({
   mint: Address,
   pool: Address,
   coinRecord: Address,
+  /** The mint the coin is priced in (ADR 0007). */
+  quoteMint: Address,
   metadataUri: z.string().url(),
   imageUri: z.string().url(),
   /** The creation transaction's signature, once submitted. */

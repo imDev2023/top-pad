@@ -3,7 +3,7 @@ import { AccountState, TOKEN_2022_PROGRAM_ADDRESS, getMintDecoder, type Extensio
 import { describe, expect, it } from "vitest";
 import nvdax from "./fixtures/xstock-nvdax.json";
 import standIn from "./fixtures/xstock-stand-in.json";
-import { DEVNET_XSTOCK_STAND_IN, TOKEN_2022_NATIVE_MINT, TOKEN_PROGRAM_ADDRESS, quoteVerdict, scaledUiMultiplier, type QuoteMint } from "./quotes";
+import { DEVNET_XSTOCK_STAND_IN, TOKEN_2022_NATIVE_MINT, TOKEN_PROGRAM_ADDRESS, displayMultiplier, quoteLabels, quoteVerdict, scaledUiMultiplier, type QuoteMint } from "./quotes";
 
 // NVDAx's mint as mainnet held it on 2026-11-03, the xStock every case below starts from.
 const NVDAX = getMintDecoder().decode(getBase64Encoder().encode(nvdax.data));
@@ -117,5 +117,42 @@ describe("scaledUiMultiplier", () => {
     const scaled = { authority: SOME_PROGRAM, multiplier: 1, newMultiplier: 0.1, newMultiplierAt: 1_800_000_000n };
     expect(scaledUiMultiplier(scaled, 1_799_999_999n)).toBe(1);
     expect(scaledUiMultiplier(scaled, 1_800_000_000n)).toBe(0.1);
+  });
+});
+
+describe("quoteLabels", () => {
+  const NOW = 1_800_000_000n;
+
+  it("labels NVDAx's issuer powers in Stoker's words, cautions first, and its scaled balances", () => {
+    const labels = quoteLabels(quoteVerdict(quote(NVDAX)).powers, "NVDAx", NOW);
+    expect(labels.map((l) => [l.kind, l.severity, l.title])).toEqual([
+      ["freeze", "caution", "Can freeze wallets"],
+      ["permanent_delegate", "caution", "Issuer can move tokens"],
+      ["pausable", "caution", "Can pause transfers"],
+      ["transfer_hook", "caution", "Can add a transfer hook"],
+      ["default_frozen", "caution", "Can freeze new wallets by default"],
+      ["scaled_balance", "info", "Scaled balances"],
+    ]);
+    const pause = labels.find((l) => l.kind === "pausable")!;
+    expect(pause.detail).toBe("The issuer (JDq1\u{2026}xJNs) can stop every transfer of NVDAx at any time; buys, sells and claims fail while it is paused.");
+    expect(pause.holder).toBe("JDq14BWvqCRFNu1krb12bcRpbGtJZ1FLEakMw6FdxJNs");
+    expect(labels.find((l) => l.kind === "permanent_delegate")?.title).toBe("Issuer can move tokens");
+  });
+
+  it("says a paused quote is paused, and names the multiplier in force", () => {
+    const paused = withExtension(NVDAX, "PausableConfig", (e) => ({ ...e, paused: true }) as Extension);
+    expect(quoteLabels(quoteVerdict(quote(paused)).powers, "NVDAx", NOW).find((l) => l.kind === "pausable")?.title).toBe("Transfers paused");
+    const split = withExtension(NVDAX, "ScaledUiAmountConfig", (e) => ({ ...e, multiplier: 1, newMultiplier: 2.5, newMultiplierEffectiveTimestamp: NOW }) as Extension);
+    const scaled = quoteLabels(quoteVerdict(quote(split)).powers, "NVDAx", NOW).find((l) => l.kind === "scaled_balance")!;
+    expect(scaled.detail).toContain("(2.5 today)");
+    expect(displayMultiplier(quoteVerdict(quote(split)).powers, NOW - 1n)).toBe(1);
+    expect(displayMultiplier(quoteVerdict(quote(split)).powers, NOW)).toBe(2.5);
+  });
+
+  it("gives a plain SPL mint with no authorities no label, and a multiplier of 1", () => {
+    const plain: Mint = { ...NVDAX, extensions: none(), freezeAuthority: none(), mintAuthority: none() };
+    const { powers } = quoteVerdict({ ...quote(plain, false), tokenProgram: TOKEN_PROGRAM_ADDRESS });
+    expect(quoteLabels(powers, "USDC", NOW)).toEqual([]);
+    expect(displayMultiplier(powers, NOW)).toBe(1);
   });
 });

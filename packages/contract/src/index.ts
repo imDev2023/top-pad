@@ -5,6 +5,7 @@ export * from "./fairOpen";
 export * from "./health";
 export * from "./jobs";
 export * from "./launch";
+export * from "./quote";
 export * from "./radar";
 export * from "./trade";
 export * from "./vampShield";

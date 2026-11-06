@@ -28,6 +28,8 @@ export type InstantLaunch = {
   /** Heat's Instant config, which has the first-swap discount off (spec 3.2). */
   config: Address;
   quoteMint: Address;
+  /** The quote mint's own token program, SPL Token unless given (ADR 0007). */
+  quoteTokenProgram?: Address;
   /** The Creator wallet: DBC's `creator`, so terminals show it as the coin's dev, and the fee payer, so it pays the rent. */
   creator: TransactionSigner;
   /** A new key for the coin's mint, which DBC creates. */
@@ -64,7 +66,7 @@ export async function instantLaunchInstructions(l: InstantLaunch): Promise<Instr
     pool,
     mintMetadata: await mintMetadataAddress(l.mint.address),
     payer: l.creator,
-    tokenQuoteProgram: TOKEN_PROGRAM_ADDRESS,
+    tokenQuoteProgram: l.quoteTokenProgram ?? TOKEN_PROGRAM_ADDRESS,
     eventAuthority: await eventAuthorityAddress(DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS),
     program: DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS,
     params: { name: l.coin.name, symbol: l.coin.ticker, uri: l.coin.uri },

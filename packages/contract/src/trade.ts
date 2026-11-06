@@ -7,7 +7,7 @@ import { Address, RawAmount } from "./launch";
 export const MAX_SLIPPAGE_BPS = 5_000;
 
 /**
- * `POST /coins/:mint/quote` and `POST /coins/:mint/swap`: a quick buy spends `amount` of the quote (lamports), a quick
+ * `POST /coins/:mint/quote` and `POST /coins/:mint/swap`: a quick buy spends `amount` of the quote (its raw units), a quick
  * sell `amount` of the coin (raw units), at most `slippageBps` worse than quoted. A swap names the wallet that signs.
  */
 export const SwapRequest = z.object({
@@ -81,6 +81,9 @@ export const SwapOutcome = z.object({
 });
 export type SwapOutcome = z.infer<typeof SwapOutcome>;
 
-/** `GET /coins/:mint/holdings/:wallet`: what a wallet can trade with, in raw units. */
-export const Holdings = z.object({ wallet: Address, sol: RawAmount, coins: RawAmount });
+/**
+ * `GET /coins/:mint/holdings/:wallet`: what a wallet can trade with, in raw units: its SOL, which pays every network fee
+ * and rent, the coin's quote it can spend on a buy (its SOL again for a coin priced in SOL), and the coin.
+ */
+export const Holdings = z.object({ wallet: Address, sol: RawAmount, quote: RawAmount, coins: RawAmount });
 export type Holdings = z.infer<typeof Holdings>;

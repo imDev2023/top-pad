@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { QuoteInfo } from "./quote";
 import { Signature } from "./earnings";
 import { Address, RawAmount } from "./launch";
 
@@ -116,7 +117,8 @@ export const FairOpen = z.object({
   failure: FairOpenFailure.nullable(),
   /** Heat's clock when it answered, so a page counts down by it. */
   serverTime: z.iso.datetime(),
-  quote: z.object({ symbol: z.string(), decimals: z.number().int().nonnegative() }),
+  /** What the launch is priced in (ADR 0007): every amount below is in its raw units, shown through its multiplier. */
+  quote: QuoteInfo,
   /** Every amount below is in the quote's raw units. */
   step: RawAmount,
   potCap: RawAmount,
