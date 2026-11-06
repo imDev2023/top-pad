@@ -3,8 +3,10 @@
 // authority (UPGRADE_AUTHORITY, or ~/.config/top-pad/<cluster>/upgrade-authority.json), which also grows a
 // `ProgramConfig` made before the quote manager existed; then the quote manager (QUOTE_MANAGER, or
 // ~/.config/top-pad/<cluster>/quote-manager.json) writes SOL's settings: Heat's two SOL configs and the 0.01 SOL step.
-// Other quotes' settings are the band job's (#89); until it runs, --quote <mint> --fair-open <config> --instant <config>
-// --step <raw units> writes one quote's by hand, its configs from `@top-pad/meteora`'s `configs --quote` (#88). Heat's bank pays (BANK_KEYPAIR, or ~/.config/top-pad/<cluster>/bank.json).
+// Other quotes' settings are the band job's, which the API's cron runs every five minutes (#89); --quote <mint>
+// --fair-open <config> --instant <config> --step <raw units> writes one quote's by hand, its configs from
+// `@top-pad/meteora`'s `configs --quote` (#88), which the job then adopts and keeps within the band. Heat's bank pays
+// (BANK_KEYPAIR, or ~/.config/top-pad/<cluster>/bank.json).
 // It simulates each step first and sends only with --send; the RPC is DEVNET_RPC_URL, or the public endpoint.
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
