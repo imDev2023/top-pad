@@ -39,6 +39,7 @@ import {
   fetchQuoteToken,
   inSol,
   quoteTokenAccount,
+  quoteTokenAccountInstruction,
   refundsInstructions,
   refundSeats,
   taxShareSeats,
@@ -340,6 +341,28 @@ export async function recoverDeposits(launch: Address, sender: KeyPairSigner, wa
   if (!account.exists || fairOpenPhase(account.data, await chainTime()).phase !== "failed") return;
   if (account.data.seats === 0) await send(sender, await closeLaunchInstructions({ launch, creator: account.data.creator, computeUnitPrice: 0n, quote }));
   await closeNonce(account.data.nonce, account.data.creator);
+}
+
+
+/**
+ * Gives each wallet `amounts[i]` raw units of a token quote from Heat's bank, opening its account of the quote first
+ * (the bank paying that rent, which `sweepDepositors` returns): devnet USDC for a run's throwaway traders and depositors.
+ */
+export async function fundQuote(wallets: { address: Address }[], amounts: bigint[], quote: QuoteToken, decimals: number) {
+  const payer = await bank();
+  const source = await quoteTokenAccount(payer.address, quote);
+  const held = await quoteHeld(payer.address, quote);
+  const needed = amounts.reduce((a, b) => a + b, 0n);
+  if (held < needed) throw new Error(`the bank holds ${held} raw units of ${quote.mint}, less than the ${needed} this run needs: run devnet-usdc`);
+  const program = { programAddress: quote.tokenProgram };
+  await send(payer, [
+    ...(await Promise.all(wallets.map((w) => quoteTokenAccountInstruction(payer, w.address, quote)))),
+    ...(await Promise.all(
+      wallets.map(async (w, i) =>
+        getTransferCheckedInstruction({ source, mint: quote.mint, destination: await quoteTokenAccount(w.address, quote), authority: payer, amount: amounts[i]!, decimals }, program),
+      ),
+    )),
+  ]);
 }
 
 /**

@@ -62,10 +62,13 @@ afterAll(async () => {
 
 let fakes: Fakes;
 let indexedNow: string[];
-beforeEach(() => {
+beforeEach(async () => {
   fakes = new Fakes();
   indexedNow = [];
   vi.stubGlobal("fetch", fakes.fetch);
+  // Heat's referral account, the treasury's account of wrapped SOL, which a swap names only once it exists.
+  const treasury = devnet.keys!.treasury;
+  fakes.accounts.set(await referralAccountOf(treasury, devnet.quote.mint), tokenAccount(treasury, devnet.quote.mint, 0n));
 });
 afterEach(() => vi.unstubAllGlobals());
 
@@ -368,10 +371,10 @@ describe("a quick trade", () => {
     fakes.accounts.set(wallet, { owner: "11111111111111111111111111111111", data: new Uint8Array(), lamports: 123n });
     fakes.accounts.set(await tokenAccountOf(wallet, MINT), tokenAccount(wallet, MINT, 456n));
     const holdings = Holdings.parse(await (await request(`/coins/${MINT}/holdings/${wallet}`)).json());
-    expect(holdings).toEqual({ wallet, sol: "123", coins: "456" });
+    expect(holdings).toEqual({ wallet, sol: "123", quote: "123", coins: "456" });
     // A wallet that has never held the coin.
     const fresh = random();
-    expect(Holdings.parse(await (await request(`/coins/${MINT}/holdings/${fresh}`)).json())).toEqual({ wallet: fresh, sol: "0", coins: "0" });
+    expect(Holdings.parse(await (await request(`/coins/${MINT}/holdings/${fresh}`)).json())).toEqual({ wallet: fresh, sol: "0", quote: "0", coins: "0" });
   });
 });
 

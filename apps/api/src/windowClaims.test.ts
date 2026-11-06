@@ -9,7 +9,7 @@ import { coins, createDb, indexedTransactions, windowClaims, type Db } from "@to
 import type { RawTransaction } from "@top-pad/indexer";
 import { createTestDatabase } from "@top-pad/db/testing";
 import { config, type Bindings } from "./env";
-import { coinRecord, dbcPool, Fakes, testBindings, testKeypair } from "./test/fakes";
+import { coinRecord, dbcPool, Fakes, seedQuoteSettings, testBindings, testKeypair } from "./test/fakes";
 import { sendWindowClaim, startKeeper, sweepWindowClaims } from "./windowClaims";
 
 // The keeper key the cluster records is swapped for a test key: the real one lives only in Secrets Store (spec 10.3).
@@ -39,9 +39,11 @@ afterAll(async () => {
 const devnet = CLUSTERS.devnet!;
 const random = () => getAddressDecoder().decode(crypto.getRandomValues(new Uint8Array(32)));
 let fakes: Fakes;
-beforeEach(() => {
+beforeEach(async () => {
   fakes = new Fakes();
   vi.stubGlobal("fetch", fakes.fetch);
+  // Heat's SOL configs on chain, which a coin's window claim reads its quote from (ADR 0007).
+  await seedQuoteSettings(fakes, devnet);
 });
 afterEach(() => vi.unstubAllGlobals());
 

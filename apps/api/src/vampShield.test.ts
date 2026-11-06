@@ -2,13 +2,13 @@ import { getBase64EncodedWireTransaction, partiallySignTransaction, type KeyPair
 import { and, eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 // Imported before ./index and ./test/fakes, so its mock below is made before the fakes, which import it, are loaded.
-import "@top-pad/chain";
+import { CLUSTERS } from "@top-pad/chain";
 import { ImageVerdict, LaunchRefusal, PreparedLaunch, VampAppeal, VampAppeals, VampShieldVerdict } from "@top-pad/contract";
 import { createDb, launches, protectedCoins, protectedImages, vampChecks, type Db } from "@top-pad/db";
 import { createTestDatabase } from "@top-pad/db/testing";
 import { app } from "./index";
 import { protectHeatCoin, upsertListed } from "./protectedSet";
-import { atCosine, decode, Fakes, FakeVision, fakeSignatures, flipBits, MemoryBlobs, ORIGINS, testBindings, testContext, testKeypair } from "./test/fakes";
+import { atCosine, decode, Fakes, FakeVision, fakeSignatures, flipBits, MemoryBlobs, ORIGINS, seedQuoteSettings, testBindings, testContext, testKeypair } from "./test/fakes";
 import type { Bindings } from "./env";
 import type { Signatures } from "./vision";
 
@@ -52,11 +52,13 @@ afterAll(async () => {
 let fakes: Fakes;
 let vision: FakeVision;
 let blobs: MemoryBlobs;
-beforeEach(() => {
+beforeEach(async () => {
   fakes = new Fakes();
   vision = new FakeVision();
   blobs = new MemoryBlobs();
   vi.stubGlobal("fetch", fakes.fetch);
+  // SOL's settings, from which the launch service reads its config (ADR 0007).
+  await seedQuoteSettings(fakes, CLUSTERS.devnet!);
 });
 afterEach(() => vi.unstubAllGlobals());
 

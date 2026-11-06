@@ -262,6 +262,26 @@ describe("Heat's LP fees", () => {
     await db.delete(graduations);
     const row = graduationRow(random(), random(), random());
     await db.insert(graduations).values(row);
+    // The curve it graduated from, as the indexer recorded it, which says the coin is priced in SOL.
+    const now = new Date();
+    await db.insert(pools).values({
+      pool: row.curvePool,
+      mint: row.mint,
+      config: row.config,
+      quoteMint: "So11111111111111111111111111111111111111112",
+      graduationTarget: 8_500_000_000n,
+      startSqrtPrice: "35525023424642174",
+      creator: random(),
+      name: "Coin",
+      ticker: "COIN",
+      uri: "https://example.com",
+      activatedAt: now,
+      createdSignature: random(),
+      createdSlot: 1,
+      createdAt: now,
+      sqrtPrice: "1",
+      quoteReserve: 0n,
+    });
     const { position } = await positionAddresses(row.heatPositionNftMint as Address);
     const blankPool = getPoolDecoder().decode(Uint8Array.from({ length: getPoolSize() }, (_, i) => (i < 8 ? POOL_DISCRIMINATOR[i]! : 0)));
     fakes.accounts.set(row.pool, { owner: "cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG", data: new Uint8Array(getPoolEncoder().encode(blankPool)) });

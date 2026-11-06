@@ -12,7 +12,7 @@ import { config, type Bindings } from "./env";
 import { closeLaunchNonce, failAndRefund, finishTicker, pushSeats, readSchedule, sendOpen, SERVE_WITHIN_MS, uploadMetadata } from "./fairOpenKeeper";
 import { app } from "./index";
 import { findPotPda } from "@top-pad/clients/fair-open";
-import { decode, Fakes, fairOpenLaunch, fairOpenSeat, lookupTableAccount, MemoryBlobs, ORIGINS, testBindings, testContext, testKeypair } from "./test/fakes";
+import { decode, Fakes, fairOpenLaunch, fairOpenSeat, lookupTableAccount, MemoryBlobs, ORIGINS, seedQuoteSettings, testBindings, testContext, testKeypair } from "./test/fakes";
 
 vi.mock("@top-pad/chain", async (importOriginal) => {
   const chain = await importOriginal<typeof import("@top-pad/chain")>();
@@ -50,6 +50,7 @@ beforeEach(async () => {
   blobs = new MemoryBlobs();
   vi.stubGlobal("fetch", fakes.fetch);
   fakes.accounts.set(devnet.lookupTable!, lookupTableAccount(await fairOpenLookupTableAddresses(devnet)));
+  await seedQuoteSettings(fakes, devnet);
 });
 afterEach(() => vi.unstubAllGlobals());
 
