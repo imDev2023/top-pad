@@ -20,6 +20,7 @@
     "@top-pad/indexer": "workspace:*",
     "@top-pad/jobs": "workspace:*",
     "@top-pad/meteora": "workspace:*",
+    "@top-pad/quotes": "workspace:*",
     "@top-pad/vamp-shield": "workspace:*",
     "drizzle-orm": "^0.45.4",
     "hono": "^4.13.14"

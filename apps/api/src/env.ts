@@ -41,6 +41,12 @@ export type Bindings = {
    * keypair array: a Secrets Store binding when deployed, or a plain var that local development passes.
    */
   ADMISSION_KEY?: SecretBinding | string;
+  /**
+   * The quote manager key, which writes each quote's `QuoteSettings` in the Fair Open program and holds no funds (ADR
+   * 0007 decision 4), as a 64-byte keypair array: a Secrets Store binding when deployed. Without it the band job runs
+   * nothing; local development leaves it out, so a local API never races the deployed one's settings.
+   */
+  QUOTE_MANAGER_KEY?: SecretBinding | string;
   BLOBS?: BlobStore;
   TURBO_UPLOAD_URL?: string;
   TURBO_PAYMENT_URL?: string;

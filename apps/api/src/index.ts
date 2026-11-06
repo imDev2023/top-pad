@@ -33,6 +33,7 @@ import { config, fairOpenLaunchSetup, instantLaunchSetup, type Bindings } from "
 import { sameOriginWrites, withConfig, withDb, type AppEnv } from "./http";
 import { checkKeeperFloat } from "./keeper";
 import { refreshLists, refreshTrending, signImages } from "./protectedSet";
+import { bandQuotes } from "./quoteBand";
 import { getLaunch, prepareLaunch, submitLaunch } from "./launches";
 import { IMAGE_TYPES } from "./metadata";
 import { getHoldings, prepareSwap, quote, reportTrade } from "./trading";
@@ -210,7 +211,7 @@ async function everyMinute(controller: ScheduledController, env: Bindings, ctx: 
 
 /**
  * The Cron Triggers. Every five minutes: the indexer kept running, the keeper's float, any window claim, Fair Open or
- * Graduation the keeper's Workflows missed, Bundle Radar's case job, Heat's LP fees once an hour, housekeeping, then every
+ * Graduation the keeper's Workflows missed, Bundle Radar's case job, the quotes' band, Heat's LP fees once an hour, housekeeping, then every
  * open alert to the operator. Every minute: the protected set (everyMinute).
  */
 async function scheduled(_controller: ScheduledController, env: Bindings, ctx: ExecutionContext) {
@@ -230,6 +231,8 @@ async function scheduled(_controller: ScheduledController, env: Bindings, ctx: E
     await runJob(db, "graduations", () => sweepGraduations(db, env), { exclusive: true }).catch(() => undefined);
     // Bundle Radar's case job: each coin an hour after its open, then hourly through its 7 days (spec 6.5, 10.2).
     await runJob(db, "bundle-radar", () => reviewBundles(db, env), { exclusive: true }).catch(() => undefined);
+    // Each quote's config pair kept within the band of its latest price (ADR 0007).
+    await runJob(db, "quote-band", () => bandQuotes(db, env), { exclusive: true }).catch(() => undefined);
     // Heat's LP fees, once an hour: the first run of each hour.
     if (new Date(_controller.scheduledTime).getUTCMinutes() < 5) {
       await runJob(db, "lp-fees", () => claimHeatLpFees(db, env), { exclusive: true }).catch(() => undefined);

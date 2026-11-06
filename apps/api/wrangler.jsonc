@@ -7,7 +7,7 @@
   // which fails with error 1042 unless fetch() routes as if from the public internet.
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "observability": { "enabled": true },
-  // Every five minutes: the indexer woken if a deploy stopped it, the keeper's float against its floor, housekeeping,
+  // Every five minutes: the indexer woken if a deploy stopped it, the keeper's float against its floor, the quotes' band, housekeeping,
   // then any open alert to the operator. Every minute: Vamp Shield's protected set (spec 6.2), and at minute 2 of each
   // hour its hourly lists and the images not yet signed.
   "triggers": { "crons": ["*/5 * * * *", "* * * * *"] },
@@ -100,7 +100,10 @@
         { "binding": "KEEPER_KEY", "store_id": "bbb2e2aa36724838a433d7495bbe9baf", "secret_name": "top-pad-devnet-keeper-key" },
         { "binding": "ADMISSION_KEY", "store_id": "bbb2e2aa36724838a433d7495bbe9baf", "secret_name": "top-pad-devnet-admission-key" },
         // Jupiter's API key, for the protected set's lists; made from the owner's shared key on 2026-11-02 (#52).
-        { "binding": "JUPITER_API_KEY", "store_id": "bbb2e2aa36724838a433d7495bbe9baf", "secret_name": "top-pad-devnet-jupiter-key" }
+        { "binding": "JUPITER_API_KEY", "store_id": "bbb2e2aa36724838a433d7495bbe9baf", "secret_name": "top-pad-devnet-jupiter-key" },
+        // The quote manager key, which writes each quote's QuoteSettings and holds no funds, for the band job (#89); made
+        // from ~/.config/top-pad/devnet/quote-manager.json on 2026-11-06.
+        { "binding": "QUOTE_MANAGER_KEY", "store_id": "bbb2e2aa36724838a433d7495bbe9baf", "secret_name": "top-pad-devnet-quote-manager-key" }
       ]
     }
   }
