@@ -1,0 +1,23 @@
+{
+  "name": "@top-pad/quotes",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@solana-program/token-2022": "0.20.0",
+    "@solana/kit": "^8.5.0",
+    "@top-pad/chain": "workspace:*",
+    "@top-pad/clients": "workspace:*",
+    "@top-pad/db": "workspace:*",
+    "@top-pad/meteora": "workspace:*",
+    "drizzle-orm": "^0.45.4"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "vitest": "^5.0.5"
+  }
+}
