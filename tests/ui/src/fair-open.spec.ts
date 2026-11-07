@@ -1,6 +1,6 @@
 // A Fair Open's window and its failure path end to end (#45's devnet demo): a launch scheduled by script takes deposits
-// and withdrawals from its page, an Unverified wallet becomes Scored by linking X, a second wallet of the same person is
-// refused, and another depositor's deposit shows on the page as it lands. The launch never opens: by default its pot
+// and withdrawals from its page, an Unverified wallet becomes Scored by linking X and signing once ("Verify once"), a
+// second wallet the same person verifies is refused, and another depositor's deposit shows on the page as it lands. The launch never opens: by default its pot
 // misses its minimum raise and fails as the window closes; with E2E_LATE=1 it has none and fails 15 minutes after its
 // open, the ticket's demo, which takes about 20 minutes. The depositor marks it failed from the page and takes back their
 // deposit and both rents in the same transaction; the other depositor takes theirs back on chain with no Heat server.
@@ -72,11 +72,12 @@ test("a Fair Open takes deposits and withdrawals from its page, then fails and r
     await expect(page.getByTestId("fair-open-held")).toHaveText("0.06 SOL");
     await snap(page, "fair-open-3-unverified-seat");
 
-    // Linking X makes the person Scored, up to 0.5 SOL, in the same seat.
+    // Linking X and signing once with the wallet makes the person Scored, up to 0.5 SOL, in the same seat.
     await page.getByRole("link", { name: "Link X" }).click();
     const handle = newHandle();
     await page.getByLabel("Handle").fill(handle);
     await page.getByRole("button", { name: "Authorize app" }).click();
+    await page.getByRole("button", { name: `Verify this wallet as @${handle}` }).click();
     await expect(page.getByTestId("fair-open-tier")).toHaveText("Scored · cap 0.5 SOL", { timeout: 30_000 });
     await move(page, "Deposit", "0.3", /Deposited 0\.3\sSOL/);
     await expect(page.getByTestId("fair-open-held")).toHaveText("0.36 SOL");
@@ -86,13 +87,14 @@ test("a Fair Open takes deposits and withdrawals from its page, then fails and r
     await expect(page.getByTestId("fair-open-pot")).toHaveText("0.46", { timeout: 30_000 });
     await snap(page, "fair-open-4-scored-seat");
 
-    // The same person through a second wallet is refused: one person, one seat, one wallet.
+    // The same person verifying a second wallet is refused with it: one person, one seat, one wallet.
     const second = await browser.newPage();
     await second.context().addCookies(await page.context().cookies());
     await installTestWallet(second, secondWallet);
     await second.goto(`/fair-open/${launch.launch}`);
     await connectTestWallet(second, second.getByRole("main").getByRole("button", { name: "Connect wallet" }));
-    await expect(second.getByRole("main").getByRole("alert")).toContainText("one person, one seat, one wallet");
+    await second.getByRole("button", { name: `Verify this wallet as @${handle}` }).click();
+    await expect(second.getByRole("main").getByRole("alert")).toContainText("one person, one seat, one wallet", { timeout: 30_000 });
     await snap(second, "fair-open-5-second-wallet-refused");
     await second.close();
 

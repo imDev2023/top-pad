@@ -5,7 +5,7 @@
 import { expect, type Locator, type Page } from "@playwright/test";
 import {
   getAddressEncoder, getBase64Decoder, getBase64EncodedWireTransaction, getBase64Encoder, getTransactionDecoder, getTransactionEncoder,
-  partiallySignTransaction, type KeyPairSigner, type Transaction,
+  partiallySignTransaction, signBytes, type KeyPairSigner, type Transaction,
 } from "@solana/kit";
 import { rpc } from "@top-pad/tests-devnet/devnet";
 
@@ -22,6 +22,8 @@ export type TestWallet = {
   requests: Transaction[];
   /** Each approval the page asked of the wallet, a prompt in a real wallet, by how many transactions it signed. */
   approvals: number[];
+  /** Every message the wallet was asked to sign, as text. */
+  messages: string[];
   /** The next signature request is declined, as a user pressing "Reject" in their wallet. */
   declineNext: () => void;
 };
@@ -35,7 +37,7 @@ function register({ name, icon, address, publicKey }: InitArgs) {
     address,
     publicKey: new Uint8Array(publicKey),
     chains,
-    features: ["solana:signTransaction", "solana:signAndSendTransaction"] as const,
+    features: ["solana:signTransaction", "solana:signAndSendTransaction", "solana:signMessage"] as const,
     label: name,
   });
   let accounts: (typeof account)[] = [];
@@ -46,6 +48,7 @@ function register({ name, icon, address, publicKey }: InitArgs) {
   const sign = (window as unknown as { __testWalletSign: (tx: string) => Promise<string> }).__testWalletSign;
   const signAndSend = (window as unknown as { __testWalletSignAndSend: (tx: string) => Promise<string> }).__testWalletSignAndSend;
   const approve = (window as unknown as { __testWalletApprove: (count: number) => Promise<void> }).__testWalletApprove;
+  const signMessage = (window as unknown as { __testWalletSignMessage: (message: string) => Promise<string> }).__testWalletSignMessage;
 
   const wallet = {
     version: "1.0.0",
@@ -86,6 +89,14 @@ function register({ name, icon, address, publicKey }: InitArgs) {
         signTransaction: async (...inputs: { transaction: Uint8Array }[]) => {
           await approve(inputs.length);
           return Promise.all(inputs.map(async ({ transaction }) => ({ signedTransaction: fromB64(await sign(toB64(transaction))) })));
+        },
+      },
+      // A message is signed as given, as Phantom, Solflare and Backpack sign one.
+      "solana:signMessage": {
+        version: "1.0.0",
+        signMessage: async (...inputs: { message: Uint8Array }[]) => {
+          await approve(inputs.length);
+          return Promise.all(inputs.map(async ({ message }) => ({ signedMessage: message, signature: fromB64(await signMessage(toB64(message))) })));
         },
       },
       // As a wallet does, it signs every transaction of a request at once, then sends each through its own RPC.
@@ -129,7 +140,7 @@ export async function connectTestWallet(page: Page, button: Locator) {
 /** Installs the wallet into a page; call before the first navigation. */
 export async function installTestWallet(page: Page, signer: KeyPairSigner, options: { maxBatch?: number } = {}): Promise<TestWallet> {
   let decline = false;
-  const wallet: TestWallet = { signer, requests: [], approvals: [], declineNext: () => void (decline = true) };
+  const wallet: TestWallet = { signer, requests: [], approvals: [], messages: [], declineNext: () => void (decline = true) };
   await page.exposeFunction("__testWalletApprove", async (count: number) => {
     // A wallet that cannot sign a batch refuses the request, as some wallets refuse one too large to show.
     if (count > (options.maxBatch ?? Infinity)) throw new Error(`This wallet signs at most ${options.maxBatch} transactions at once.`);
@@ -147,6 +158,15 @@ export async function installTestWallet(page: Page, signer: KeyPairSigner, optio
     // Fills only this wallet's signature, as a real wallet does: a transaction the server co-signed keeps its other ones.
     const signed = await partiallySignTransaction([signer.keyPair], tx);
     return getBase64Decoder().decode(encodeTx.encode(signed));
+  });
+  await page.exposeFunction("__testWalletSignMessage", async (b64: string) => {
+    const message = Uint8Array.from(getBase64Encoder().encode(b64));
+    wallet.messages.push(new TextDecoder().decode(message));
+    if (decline) {
+      decline = false;
+      throw new Error("User rejected the request.");
+    }
+    return getBase64Decoder().decode(await signBytes(signer.keyPair.privateKey, message));
   });
   // The wallet's own RPC is the tests' devnet one; it answers with the signature as soon as the network takes it.
   await page.exposeFunction("__testWalletSignAndSend", async (b64: string) => {
