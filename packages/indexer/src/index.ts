@@ -11,6 +11,7 @@ export * from "./configs";
 export * from "./decode";
 export * from "./funding";
 export * from "./heat";
+export * from "./linkage";
 export * from "./live";
 export * from "./radar";
 
