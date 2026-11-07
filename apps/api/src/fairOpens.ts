@@ -66,7 +66,8 @@ import {
   type PreparedFairOpenTransaction,
 } from "@top-pad/contract";
 import { coins, creators, creatorWallets, fairOpenRungs, fairOpens, launches, pools, type Db } from "@top-pad/db";
-import { admit, AdmissionRefused, loadAdmissionKey, personOf, refusalOf, tierName } from "./admission";
+import { FundingUnreadable, rpcFundingSource } from "@top-pad/indexer";
+import { admit, AdmissionRefused, linkageOf, loadAdmissionKey, personOf, refusalOf, tierName, UNREADABLE } from "./admission";
 import { closedSeatOf, creatorLockOf, deliveredSeats, taxShareOf } from "./afterOpen";
 import { sessionCreator } from "./auth";
 import { explorerUrl, fairOpenLaunchSetup, fairOpenSetup } from "./env";
@@ -188,17 +189,23 @@ export async function getFairOpen(c: Context<AppEnv>) {
 
   let you: FairOpen["you"] = null;
   if (wallet) {
-    const session = await sessionCreator(c);
-    const person = await personOf(db, wallet as KitAddress, session);
+    const linkage = await linkageOf(db, heat, rpcFundingSource(cfg.rpcUrl));
     const seatExists = async (seat: KitAddress) => (await fetchEncodedAccount(rpc, seat, limited())).exists;
-    const [refusal, found] = await Promise.all([
-      refusalOf(db, { launch: address as KitAddress, creator: terms.creator, step: terms.step }, wallet as KitAddress, person, seatExists),
-      launch ? seatOfWallet(rpc, address as KitAddress, wallet as KitAddress) : null,
-    ]);
-    const tier = Tier[person.tier === "scored" ? "Scored" : person.tier === "verified" ? "Verified" : "Unverified"];
-    const admission: FairOpenAdmission = refusal
-      ? { admitted: false, reason: refusal }
-      : { admitted: true, tier: person.tier, cap: `${tierCap(tier, terms.step)}`, via: person.via, handle: person.handle };
+    const admitting = { launch: address as KitAddress, creator: terms.creator, step: terms.step };
+    const admissionOf = async (): Promise<FairOpenAdmission> => {
+      let person;
+      try {
+        person = await personOf(db, linkage, wallet as KitAddress);
+      } catch (e) {
+        if (e instanceof FundingUnreadable) return { admitted: false, reason: UNREADABLE };
+        throw e;
+      }
+      const refusal = await refusalOf(db, linkage, admitting, wallet as KitAddress, person, seatExists);
+      if (refusal) return { admitted: false, reason: refusal };
+      const tier = Tier[person.tier === "scored" ? "Scored" : person.tier === "verified" ? "Verified" : "Unverified"];
+      return { admitted: true, tier: person.tier, cap: `${tierCap(tier, terms.step)}`, via: person.via, handle: person.handle, linked: person.linked };
+    };
+    const [admission, found] = await Promise.all([admissionOf(), launch ? seatOfWallet(rpc, address as KitAddress, wallet as KitAddress) : null]);
     let seat: FairOpenSeat | null = null;
     if (!found && (launch ? launch.status === LaunchStatus.Opened : row?.status === "opened")) {
       // A seat closed after the open, by its Tax Share or the Creator lock.
@@ -373,14 +380,16 @@ export async function prepareDeposit(c: Context<AppEnv>) {
   if (amount === null) return refuse(c, 400, { error: `Deposits move in steps of ${money(launch.step)}.`, code: "invalid" });
 
   const wallet = move.data.wallet as KitAddress;
-  const person = await personOf(db, wallet, await sessionCreator(c));
+  const linkage = await linkageOf(db, cfg.heat!, rpcFundingSource(cfg.rpcUrl));
   const key = await loadAdmissionKey(setup.admissionKey, setup.admission);
   const seatExists = async (seat: KitAddress) => (await fetchEncodedAccount(rpc, seat, limited())).exists;
   let admitted;
   try {
-    admitted = await admit(db, key, { launch: address, creator: launch.creator, step: launch.step }, wallet, person, at, seatExists);
+    const person = await personOf(db, linkage, wallet);
+    admitted = await admit(db, key, linkage, { launch: address, creator: launch.creator, step: launch.step }, wallet, person, at, seatExists);
   } catch (e) {
     if (e instanceof AdmissionRefused) return refuse(c, 403, { error: e.message, code: "not_admitted" });
+    if (e instanceof FundingUnreadable) return refuse(c, 503, { error: UNREADABLE, code: "unavailable" });
     throw e;
   }
   const seat = await fetchEncodedAccount(rpc, admitted.seat, limited());

@@ -9,3 +9,4 @@ export * from "./quote";
 export * from "./radar";
 export * from "./trade";
 export * from "./vampShield";
+export * from "./verify";

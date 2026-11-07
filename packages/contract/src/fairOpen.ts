@@ -31,10 +31,15 @@ export const FairOpenAdmission = z.discriminatedUnion("admitted", [
     tier: DepositorTier,
     /** The most the wallet's seat may hold, in the quote's raw units. */
     cap: RawAmount,
-    /** How Heat knows the person: their linked X account, the Creator wallet of their record, or not at all. */
-    via: z.enum(["x", "creator_wallet", "none"]),
+    /**
+     * How Heat knows the person: the wallet verified once for their X account, the Creator wallet of their record, the
+     * person of the wallets its SOL came from with it (the linkage pipeline), or not at all.
+     */
+    via: z.enum(["x", "creator_wallet", "linked", "none"]),
     /** The X handle the tier comes from, when it does. */
     handle: z.string().nullable(),
+    /** When the linkage pipeline counts the wallet as one person with others: why, in the words the wallet is shown. */
+    linked: z.string().nullable(),
   }),
   z.object({ admitted: z.literal(false), reason: z.string() }),
 ]);

@@ -11,6 +11,7 @@ import { createDb, launches, probe, sessions, xAuthorizations, type Db } from "@
 import { pruneCandles } from "@top-pad/indexer";
 import { notifyPending, runJob } from "@top-pad/jobs";
 import { finishXLink, logout, me, startXLink } from "./auth";
+import { verifyMessageRoute, verifyRoute } from "./verify";
 import { getCoinRadar, reviewBundles } from "./bundleRadar";
 import { getCoin, getCoinCandles, getCoinTrades } from "./coins";
 import { getEarnings, prepareClaim, reportClaim } from "./earnings";
@@ -110,11 +111,13 @@ app.post("*", async (c, next) => {
   const refusal: LaunchRefusal = { error: `The image is too large: a coin's image can be at most ${Math.round(maxImageBytes / 1024)} KB.`, code: "image" };
   return bodyLimit({ maxSize: maxImageBytes + 16 * 1024, onError: (c) => c.json(refusal, 413) })(c, next);
 });
-for (const path of ["/auth/*", "/me", "/launches", "/launches/*", "/vamp-shield/*", "/coins/*", "/earnings/*", "/fair-opens/*"]) app.use(path, withDb);
+for (const path of ["/auth/*", "/me", "/verify", "/verify/*", "/launches", "/launches/*", "/vamp-shield/*", "/coins/*", "/earnings/*", "/fair-opens/*"]) app.use(path, withDb);
 app.get("/auth/x/start", startXLink);
 app.get("/auth/x/callback", finishXLink);
 app.post("/auth/logout", logout);
 app.get("/me", me);
+app.post("/verify/message", verifyMessageRoute);
+app.post("/verify", verifyRoute);
 app.post("/vamp-shield/check", checkRoute);
 app.post("/vamp-shield/image", checkImageRoute);
 app.get("/vamp-shield/image/:sha256", imageVerdictRoute);

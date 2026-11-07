@@ -92,6 +92,35 @@ export class Fakes {
   transactions = new Map<string, RawTransaction>();
   /** Each address's transactions, newest first, as `getSignaturesForAddress` lists them. */
   history = new Map<string, string[]>();
+
+  /**
+   * `from` sends `to` lamports in a plain System transfer, listed in both histories and served parsed, as the linkage
+   * pipeline reads a wallet's first funding. Its signature.
+   */
+  fund(from: string, to: string, lamports = 1_000_000_000) {
+    const signature = getBase58Decoder().decode(crypto.getRandomValues(new Uint8Array(64)));
+    for (const wallet of [from, to]) this.history.set(wallet, [signature, ...(this.history.get(wallet) ?? [])]);
+    const parsed = {
+      slot: 1,
+      blockTime: Math.floor(Date.now() / 1000),
+      transaction: {
+        signatures: [signature],
+        message: {
+          accountKeys: [{ pubkey: from, signer: true }, { pubkey: to, signer: false }],
+          instructions: [{ programId: SYSTEM_PROGRAM, program: "system", parsed: { type: "transfer", info: { source: from, destination: to, lamports } } }],
+        },
+      },
+      meta: { err: null, innerInstructions: [], preTokenBalances: [], postTokenBalances: [] },
+    };
+    this.transactions.set(signature, parsed as unknown as RawTransaction);
+    return signature;
+  }
+
+  /** Gives a wallet a full page of history, as an exchange's hot wallet or a faucet has. */
+  busy(wallet: string) {
+    const padding = Array.from({ length: 1_000 }, () => getBase58Decoder().decode(crypto.getRandomValues(new Uint8Array(64))));
+    this.history.set(wallet, [...padding, ...(this.history.get(wallet) ?? [])]);
+  }
   // Turbo and the gateway
   uploads: string[] = [];
   turboFails = false;

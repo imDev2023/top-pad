@@ -1,17 +1,20 @@
 import {
   decompileTransactionMessage,
+  generateKeyPairSigner,
   getAddressDecoder,
   getCompiledTransactionMessageDecoder,
   getPublicKeyFromAddress,
+  signBytes,
   verifySignature,
   type Address,
+  type KeyPairSigner,
   type SignatureBytes,
 } from "@solana/kit";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { admissionMessage, ED25519_PROGRAM_ADDRESS, FAIR_OPEN_PROGRAM_ADDRESS, fairOpenAccounts, seatAddress, seatOutcome, Tier } from "@top-pad/chain";
 import { CLAIM_DISCRIMINATOR, DEPOSIT_DISCRIMINATOR, getDepositInstructionDataDecoder, MARK_FAILED_DISCRIMINATOR, WITHDRAW_FAILED_DISCRIMINATOR } from "@top-pad/clients/fair-open";
-import { FairOpen, FairOpenRefusal, PreparedFairOpenTransaction } from "@top-pad/contract";
-import { admissions, createDb, creators, creatorWallets, fairOpens, fairOpenSeatEvents, pools, type Db } from "@top-pad/db";
+import { FairOpen, FairOpenRefusal, PreparedFairOpenTransaction, VerifiedWallet, VerifyMessage, VerifyRefusal } from "@top-pad/contract";
+import { admissionReviews, admissions, createDb, creators, creatorWallets, fairOpens, fairOpenSeatEvents, linkageHubs, pools, walletFundings, walletVerifications, type Db } from "@top-pad/db";
 import { createTestDatabase } from "@top-pad/db/testing";
 import { app } from "./index";
 import { decode, Fakes, fairOpenLaunch, fairOpenSeat, ORIGINS, testBindings, testContext, testKeypair } from "./test/fakes";
@@ -47,7 +50,7 @@ beforeEach(async () => {
   fakes = new Fakes();
   indexedNow = [];
   vi.stubGlobal("fetch", fakes.fetch);
-  for (const table of [admissions, fairOpenSeatEvents, fairOpens, creatorWallets, pools]) await db.delete(table);
+  for (const table of [admissions, admissionReviews, walletVerifications, walletFundings, linkageHubs, fairOpenSeatEvents, fairOpens, creatorWallets, pools]) await db.delete(table);
 });
 afterEach(() => vi.unstubAllGlobals());
 
@@ -88,6 +91,19 @@ async function linkX(user: { id: string; username: string }) {
   const state = new URL(start.headers.get("location")!).searchParams.get("state")!;
   const res = await request(`/auth/x/callback?state=${state}&code=c`, { headers: { cookie: `heat_x_state=${state}` } });
   return res.headers.getSetCookie().find((c) => c.startsWith("heat_session="))!.split(";")[0]!;
+}
+
+/** Verifies a wallet once for the X account `cookie`'s browser linked, the wallet signing Heat's message: its address. */
+async function verified(cookie: string, signer?: KeyPairSigner) {
+  signer ??= await generateKeyPairSigner();
+  const asked = await post("/verify/message", { wallet: signer.address }, cookie);
+  expect(asked.status, await asked.clone().text()).toBe(200);
+  const { message } = VerifyMessage.parse(await asked.json());
+  const signature = await signBytes(signer.keyPair.privateKey, new TextEncoder().encode(message));
+  const res = await post("/verify", { wallet: signer.address, message, signature: Buffer.from(signature).toString("base64") }, cookie);
+  expect(res.status, await res.clone().text()).toBe(200);
+  expect(VerifiedWallet.parse(await res.json())).toMatchObject({ wallet: signer.address, tier: "scored" });
+  return signer.address;
 }
 
 async function view(launch: string, wallet?: string, cookie?: string) {
@@ -138,7 +154,7 @@ describe("a Fair Open's page", () => {
     const page = await view(launch, wallet);
     expect(page.you).toEqual({
       wallet,
-      admission: { admitted: true, tier: "unverified", cap: "100000000", via: "none", handle: null },
+      admission: { admitted: true, tier: "unverified", cap: "100000000", via: "none", handle: null, linked: null },
       // 2.1 SOL asked of a 1.7 SOL pot: the Unverified seat's 0.1 SOL fills, within a quarter of the spend.
       seat: {
         address: seat,
@@ -157,11 +173,16 @@ describe("a Fair Open's page", () => {
     });
   });
 
-  it("knows a linked X account as Scored", async () => {
+  it("knows a wallet verified once for a linked X account as Scored, signed in or not", async () => {
     const { launch } = await launchOnChain();
     const cookie = await linkX({ id: "7001", username: "depositor_one" });
-    const page = await view(launch, random(), cookie);
-    expect(page.you!.admission).toEqual({ admitted: true, tier: "scored", cap: "500000000", via: "x", handle: "depositor_one" });
+    // Linking X alone proves nothing about a wallet: until the wallet signs for it, it is Unverified.
+    const signer = await generateKeyPairSigner();
+    expect((await view(launch, signer.address, cookie)).you!.admission).toMatchObject({ admitted: true, tier: "unverified", via: "none" });
+    const wallet = await verified(cookie, signer);
+    const scored = { admitted: true, tier: "scored", cap: "500000000", via: "x", handle: "depositor_one", linked: null };
+    expect((await view(launch, wallet, cookie)).you!.admission).toEqual(scored);
+    expect((await view(launch, wallet)).you!.admission).toEqual(scored);
   });
 
   it("says when a closed launch's every seat came back", async () => {
@@ -295,12 +316,14 @@ describe("a deposit", () => {
     expect(deposit.expiresAt - nowSeconds()).toBeGreaterThan(100n);
   });
 
-  it("gives a wallet the same person every time, and a higher tier once it links X", async () => {
+  it("gives a wallet the same person every time, and a higher tier once it is verified", async () => {
     const { launch } = await launchOnChain();
-    const wallet = random();
+    const signer = await generateKeyPairSigner();
+    const wallet = signer.address;
     const first = await prepared(await post(`/fair-opens/${launch}/deposit`, { wallet, amount: `${STEP}` }));
     const cookie = await linkX({ id: "7002", username: "depositor_two" });
-    const second = await prepared(await post(`/fair-opens/${launch}/deposit`, { wallet, amount: `${STEP}` }, cookie));
+    await verified(cookie, signer);
+    const second = await prepared(await post(`/fair-opens/${launch}/deposit`, { wallet, amount: `${STEP}` }));
     const person = (m: typeof first.message) => getDepositInstructionDataDecoder().decode(m.instructions.at(-1)!.data!).person;
     expect(person(second.message)).toEqual(person(first.message));
     expect(second.body.admission).toEqual({ tier: "scored", cap: "500000000" });
@@ -313,22 +336,24 @@ describe("a deposit", () => {
   it("refuses a person's second wallet while their first holds a seat", async () => {
     const { launch } = await launchOnChain();
     const cookie = await linkX({ id: "7003", username: "depositor_three" });
-    const [first, second] = [random(), random()];
-    const one = await prepared(await post(`/fair-opens/${launch}/deposit`, { wallet: first, amount: `${STEP}` }, cookie));
+    const [first, second] = [await verified(cookie), await verified(cookie)];
+    const one = await prepared(await post(`/fair-opens/${launch}/deposit`, { wallet: first, amount: `${STEP}` }));
     // Before the first deposit lands the person may still move to another wallet; once it has, they may not.
     const person = getDepositInstructionDataDecoder().decode(one.message.instructions.at(-1)!.data!).person;
     fakes.accounts.set(await seatAddress(launch, person), fairOpenSeat({ launch, wallet: first, person: new Uint8Array(person), tier: Tier.Scored, deposit: STEP }));
-    const refused = await refusal(await post(`/fair-opens/${launch}/deposit`, { wallet: second, amount: `${STEP}` }, cookie));
+    const refused = await refusal(await post(`/fair-opens/${launch}/deposit`, { wallet: second, amount: `${STEP}` }));
     expect(refused).toMatchObject({ status: 403, code: "not_admitted" });
     expect(refused.error).toContain("one person, one seat, one wallet");
-    expect((await view(launch, second, cookie)).you!.admission).toMatchObject({ admitted: false });
+    expect((await view(launch, second)).you!.admission).toMatchObject({ admitted: false });
+    // A person's own second wallet is no case for the operator queue.
+    expect(await db.select().from(admissionReviews)).toEqual([]);
   });
 
   it("lets a person move to another wallet once their first holds no seat", async () => {
     const { launch } = await launchOnChain();
     const cookie = await linkX({ id: "7004", username: "depositor_four" });
-    await prepared(await post(`/fair-opens/${launch}/deposit`, { wallet: random(), amount: `${STEP}` }, cookie));
-    await prepared(await post(`/fair-opens/${launch}/deposit`, { wallet: random(), amount: `${STEP}` }, cookie));
+    await prepared(await post(`/fair-opens/${launch}/deposit`, { wallet: await verified(cookie), amount: `${STEP}` }));
+    await prepared(await post(`/fair-opens/${launch}/deposit`, { wallet: await verified(cookie), amount: `${STEP}` }));
   });
 
   it("refuses the creator's own X account through any wallet but the Creator wallet", async () => {
@@ -337,8 +362,9 @@ describe("a deposit", () => {
     const [creator] = await db.select().from(creators).where((await import("drizzle-orm")).eq(creators.xUserId, "7005"));
     await db.insert(creatorWallets).values({ creatorId: creator!.id, wallet: creatorWallet, via: "first_launch", proof: "proof" });
     const { launch } = await launchOnChain({ ago: 60n, creator: creatorWallet });
-    const refused = await refusal(await post(`/fair-opens/${launch}/deposit`, { wallet: random(), amount: `${STEP}` }, cookie));
+    const refused = await refusal(await post(`/fair-opens/${launch}/deposit`, { wallet: await verified(cookie), amount: `${STEP}` }));
     expect(refused).toMatchObject({ status: 403, code: "not_admitted" });
+    expect(refused.error).toContain("creator's own X account");
     // The Creator wallet itself deposits, Scored by its record's X account, signed in or not.
     const own = await prepared(await post(`/fair-opens/${launch}/deposit`, { wallet: creatorWallet, amount: `${STEP}` }));
     expect(own.body.admission).toEqual({ tier: "scored", cap: "500000000" });
@@ -353,6 +379,180 @@ describe("a deposit", () => {
     expect(await refusal(await post(`/fair-opens/${early.launch}/deposit`, { wallet, amount: `${STEP}` }))).toMatchObject({ status: 409, code: "window" });
     const late = await launchOnChain({ ago: 601n });
     expect(await refusal(await post(`/fair-opens/${late.launch}/deposit`, { wallet, amount: `${STEP}` }))).toMatchObject({ status: 409, code: "window" });
+  });
+});
+
+describe("verifying a wallet once", () => {
+  it("refuses a browser with no X account linked, a message not Heat's, a stale one, and a signature not the wallet's", async () => {
+    const signer = await generateKeyPairSigner();
+    expect(VerifyRefusal.parse(await (await post("/verify/message", { wallet: signer.address })).json())).toMatchObject({ code: "signed_out" });
+    const cookie = await linkX({ id: "7101", username: "verifier" });
+    const { message } = VerifyMessage.parse(await (await post("/verify/message", { wallet: signer.address }, cookie)).json());
+    expect(message).toContain(`Wallet: ${signer.address}\nX account: @verifier`);
+    const sign = async (text: string, by = signer) => Buffer.from(await signBytes(by.keyPair.privateKey, new TextEncoder().encode(text))).toString("base64");
+    const attempt = async (text: string, signature: string) => {
+      const res = await post("/verify", { wallet: signer.address, message: text, signature }, cookie);
+      return { status: res.status, ...(res.status === 200 ? {} : VerifyRefusal.parse(await res.json())) };
+    };
+    // Another wallet's signature, a message edited after it was given, and one issued an hour ago.
+    expect(await attempt(message, await sign(message, await generateKeyPairSigner()))).toMatchObject({ status: 400, code: "invalid" });
+    const edited = message.replace("@verifier", "@someone_else");
+    expect(await attempt(edited, await sign(edited))).toMatchObject({ status: 400, code: "invalid" });
+    const stale = message.replace(/Issued: .*/, `Issued: ${new Date(Date.now() - 3_600_000).toISOString()}`);
+    expect(await attempt(stale, await sign(stale))).toMatchObject({ status: 400, code: "invalid" });
+    expect(await db.select().from(walletVerifications)).toEqual([]);
+    expect(await attempt(message, await sign(message))).toMatchObject({ status: 200 });
+    // Again is fine; verified, the wallet belongs to that person.
+    expect(await attempt(message, await sign(message))).toMatchObject({ status: 200 });
+    expect(await db.select({ wallet: walletVerifications.wallet }).from(walletVerifications)).toEqual([{ wallet: signer.address }]);
+  });
+
+  it("refuses a wallet already another person's: verified for another X account, or another record's Creator wallet", async () => {
+    const first = await linkX({ id: "7102", username: "first_person" });
+    const signer = await generateKeyPairSigner();
+    await verified(first, signer);
+    const second = await linkX({ id: "7103", username: "second_person" });
+    const { message } = VerifyMessage.parse(await (await post("/verify/message", { wallet: signer.address }, second)).json());
+    const signature = Buffer.from(await signBytes(signer.keyPair.privateKey, new TextEncoder().encode(message))).toString("base64");
+    const res = await post("/verify", { wallet: signer.address, message, signature }, second);
+    expect({ status: res.status, ...VerifyRefusal.parse(await res.json()) }).toMatchObject({ status: 409, code: "taken" });
+
+    const creatorSigner = await generateKeyPairSigner();
+    const [record] = await db.select().from(creators).where((await import("drizzle-orm")).eq(creators.xUserId, "7102"));
+    await db.insert(creatorWallets).values({ creatorId: record!.id, wallet: creatorSigner.address, via: "first_launch", proof: "proof" });
+    const asked = VerifyMessage.parse(await (await post("/verify/message", { wallet: creatorSigner.address }, second)).json());
+    const signed = Buffer.from(await signBytes(creatorSigner.keyPair.privateKey, new TextEncoder().encode(asked.message))).toString("base64");
+    expect((await post("/verify", { wallet: creatorSigner.address, message: asked.message, signature: signed }, second)).status).toBe(409);
+  });
+});
+
+describe("the linkage pipeline at admission", () => {
+  /** Funds `to` from `from` through `hops` single-use wallets, each passing on all but a fee. */
+  function through(from: string, to: string, hops: number) {
+    let at = from;
+    for (let i = 0; i < hops; i++) {
+      const hop = random();
+      fakes.fund(at, hop, 1_000_000_000 - i * 5_000);
+      at = hop;
+    }
+    fakes.fund(at, to, 1_000_000_000 - hops * 5_000);
+  }
+  const personIn = (m: Awaited<ReturnType<typeof prepared>>["message"]) => getDepositInstructionDataDecoder().decode(m.instructions.at(-1)!.data!).person;
+
+  it("merges five wallets funded from one source, directly and through hop wallets, into one person with one seat", async () => {
+    const { launch } = await launchOnChain();
+    const exchange = random();
+    fakes.busy(exchange);
+    const source = random();
+    fakes.fund(exchange, source, 6_000_000_000);
+    const wallets = [random(), random(), random(), random(), random()];
+    fakes.fund(source, wallets[0]!);
+    fakes.fund(source, wallets[1]!);
+    through(source, wallets[2]!, 1);
+    through(source, wallets[3]!, 2);
+    through(source, wallets[4]!, 3);
+    // Someone else the exchange funded is their own person.
+    const stranger = random();
+    fakes.fund(exchange, stranger);
+
+    // Before any seat exists, each of the five is told it shares the source's person, and is admitted as it.
+    const page = await view(launch, wallets[4]!);
+    expect(page.you!.admission).toMatchObject({ admitted: true, tier: "unverified", via: "linked" });
+    const linked = (page.you!.admission as { linked: string }).linked;
+    expect(linked).toContain(`its SOL came from ${source.slice(0, 4)}…${source.slice(-4)}, through 3 pass-through wallets in between`);
+    const first = await prepared(await post(`/fair-opens/${launch}/deposit`, { wallet: wallets[0]!, amount: `${STEP}` }));
+    const person = personIn(first.message);
+    fakes.accounts.set(await seatAddress(launch, person), fairOpenSeat({ launch, wallet: wallets[0]!, person: new Uint8Array(person), tier: Tier.Unverified, deposit: STEP }));
+
+    // Once the first holds the seat, the other four are refused with why, and can still buy after the open.
+    for (const wallet of wallets.slice(1)) {
+      const refused = await refusal(await post(`/fair-opens/${launch}/deposit`, { wallet, amount: `${STEP}` }));
+      expect(refused).toMatchObject({ status: 403, code: "not_admitted" });
+      expect(refused.error).toMatch(/^Heat counts this wallet as one person with \S+: both got their SOL from \S+, this wallet (directly|through \d pass-through wallets? in between)\. .* holds this Fair Open's seat: one person, one seat, one wallet\. You can still buy the coin once it opens\.$/);
+      expect((await view(launch, wallet)).you!.admission).toMatchObject({ admitted: false, reason: refused.error });
+    }
+    // The source itself is the same person.
+    expect((await refusal(await post(`/fair-opens/${launch}/deposit`, { wallet: source, amount: `${STEP}` }))).error).toContain(`this wallet funded ${wallets[0]!.slice(0, 4)}`);
+    // The stranger is not.
+    const theirs = await prepared(await post(`/fair-opens/${launch}/deposit`, { wallet: stranger, amount: `${STEP}` }));
+    expect(personIn(theirs.message)).not.toEqual(person);
+
+    // The operator queue holds every merge, with the funding chain behind it.
+    const reviews = await db.select().from(admissionReviews).orderBy(admissionReviews.wallet);
+    expect(new Set(reviews.map((r) => r.wallet))).toEqual(new Set([...wallets, source]));
+    expect(reviews.every((r) => r.kind === "merged" && r.cluster === `wallet:${source}`)).toBe(true);
+    const w5 = reviews.find((r) => r.wallet === wallets[4] && r.reason.startsWith("Heat counts this wallet as one person with "))!;
+    expect((w5.evidence as { wallet: { chain: unknown[] } }).wallet.chain).toHaveLength(4);
+  });
+
+  it("refuses a wallet the Creator wallet funded, and says why, while the creator deposits", async () => {
+    const creator = random();
+    const { launch } = await launchOnChain({ ago: 60n, creator });
+    const funded = random();
+    through(creator, funded, 2);
+    const refused = await refusal(await post(`/fair-opens/${launch}/deposit`, { wallet: funded, amount: `${STEP}` }));
+    expect(refused).toMatchObject({ status: 403, code: "not_admitted" });
+    expect(refused.error).toBe(
+      "The Creator wallet funded this wallet, through 2 pass-through wallets in between. Wallets tied to the creator cannot deposit in their Fair Open. You can still buy the coin once it opens.",
+    );
+    expect((await view(launch, funded)).you!.admission).toEqual({ admitted: false, reason: refused.error });
+    // So is one that funded the Creator wallet, and one whose SOL came from where the creator's did.
+    const backer = random();
+    const sibling = random();
+    fakes.fund(backer, sibling);
+    const other = await launchOnChain({ ago: 60n });
+    fakes.fund(backer, other.creator);
+    expect((await refusal(await post(`/fair-opens/${other.launch}/deposit`, { wallet: backer, amount: `${STEP}` }))).error).toMatch(/^This wallet funded the Creator wallet, directly\./);
+    expect((await refusal(await post(`/fair-opens/${other.launch}/deposit`, { wallet: sibling, amount: `${STEP}` }))).error).toMatch(/^This wallet's SOL came from \S+, as the Creator wallet's did\./);
+    // The creator deposits from the Creator wallet itself.
+    await prepared(await post(`/fair-opens/${launch}/deposit`, { wallet: creator, amount: `${STEP}` }));
+    const reviews = await db.select().from(admissionReviews).where((await import("drizzle-orm")).eq(admissionReviews.kind, "refused"));
+    expect(new Set(reviews.map((r) => r.wallet))).toEqual(new Set([funded, backer, sibling]));
+  });
+
+  it("ties nobody through a hub, even when the hub is the creator: Heat's devnet bank funds every test wallet", async () => {
+    const bank = "Ew6E318g8SYCSjCUdRqcpSywRUzuFUPoxLAQWYfZD933" as Address;
+    const { launch } = await launchOnChain({ ago: 60n, creator: bank });
+    const [a, b] = [random(), random()];
+    fakes.fund(bank, a);
+    fakes.fund(bank, b);
+    const one = await prepared(await post(`/fair-opens/${launch}/deposit`, { wallet: a, amount: `${STEP}` }));
+    const two = await prepared(await post(`/fair-opens/${launch}/deposit`, { wallet: b, amount: `${STEP}` }));
+    expect(personIn(one.message)).not.toEqual(personIn(two.message));
+    // An operator's hub ties nobody either.
+    const faucet = random();
+    await db.insert(linkageHubs).values({ address: faucet, label: "a faucet" });
+    const [c, d] = [random(), random()];
+    fakes.fund(faucet, c);
+    fakes.fund(faucet, d);
+    expect((await view(launch, c)).you!.admission).toMatchObject({ admitted: true, via: "none", linked: null });
+  });
+
+  it("counts a wallet funded from where a verified wallet's SOL came from as that person, Scored", async () => {
+    const { launch } = await launchOnChain();
+    const source = random();
+    const signer = await generateKeyPairSigner();
+    fakes.fund(source, signer.address);
+    const cookie = await linkX({ id: "7201", username: "farm_owner" });
+    await verified(cookie, signer);
+    const other = random();
+    through(source, other, 1);
+    const admission = (await view(launch, other)).you!.admission;
+    expect(admission).toMatchObject({ admitted: true, tier: "scored", via: "linked", handle: "farm_owner" });
+    expect((admission as { linked: string }).linked).toMatch(/^Heat counts this wallet as @farm_owner's person/);
+    const first = await prepared(await post(`/fair-opens/${launch}/deposit`, { wallet: signer.address, amount: `${STEP}` }));
+    const person = personIn(first.message);
+    fakes.accounts.set(await seatAddress(launch, person), fairOpenSeat({ launch, wallet: signer.address, person: new Uint8Array(person), tier: Tier.Scored, deposit: STEP }));
+    expect((await refusal(await post(`/fair-opens/${launch}/deposit`, { wallet: other, amount: `${STEP}` }))).error).toContain("one person, one seat, one wallet");
+  });
+
+  it("concludes nothing from a chain it cannot read: the wallet is asked to try again", async () => {
+    const { launch } = await launchOnChain();
+    const wallet = random();
+    const signature = fakes.fund(random(), wallet);
+    fakes.transactions.delete(signature);
+    expect((await view(launch, wallet)).you!.admission).toEqual({ admitted: false, reason: "Heat could not read where this wallet's SOL came from just now. Try again in a moment." });
+    expect(await refusal(await post(`/fair-opens/${launch}/deposit`, { wallet, amount: `${STEP}` }))).toMatchObject({ status: 503, code: "unavailable" });
   });
 });
 
