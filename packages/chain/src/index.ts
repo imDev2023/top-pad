@@ -78,6 +78,12 @@ export type HeatCluster = {
    * badges it on devnet) is listed and waits.
    */
   quotes: HeatQuote[];
+  /**
+   * Wallets the linkage pipeline never ties anyone through (spec 6.3), besides Heat's own keys, any wallet too busy to
+   * read back (a full page of history) and the operator's `linkage_hubs`: funding sources everyone on the cluster shares,
+   * as Heat's devnet bank, which funds every test wallet, the creators' included.
+   */
+  linkageHubs: Address[];
 };
 
 /**
@@ -174,6 +180,8 @@ export const CLUSTERS: Record<Cluster, HeatCluster | null> = {
       // The stand-in xStock, priced as NVDAx (both 8 decimals): DBC takes it once Meteora badges it on devnet (#91).
       { symbol: "NVDAx", mint: address("Wm7nXsHnoHJm3NemWaLbnxd7QkmeHLALucsFC4qTUNK"), tokenProgram: TOKEN_2022, decimals: 8, price: { kind: "jupiter", mint: NVDAX_MINT } },
     ],
+    // Heat's devnet bank (~/.config/top-pad/devnet/bank.json), which pays for every test, script and deploy.
+    linkageHubs: [address("Ew6E318g8SYCSjCUdRqcpSywRUzuFUPoxLAQWYfZD933")],
   },
   mainnet: {
     quote: { mint: WSOL_MINT, symbol: "SOL", decimals: 9 },
@@ -185,6 +193,7 @@ export const CLUSTERS: Record<Cluster, HeatCluster | null> = {
     rehearsal: null,
     tableQuotes: [],
     quotes: [SOL, ...(Object.keys(XSTOCKS) as (keyof typeof XSTOCKS)[]).map(xstock)],
+    linkageHubs: [],
   },
 };
 

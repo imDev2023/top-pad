@@ -788,6 +788,83 @@ export const admissions = pgTable(
 );
 
 /**
+ * "Verify once" (spec 6.3): a wallet proven to belong to a person Heat knows, by the wallet signing a message that names
+ * the person's linked X account. The wallet then has the person's Depositor tier in every Fair Open, signed in or not,
+ * and shares the person's one seat with their other wallets. A wallet belongs to one person; a person may verify many.
+ */
+export const walletVerifications = pgTable(
+  "wallet_verifications",
+  {
+    wallet: text("wallet").primaryKey(),
+    /** The person: the X account linked through OAuth, whose record this is. */
+    creatorId: uuid("creator_id")
+      .notNull()
+      .references(() => creators.id),
+    /** How the wallet was verified: `x`, the X account linked in the same browser (Scored). */
+    method: text("method", { enum: ["x"] }).notNull(),
+    /** The message the wallet signed and its ed25519 signature, base58, kept as the proof. */
+    message: text("message").notNull(),
+    signature: text("signature").notNull(),
+    /** The wallet's funding root when it was verified (`wallet_fundings`), so wallets funded from it join the person. */
+    root: text("root"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("wallet_verifications_creator_idx").on(t.creatorId), index("wallet_verifications_root_idx").on(t.root)],
+);
+
+/**
+ * The linkage pipeline's reading of each wallet's first funding (spec 6.3): the first transfer of SOL into it, oldest
+ * first, which never changes once found, and how busy its history is, which does. A wallet with a full page of history
+ * (1,000 signatures) is a hub, as an exchange's hot wallet or a faucet is, and ties nobody together.
+ */
+export const walletFundings = pgTable("wallet_fundings", {
+  wallet: text("wallet").primaryKey(),
+  /** Who sent its first SOL, and in which transaction; null when it has none or is too busy to read back to it. */
+  funder: text("funder"),
+  signature: text("signature"),
+  /** Lamports. */
+  amount: numeric("amount", { precision: 30, scale: 0 }),
+  fundedAt: timestamp("funded_at", { withTimezone: true }),
+  /** How many signatures its history listed when last read, at most 1,000. */
+  history: integer("history").notNull(),
+  checkedAt: timestamp("checked_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * Addresses the linkage pipeline never ties anyone through (spec 6.3), on top of Heat's own keys and any busy wallet:
+ * exchanges, bridges, routers and faucets an operator has named, as Bubblemaps and Arbitrum's airdrop did (#5).
+ */
+export const linkageHubs = pgTable("linkage_hubs", {
+  address: text("address").primaryKey(),
+  /** What it is, for the operator: "Binance hot wallet 3". */
+  label: text("label").notNull(),
+  createdAt: createdAt(),
+});
+
+/**
+ * The operator queue's admissions (spec 6.6): every wallet refused at admission and every wallet the linkage pipeline
+ * merged into another's person, with the reason it was shown and the evidence behind it, once per launch and wallet.
+ */
+export const admissionReviews = pgTable(
+  "admission_reviews",
+  {
+    launch: text("launch").notNull(),
+    wallet: text("wallet").notNull(),
+    /** `refused`: tied to the creator's cluster, so it may not deposit; `merged`: one person with other wallets. */
+    kind: text("kind", { enum: ["refused", "merged"] }).notNull(),
+    cluster: text("cluster").notNull(),
+    /** What the wallet was told, word for word. */
+    reason: text("reason").notNull(),
+    /** The funding chain behind it: each wallet, who funded it, in which transaction, and how much. */
+    evidence: jsonb("evidence").notNull(),
+    createdAt: createdAt(),
+    /** Once an operator has dealt with it (#54). */
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  },
+  (t) => [primaryKey({ columns: [t.launch, t.wallet, t.kind] }), index("admission_reviews_open_idx").on(t.createdAt).where(sql`${t.resolvedAt} is null`)],
+);
+
+/**
  * The funding graph (spec 6.5, 10.4): every direct transfer of SOL or a token to or from a Creator wallet, read from that
  * wallet's history over the 7 days before each of its coins' opens and the 7 days after. A buyer who sent or received
  * one is directly linked to the creator. Keyed by its transaction and its place among the transaction's instructions,
