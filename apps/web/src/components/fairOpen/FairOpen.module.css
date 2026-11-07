@@ -353,6 +353,85 @@
   gap: 12px;
 }
 
+/* Verify once: the Depositor tiers, the wallet's own marked, and how to move up */
+.verify {
+  display: grid;
+  gap: 10px;
+}
+
+.verifyHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+
+.tiers {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.tierRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 2px 12px;
+  padding: 9px 12px;
+  border-left: 3px solid transparent;
+}
+
+.tierRow + .tierRow {
+  border-top: 1px solid var(--line);
+}
+
+.tierYours {
+  background: var(--info-soft);
+  border-left-color: var(--info);
+}
+
+.tierSoon .tierName,
+.tierSoon .tierCap {
+  color: var(--faint);
+}
+
+.tierName {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.tierCap {
+  font-size: 0.9rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.tierCap :global(.num) {
+  color: var(--fg);
+}
+
+.tierSoon .tierCap :global(.num) {
+  color: var(--faint);
+}
+
+.tierProof {
+  grid-column: 1 / -1;
+}
+
+.verifyAction {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
 .holding {
   display: grid;
   grid-template-columns: repeat(2, auto);

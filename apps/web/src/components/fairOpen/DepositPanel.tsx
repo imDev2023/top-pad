@@ -5,11 +5,12 @@ import { useSignAndSendTransaction } from "@solana/react";
 import type { UiWalletAccount } from "@wallet-standard/react";
 import type { FairOpen, FairOpenOutcome } from "@top-pad/contract";
 import { useState } from "react";
-import { ApiProblem, linkXUrl, prepareFairOpen, reportFairOpen } from "@/lib/api";
+import { ApiProblem, prepareFairOpen, reportFairOpen } from "@/lib/api";
 import { coinAmount, quoteAmount, quoteText, rawQuoteOf, sol, typedQuote, type QuoteUnit } from "@/lib/format";
 import { WalletButton } from "../WalletButton";
 import { useWallet, type SolanaChain } from "../WalletProvider";
 import styles from "./FairOpen.module.css";
+import { VerifyOnce } from "./VerifyOnce";
 
 const SIGN_AND_SEND = "solana:signAndSendTransaction";
 const toBytes = (base64: string) => Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
@@ -203,7 +204,7 @@ function Seated({ view, account, chain, onChanged }: { view: FairOpen; account: 
 
   return (
     <div className={styles.seated}>
-      <Tier view={view} />
+      <Tier view={view} account={account} onChanged={onChanged} />
       {seat ? (
         <dl className={styles.holding}>
           <div>
@@ -221,10 +222,10 @@ function Seated({ view, account, chain, onChanged }: { view: FairOpen; account: 
             </div>
           )}
         </dl>
+      ) : view.phase === "scheduled" || view.phase === "window" ? (
+        you.admission.admitted && <p className="note">You hold no seat here yet.</p>
       ) : (
-        you.admission.admitted && (
-          <p className="note">{view.phase === "scheduled" || view.phase === "window" ? "You hold no seat here yet." : "You hold no seat here."}</p>
-        )
+        <p className="note">You hold no seat here.</p>
       )}
 
       {view.phase === "window" && you.admission.admitted && (
@@ -363,36 +364,20 @@ function Seated({ view, account, chain, onChanged }: { view: FairOpen; account: 
   );
 }
 
-/** The tier and how Heat knows it, or why this wallet may not deposit. */
-function Tier({ view }: { view: FairOpen }) {
+/** While deposits are ahead or open: the tier and how to raise it once, or why this wallet may not deposit. */
+function Tier({ view, account, onChanged }: { view: FairOpen; account: UiWalletAccount; onChanged: () => Promise<void> }) {
+  // Once deposits are over, what a tier could deposit, or why it could not, is no longer the visitor's business.
+  if (view.phase !== "scheduled" && view.phase !== "window") return null;
   const admission = view.you!.admission;
   if (!admission.admitted) {
     return (
-      <div className="verdict verdict-stop" role="alert">
+      <div className="verdict verdict-stop" role="alert" data-testid="fair-open-refused">
         <b>This wallet cannot deposit here</b>
         <span className="note">{admission.reason}</span>
       </div>
     );
   }
-  // Once deposits are over, what a tier could deposit is no longer the visitor's business.
-  if (view.phase !== "scheduled" && view.phase !== "window") return null;
-  const { tierCaps, quote } = view;
-  if (admission.tier === "unverified") {
-    return (
-      <p className="note">
-        Unverified wallets deposit up to {exact(tierCaps.unverified, quote)}, and all of them together get at most a quarter of the pot&apos;s buy.{" "}
-        <a href={linkXUrl(`/fair-open/${view.launch}`)}>Link X</a> to deposit up to {exact(tierCaps.scored, quote)}.
-      </p>
-    );
-  }
-  const how = admission.via === "creator_wallet" ? "your Creator record's X account" : "your linked X account";
-  return (
-    <p className="note">
-      {TIER_NAMES[admission.tier]} through {how}
-      {admission.handle ? ` @${admission.handle}` : ""}. Verifying once, for up to {exact(tierCaps.verified, quote)} in every Fair Open, comes in a later
-      build.
-    </p>
-  );
+  return <VerifyOnce view={view} account={account} admission={admission} onChanged={onChanged} />;
 }
 
 const STEPS = [

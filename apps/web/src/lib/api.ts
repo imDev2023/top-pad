@@ -25,6 +25,8 @@ import {
   VampAppeal,
   VampAppeals,
   VampShieldVerdict,
+  VerifiedWallet,
+  VerifyMessage,
   type VampAppealForm,
   type CandleSeconds,
   type ClaimRequest,
@@ -103,6 +105,12 @@ export async function getPlatformOrNull(): Promise<Platform | null> {
 
 /** The Creator this browser linked, or null when it has not linked X. */
 export const getMe = (): Promise<Me | null> => call(Me.nullable(), "/me");
+
+/** "Verify once" (spec 6.3): the message the wallet signs for the X account this browser linked. */
+export const verifyMessage = (wallet: string) => call(VerifyMessage, "/verify/message", postJson({ wallet }));
+
+/** The signed message, base64 signature: the wallet has the person's tier in every Fair Open from now on. */
+export const verifyWallet = (wallet: string, message: string, signature: string) => call(VerifiedWallet, "/verify", postJson({ wallet, message, signature }));
 
 export const logout = () => fetch(`${API_URL}/auth/logout`, { method: "POST", credentials: "include" });
 
