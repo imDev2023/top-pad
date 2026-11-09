@@ -55,15 +55,22 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
-      # Both downloads retry: a release host's passing 504 failed the whole job on 2026-11-09 (#54).
       - name: Install Solana
         run: |
           sh -c "$(curl -sSfL --retry 5 --retry-all-errors --retry-delay 10 https://release.anza.xyz/v3.1.10/install)"
           echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+      # Through the API's asset route, as `gh release download` fetches: on 2026-11-09 github.com's release download path
+      # answered 504 for an hour while the API served the same file (#54). Tried five times.
       - name: Install Anchor 1.2.1
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p "$HOME/.local/bin"
-          curl -sSfL --retry 5 --retry-all-errors --retry-delay 10 -o "$HOME/.local/bin/anchor" https://github.com/otter-sec/anchor/releases/download/v1.2.1/anchor-1.2.1-x86_64-unknown-linux-gnu
+          for try in 1 2 3 4 5; do
+            gh release download v1.2.1 --repo otter-sec/anchor --pattern anchor-1.2.1-x86_64-unknown-linux-gnu --output "$HOME/.local/bin/anchor" --clobber && break
+            if [ "$try" = 5 ]; then exit 1; fi
+            sleep 10
+          done
           chmod +x "$HOME/.local/bin/anchor"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - run: cargo fmt --all --check
