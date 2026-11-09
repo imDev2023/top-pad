@@ -162,7 +162,7 @@ textarea.input { min-height: 84px; resize: vertical; }
 .age.over b { color: var(--stop); }
 .age.over .bar i { background: var(--stop); }
 /* In an item's facts: the figure, a short bar and the aim on one line. */
-.age.inline { grid-template-columns: auto minmax(80px, 220px) auto; justify-items: start; align-items: center; gap: 10px; text-align: left; }
+.age.inline { grid-template-columns: auto minmax(80px, 220px) auto; justify-content: start; justify-items: start; align-items: center; gap: 10px; text-align: left; }
 .empty { padding: 32px 18px; text-align: center; color: var(--muted); }
 
 /* An item's own page. */
