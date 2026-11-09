@@ -57,6 +57,7 @@ p { margin: 0; }
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
 .pad { padding: 16px 18px; }
 .break { overflow-wrap: anywhere; }
+.nowrap { white-space: nowrap; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 
 .btn {
@@ -95,7 +96,8 @@ p { margin: 0; }
 .input:focus { border-color: var(--info); outline: none; }
 textarea.input { min-height: 84px; resize: vertical; }
 
-.verdict { display: grid; gap: 4px; padding: 10px 12px; border-left: 3px solid transparent; border-radius: var(--radius-sm); }
+.verdict { display: grid; gap: 4px; padding: 10px 12px; border-left: 3px solid transparent; border-radius: var(--radius-sm); overflow-wrap: anywhere; }
+.verdict > * { min-width: 0; }
 .verdict-go { background: var(--go-soft); border-left-color: var(--go); }
 .verdict-caution { background: var(--caution-soft); border-left-color: var(--caution); }
 .verdict-stop { background: var(--stop-soft); border-left-color: var(--stop); }
@@ -159,6 +161,8 @@ textarea.input { min-height: 84px; resize: vertical; }
 .age.late .bar i { background: var(--caution); }
 .age.over b { color: var(--stop); }
 .age.over .bar i { background: var(--stop); }
+/* In an item's facts: the figure, a short bar and the aim on one line. */
+.age.inline { grid-template-columns: auto minmax(80px, 220px) auto; justify-items: start; align-items: center; gap: 10px; text-align: left; }
 .empty { padding: 32px 18px; text-align: center; color: var(--muted); }
 
 /* An item's own page. */
@@ -186,6 +190,7 @@ textarea.input { min-height: 84px; resize: vertical; }
 .table th { text-align: left; font-weight: 500; color: var(--muted); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; padding: 8px 10px; border-bottom: 1px solid var(--line); }
 .table td { padding: 10px; border-bottom: 1px solid var(--line); vertical-align: top; overflow-wrap: anywhere; }
 .table tr:last-child td { border-bottom: 0; }
+.table.fixed { table-layout: fixed; }
 
 .foot { border-top: 1px solid var(--line); }
 .foot-in { max-width: calc(var(--page) + 2 * var(--gutter)); margin: 0 auto; padding: 14px var(--gutter); font-size: 0.8rem; color: var(--faint); }
@@ -202,6 +207,7 @@ textarea.input { min-height: 84px; resize: vertical; }
   .item { grid-template-columns: minmax(0, 1fr); gap: 10px; }
   .age { justify-items: start; text-align: left; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 10px; }
   .age small { grid-column: 1 / -1; margin-top: -4px; }
+  .age.inline small { grid-column: auto; margin-top: 0; }
   .facts { grid-template-columns: minmax(0, 1fr); gap: 2px; }
   .facts dd { margin-bottom: 8px; }
   .table thead { display: none; }

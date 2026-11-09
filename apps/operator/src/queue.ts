@@ -44,7 +44,10 @@ export type AdmissionItem = {
   since: Date;
   reviews: AdmissionReview[];
   fairOpen: FairOpenInfo | null;
-  /** Where the wallet's SOL came from, the top of its funding chain, when that is another wallet: a hub candidate. */
+  /**
+   * Where the wallet's SOL came from, the top of its funding chain, when that is another wallet and not the Creator
+   * wallet: a hub candidate. A creator funding their own depositors is the tie itself, never a hub.
+   */
   root: string | null;
 };
 
@@ -192,6 +195,7 @@ export async function admissionItems(tx: DbOrTransaction): Promise<AdmissionItem
       ticker: sql<string | null>`case when ${launches.openLandedAt} is not null then ${launches.ticker} end`,
       name: sql<string | null>`case when ${launches.openLandedAt} is not null then ${launches.name} end`,
       known: launches.id,
+      creatorWallet: launches.wallet,
     })
     .from(admissionReviews)
     .leftJoin(launches, eq(launches.fairOpen, admissionReviews.launch))
@@ -203,7 +207,9 @@ export async function admissionItems(tx: DbOrTransaction): Promise<AdmissionItem
     const id = `${r.review.launch}:${r.review.wallet}`;
     let item = items.get(id);
     if (!item) {
-      const trace = Trace.safeParse((r.review.evidence as { wallet?: unknown } | null)?.wallet);
+      const evidence = r.review.evidence as { wallet?: unknown; creator?: { wallet?: string } } | null;
+      const trace = Trace.safeParse(evidence?.wallet);
+      const creatorWallet = r.creatorWallet ?? evidence?.creator?.wallet ?? null;
       item = {
         kind: "admission",
         launch: r.review.launch,
@@ -213,7 +219,7 @@ export async function admissionItems(tx: DbOrTransaction): Promise<AdmissionItem
         fairOpen: r.known
           ? { creatorHandle: r.handle, teaser: r.teaser, opensAt: r.opensAt, opened: r.openLandedAt !== null, ticker: r.ticker, name: r.name }
           : null,
-        root: trace.success && trace.data.root !== r.review.wallet ? trace.data.root : null,
+        root: trace.success && trace.data.root !== r.review.wallet && trace.data.root !== creatorWallet ? trace.data.root : null,
       };
       items.set(id, item);
     }

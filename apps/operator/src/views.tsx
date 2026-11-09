@@ -38,6 +38,9 @@ export function launchHref(key: LaunchKey) {
   return `/launch?${q}`;
 }
 
+/** A Protected coin by its ticker, as the public site names it: "$Bonk". */
+const coinName = (coin: ProtectedMatch) => `${coin.ticker.startsWith("$") ? "" : "$"}${coin.ticker}`;
+
 // The shell.
 
 const ThemeButton: FC = () => (
@@ -128,11 +131,11 @@ export const Denied: FC<Shell> = (shell) => (
   </Layout>
 );
 
-export const Missing: FC<Shell & { what: string }> = ({ what, ...shell }) => (
+export const Missing: FC<Shell & { heading?: string; what: string }> = ({ heading = "Not in the queue", what, ...shell }) => (
   <Layout {...shell} title="Not here">
     <div class="stack">
       <a class="back" href="/">← Queue</a>
-      <h1>Not in the queue</h1>
+      <h1>{heading}</h1>
       <p class="lead">{what}</p>
     </div>
   </Layout>
@@ -140,10 +143,10 @@ export const Missing: FC<Shell & { what: string }> = ({ what, ...shell }) => (
 
 // The queue.
 
-const Age: FC<{ since: Date; now: Date }> = ({ since, now }) => {
+const Age: FC<{ since: Date; now: Date; inline?: boolean }> = ({ since, now, inline }) => {
   const age = ageOf(since, now);
   return (
-    <div class={`age ${age.state}`}>
+    <div class={`age ${age.state}${inline ? " inline" : ""}`}>
       <b>{waited(age.hours)}</b>
       <span class="bar" aria-hidden="true">
         <i style={`width: ${Math.round(age.share * 100)}%`} />
@@ -168,7 +171,7 @@ const fairOpenName = (item: AdmissionItem) => {
 
 function itemLine(item: QueueItem): { href: string; title: string; who: string; why: string } {
   if (item.kind === "launch") {
-    const fields = item.refusing.map((r) => r.field).join(", ") || "its text";
+    const fields = item.refusing.map((r) => r.field).join(" and ");
     return {
       href: launchHref(item.key),
       title: `$${item.key.ticker} · ${item.key.name}`,
@@ -176,7 +179,7 @@ function itemLine(item: QueueItem): { href: string; title: string; who: string; 
       why:
         item.appeals.length > 0
           ? `Appealed: "${item.appeals[0]!.message}"`
-          : `Refused for its ${fields}${item.refusing[0] ? `, as ${item.refusing[0].coin.ticker.startsWith("$") ? "" : "$"}${item.refusing[0].coin.ticker}'s` : ""}; ${item.attempts} ${item.attempts === 1 ? "try" : "tries"}.`,
+          : `${item.refusing[0] ? `Refused: its ${fields} ${item.refusing.length === 1 ? "is" : "are"} ${coinName(item.refusing[0].coin)}'s.` : "Refused by the text rules."} ${item.attempts} ${item.attempts === 1 ? "try" : "tries"}.`,
     };
   }
   if (item.kind === "admission") {
@@ -256,7 +259,7 @@ export const QueuePage: FC<Shell & { items: QueueItem[]; now: Date; flash: Child
 
 export const Flash: FC<{ tone: "go" | "stop" | "info"; children: Child }> = ({ tone, children }) => (
   <div class={`verdict verdict-${tone} flash`} role={tone === "stop" ? "alert" : "status"}>
-    {children}
+    <p>{children}</p>
   </div>
 );
 
@@ -276,8 +279,8 @@ const Matched: FC<{ r: Refusing }> = ({ r }) => (
       {r.coin.imageUrl && <img src={r.coin.imageUrl} alt="" loading="lazy" referrerpolicy="no-referrer" />}
       <div class="stack" style="gap: 2px">
         <b>
-          {r.field[0]!.toUpperCase() + r.field.slice(1)} refused as {r.coin.ticker.startsWith("$") ? "" : "$"}
-          {r.coin.ticker} ({r.coin.name})
+          {r.field[0]!.toUpperCase() + r.field.slice(1)} refused as {coinName(r.coin)}
+          {r.coin.name.toLowerCase() !== r.coin.ticker.replace(/^\$/, "").toLowerCase() && ` (${r.coin.name})`}
         </b>
         <span class="note">
           {sourceName[r.coin.source]} · <a href={r.coin.url} rel="noreferrer" target="_blank">see the protected coin</a>
@@ -320,7 +323,7 @@ export const LaunchPage: FC<Shell & { item: LaunchItem; now: Date; error: string
           <dd>@{item.handle}</dd>
           <dt>Waiting</dt>
           <dd>
-            <Age since={item.since} now={now} />
+            <Age since={item.since} now={now} inline />
           </dd>
           <dt>Refused</dt>
           <dd>{item.attempts > 0 ? `${item.attempts} ${item.attempts === 1 ? "time" : "times"}, last ${when(item.lastRefusedAt!)}` : "Appealed before any launch was tried"}</dd>
@@ -342,7 +345,7 @@ export const LaunchPage: FC<Shell & { item: LaunchItem; now: Date; error: string
                 {a.original && (
                   <>
                     {" "}
-                    · names the original <a href={explorer(shell.cluster, "address", a.original)} class="mono" rel="noreferrer" target="_blank">{short(a.original)}</a>
+                    · names the original <a href={explorer(shell.cluster, "address", a.original)} class="mono nowrap" rel="noreferrer" target="_blank">{short(a.original)}</a>
                   </>
                 )}
               </span>
@@ -392,11 +395,11 @@ const Chain: FC<{ cluster: string; title: string; steps: Step[] }> = ({ cluster,
         {steps.map((s) => (
           <li>
             <span class="break">
-              <a class="mono" href={explorer(cluster, "address", s.funder)} rel="noreferrer" target="_blank">
+              <a class="mono nowrap" href={explorer(cluster, "address", s.funder)} rel="noreferrer" target="_blank">
                 {short(s.funder)}
               </a>{" "}
               funded{" "}
-              <a class="mono" href={explorer(cluster, "address", s.wallet)} rel="noreferrer" target="_blank">
+              <a class="mono nowrap" href={explorer(cluster, "address", s.wallet)} rel="noreferrer" target="_blank">
                 {short(s.wallet)}
               </a>
               {s.passThrough && <span class="chip chip-neutral" style="margin-left: 6px">pass-through</span>}
@@ -449,7 +452,7 @@ export const AdmissionPage: FC<Shell & { item: AdmissionItem; now: Date; error: 
             </dd>
             <dt>Waiting</dt>
             <dd>
-              <Age since={item.since} now={now} />
+              <Age since={item.since} now={now} inline />
             </dd>
           </dl>
         </div>
@@ -458,7 +461,7 @@ export const AdmissionPage: FC<Shell & { item: AdmissionItem; now: Date; error: 
             <div class="row">
               <span class={`chip flag ${r.kind === "refused" ? "chip-stop" : "chip-caution"}`}>{r.kind === "refused" ? "Refused" : "Merged"}</span>
               <span class="note">
-                {when(r.createdAt)} · counted as <span class="mono">{r.cluster.replace(/^wallet:(.{4}).*(.{4})$/, "wallet:$1…$2")}</span>
+                {when(r.createdAt)} · counted as <span class="mono nowrap">{r.cluster.replace(/^wallet:(.{4}).*(.{4})$/, "wallet:$1…$2")}</span>
               </span>
             </div>
             <p class="quote">{r.reason}</p>
@@ -525,7 +528,7 @@ export const CasePage: FC<Shell & CaseView & { error: string | null }> = ({ item
           <dt>Creator</dt>
           <dd>
             {item.handle ? `@${item.handle}, ` : ""}
-            <a class="mono" href={explorer(shell.cluster, "address", item.creatorWallet)} rel="noreferrer" target="_blank">
+            <a class="mono nowrap" href={explorer(shell.cluster, "address", item.creatorWallet)} rel="noreferrer" target="_blank">
               {short(item.creatorWallet)}
             </a>
           </dd>
@@ -537,7 +540,7 @@ export const CasePage: FC<Shell & CaseView & { error: string | null }> = ({ item
           <dd>{when(item.since)}</dd>
           <dt>Waiting</dt>
           <dd>
-            <Age since={item.since} now={now} />
+            <Age since={item.since} now={now} inline />
           </dd>
         </dl>
       </div>
@@ -613,8 +616,9 @@ export const EvidencePage: FC<Shell & CaseView & { pack: Pack; source: "r2" | "p
             {pack.floor && (
               <>
                 <dt>Bought by linked wallets</dt>
-                <dd class="num">
-                  {units(pack.floor.linkedCoins, 6)} coins, {pack.floor.share} of supply (the floor is {units(pack.floor.floor, 6)})
+                <dd>
+                  <span class="num">{units(pack.floor.linkedCoins, 6)}</span> coins, <span class="num">{pack.floor.share}</span> of supply, against a floor of{" "}
+                  <span class="num">{units(pack.floor.floor, 6)}</span> (1%)
                 </dd>
               </>
             )}
@@ -649,14 +653,22 @@ export const EvidencePage: FC<Shell & CaseView & { pack: Pack; source: "r2" | "p
                 <a class="mono break" href={explorer(shell.cluster, "address", w.wallet)} rel="noreferrer" target="_blank">
                   {w.wallet}
                 </a>
-                <span class="num">counted {shareOf(w.counted)}</span>
+                <span class="note">
+                  counted <span class="num">{shareOf(w.counted)}</span> of supply
+                </span>
               </div>
               <div class="row">
                 {w.labels.map((l) => (
                   <span class="chip chip-stop">{LABELS[l] ?? l}</span>
                 ))}
               </div>
-              <table class="table">
+              <table class="table fixed">
+                <colgroup>
+                  <col style="width: 30%" />
+                  <col style="width: 22%" />
+                  <col style="width: 32%" />
+                  <col style="width: 16%" />
+                </colgroup>
                 <thead>
                   <tr>
                     <th>What</th>
@@ -801,9 +813,20 @@ const ACTION_NAMES: Record<string, string> = {
   audit_exported: "Exported the audit log",
 };
 
+/** What an action was taken on, in words: the coin and its creator, a wallet, a case, the export. */
+function subjectLine(row: AuditRow) {
+  const [kind, ...rest] = row.subject.split(":");
+  const d = (row.detail ?? {}) as { ticker?: string; creator?: { handle?: string } };
+  if (kind === "launch") return `$${d.ticker ?? rest.at(-1)}${d.creator?.handle ? ` by @${d.creator.handle}` : ""}`;
+  if (kind === "wallet") return `Wallet ${short(rest[0] ?? "")}`;
+  if (kind === "case") return `Case of ${short(rest[0] ?? "")}`;
+  if (kind === "job") return "The export";
+  return row.subject;
+}
+
 const detailLine = (detail: unknown) => {
   const d = (detail ?? {}) as Record<string, unknown>;
-  const parts = [d.ticker && `$${d.ticker}`, d.label && `"${d.label}"`, d.note && `"${d.note}"`].filter(Boolean);
+  const parts = [d.label && `"${d.label}"`, d.note && `"${d.note}"`].filter(Boolean);
   return parts.join(" · ");
 };
 
@@ -821,7 +844,13 @@ export const AuditPage: FC<Shell & { rows: AuditRow[]; runs: RunRow[]; files: { 
           <div class="panel empty">No operator has acted yet.</div>
         ) : (
           <div class="panel pad">
-            <table class="table" data-testid="audit-rows">
+            <table class="table fixed" data-testid="audit-rows">
+              <colgroup>
+                <col style="width: 20%" />
+                <col style="width: 22%" />
+                <col style="width: 38%" />
+                <col style="width: 20%" />
+              </colgroup>
               <thead>
                 <tr>
                   <th>When</th>
@@ -834,7 +863,8 @@ export const AuditPage: FC<Shell & { rows: AuditRow[]; runs: RunRow[]; files: { 
                 {rows.map((r) => (
                   <tr>
                     <td data-label="When" class="num">
-                      {when(r.at)}
+                      {r.at.toISOString().slice(0, 10)}
+                      <div class="note">{r.at.toISOString().slice(11, 19)} UTC</div>
                     </td>
                     <td data-label="Who" class="break">
                       {r.operator}
@@ -843,8 +873,8 @@ export const AuditPage: FC<Shell & { rows: AuditRow[]; runs: RunRow[]; files: { 
                       <b>{ACTION_NAMES[r.action] ?? r.action}</b>
                       {detailLine(r.detail) && <div class="note break">{detailLine(r.detail)}</div>}
                     </td>
-                    <td data-label="On" class="mono break">
-                      {r.subject.replace(/([1-9A-HJ-NP-Za-km-z]{32,44})/g, (a) => short(a))}
+                    <td data-label="On" class="break">
+                      {subjectLine(r)}
                     </td>
                   </tr>
                 ))}
@@ -882,8 +912,8 @@ export const AuditPage: FC<Shell & { rows: AuditRow[]; runs: RunRow[]; files: { 
                       <span class={`chip ${r.status === "succeeded" ? "chip-go" : r.status === "failed" ? "chip-stop" : "chip-neutral"}`}>{r.status}</span>
                       {r.error && <div class="note break">{r.error}</div>}
                     </td>
-                    <td data-label="Days written" class="num">
-                      {s?.exported?.length ? s.exported.map((e) => `${e.day} (${e.rows})`).join(", ") : "none due"}
+                    <td data-label="Days written">
+                      {s?.exported?.length ? <span class="num">{s.exported.map((e) => `${e.day} (${e.rows})`).join(", ")}</span> : <span class="muted">None due</span>}
                     </td>
                   </tr>
                 );
