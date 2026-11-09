@@ -695,6 +695,22 @@ As built ([#53](https://github.com/imDev2023/top-pad/issues/53), 2026-11-02):
 One queue handles refused launches, refused or merged admissions, bundling cases and appeals, aiming to answer within 48 hours.
 On devnet the owner is the only operator; mainnet staffing is part of the mainnet effort.
 
+As built ([#54](https://github.com/imDev2023/top-pad/issues/54), 2026-11-09), in the operator app (10.2):
+- One list, oldest first, each item with how long it has waited against the 48-hour aim:
+  - refused launches: each creator's ticker, name and image that Vamp Shield refused as a launch was prepared (`vamp_checks`), with the creator's appeals for that ticker and name (`vamp_appeals`), whose clock then starts at the first appeal; an appeal no refusal accounts for is an item of its own;
+  - refused or merged admissions, one item per Fair Open and wallet (`admission_reviews`), with the funding chains behind them;
+  - bundling cases (`bundle_cases`).
+- A refused launch is cleared or kept refused (`launch_reviews`), its appeals upheld or denied with it.
+  Clearing writes `vamp_clearances`, and from then that creator's own checks pass the ticker, name or image Vamp Shield refused, with no label, the live checks as they type included; anyone else is refused as before.
+  A refusal kept leaves the queue until the creator is refused again.
+- An admission's wallet is cleared for future Fair Opens (`wallet_clearances`): in a Fair Open whose deposits open after the clearance, nothing ties it to the creator or merges it, so it holds a seat of its own, unless it is verified for the creator's own X account; a Fair Open already taking deposits keeps what it gave.
+  Or its funding root is named a hub (`linkage_hubs`), which answers every open review traced to that root; the Creator wallet is never offered, since a creator funding their own depositors is the tie itself.
+  Or the refusal or merge is kept.
+  The hubs page names and removes hubs by hand.
+- A case's evidence pack is read from R2 and compared with the case's own copy in Postgres; each opening is an audited action.
+  Confirming a case and hearing its appeal come with the Bars ([#56](https://github.com/imDev2023/top-pad/issues/56)), so every case stays in the queue until then.
+- A sealed Fair Open's coin never reaches the operator's pages before its open: the queue names it by its teaser.
+
 ## 7. Creators
 
 Sources: [Creator record](https://github.com/imDev2023/top-pad/issues/21), [Confirmed bundling](https://github.com/imDev2023/top-pad/issues/34), [Discovery and ranking](https://github.com/imDev2023/top-pad/issues/37).
@@ -894,6 +910,14 @@ Sources: [Stack](https://github.com/imDev2023/top-pad/issues/17), [Backend desig
 - **The band job** ([ADR 0007](adr/0007-stock-priced-coins-on-meteora-quotes.md), [#89](https://github.com/imDev2023/top-pad/issues/89)): `quote-band` in the 5-minute cron prices every quote Heat offers and keeps its `QuoteSettings` naming a config pair within 10% of the SOL target's worth, making a new pair when one drifts past it (section 3.2); each run's summary in `job_runs` says per quote whether it was kept (and how far it has drifted), named, waiting, unpriced, deferred or short of rent.
   It signs with the quote manager key from Secrets Store (`top-pad-devnet-quote-manager-key`, made on 2026-11-06) and pays from the keeper; local development binds no quote manager key, so a local API never rewrites the deployed one's settings.
 - **Operator app**: its own Worker behind Cloudflare Access (free for up to 50 users), never a route of the public site; every operator action writes an audit row through a database role that can only insert; the audit log is exported to R2 daily; evidence packs are stored with their case.
+  As built ([#54](https://github.com/imDev2023/top-pad/issues/54), 2026-11-09): `apps/operator`, the Worker `top-pad-operator-devnet` on workers.dev with no version URLs, behind the Access application "Heat operator (devnet)", which protects the Worker itself and allows the owner's email alone.
+  - Access signs the operator in before the Worker runs, and the runtime hands the Worker `ctx.access`; the Worker refuses, with a page that shows nothing, any request without it or whose audience tag is not its own application's (`ACCESS_AUD`), so a broader policy, such as one protecting every Worker in the account, cannot open it either. The operator is the email Access gives.
+  - Its pages are rendered on the server (Hono's JSX) with plain forms, each post checked for the app's own origin; the only script is the theme toggle's, under a nonce; nothing is cached or framed.
+  - Neither the public site nor the API has an operator route.
+  - It reads and writes Postgres through the API's Hyperdrive, every statement inside a transaction as `heat_operator` (`SET LOCAL ROLE`, migration 0016). The role reads the queue's tables and writes only the operator's decisions: inserts into `launch_reviews`, `vamp_clearances` and `wallet_clearances`, inserts and deletes on `linkage_hubs`, the decision columns of `vamp_appeals` and `admission_reviews`, and on `audit_log` inserts and reads, never updates or deletes. A trigger also refuses update, delete and truncate on `audit_log` to every role, its owner included.
+  - An action and its audit row (`audit_log`: when, the operator's email, the action, its subject, and what was done with the operator's reason) go in one transaction, so neither exists without the other.
+  - The Worker's Cron Trigger exports the audit log at 00:15 UTC: each finished UTC day not yet in R2, one JSON object a line, at `operator-audit/<day>.jsonl` in the API's bucket, an empty day included, recorded in `job_runs` as `audit-export`; the audit page runs it on demand.
+  - On devnet the Worker connects with the API's database credentials and takes on `heat_operator` for each transaction; a login of its own, behind a Hyperdrive of its own, would make the role a boundary its credentials could not step out of, and is left for the mainnet effort.
 - **Cohort tap**: gives each cohort member 1 devnet SOL once.
 
 ### 10.3 Keys
@@ -915,6 +939,7 @@ Sources: [Stack](https://github.com/imDev2023/top-pad/issues/17), [Backend desig
 - Postgres is the only system of record: launches, seats, coins, pools, trades, candles, transfers (the funding graph), the co-signed list mirror, creators (X account, Creator wallet history, World ID nullifier), admissions, protected coins and their signatures, the known-bot list, cases, appeals, bars, the audit log, job runs and indexer cursors.
 - R2 holds blobs: an Arweave image cache, Fairness card images, evidence pack and audit exports.
   As built ([#53](https://github.com/imDev2023/top-pad/issues/53)): the funding graph is `transfers`, every direct transfer to or from a Creator wallet in its coins' windows, with `funding_scans` saying how far each wallet's history is read; Jito's record is `jito_bundles`; reviews and cases are `bundle_reviews` and `bundle_cases`.
+  As built ([#54](https://github.com/imDev2023/top-pad/issues/54)): the audit log is `audit_log`, the operator's decisions `launch_reviews`, `vamp_clearances` and `wallet_clearances`, and the audit exports `operator-audit/<day>.jsonl` in the API's bucket.
 - KV holds only public caches (up to 60 s stale).
 - Durable Object storage holds only live-room state; D1 is not used.
 - One Neon project for devnet **(owner, 2026-10-27)**: Supabase's free plan allows two active projects and both are Stoker's; Convex was weighed and set aside, because the board's trending query, the funding graph, the candle rebuilds and the insert-only audit role are SQL.

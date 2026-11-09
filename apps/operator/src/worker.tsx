@@ -239,7 +239,7 @@ app.post("/audit/export", async (c) => {
   return c.redirect(`/audit?done=${auditId}`, 303);
 });
 
-app.notFound((c) => c.html(<Missing {...shell(c)} what="The operator app has no page here." />, 404));
+app.notFound((c) => c.html(<Missing {...shell(c)} heading="No page here" what="The operator app has no page at this address." />, 404));
 
 /** The daily export (00:15 UTC): every whole day not yet in R2, recorded in `job_runs` as `audit-export`. */
 export async function scheduled(controller: ScheduledController, env: Bindings, ctx: ExecutionContext) {
