@@ -1,0 +1,48 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // The operator app (spec 10.2): its own Worker behind Cloudflare Access, never a route of the public site.
+  "name": "top-pad-operator",
+  "main": "src/worker.tsx",
+  "compatibility_date": "2026-10-20",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  // No version URLs: a deployment is reached only at its workers.dev address, which Access protects.
+  "preview_urls": false,
+  // The audit log's daily export to R2, well after midnight so the day's last rows have committed.
+  "triggers": { "crons": ["15 0 * * *"] },
+  // Locally (`wrangler dev`), the runtime stands in for Access with this identity, so the pages run as they do deployed;
+  // drop the block to see what a request without Access gets.
+  "access": { "dev": { "aud": "heat-operator-local", "identity": { "email": "operator@heat.local" } } },
+  "vars": {
+    "CLUSTER": "devnet",
+    "ACCESS_AUD": "heat-operator-local"
+  },
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      "id": "00000000000000000000000000000000",
+      // The docker database (`docker compose up -d`).
+      "localConnectionString": "postgres://toppad:toppad@127.0.0.1:5452/toppad"
+    }
+  ],
+  "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "top-pad-blobs-local" }],
+  "env": {
+    "devnet": {
+      "name": "top-pad-operator-devnet",
+      "workers_dev": true,
+      "preview_urls": false,
+      "triggers": { "crons": ["15 0 * * *"] },
+      "vars": {
+        "CLUSTER": "devnet",
+        // The audience tag of the Access application "Heat operator (devnet)", which allows the owner's email alone
+        // (made on 2026-11-09, #54). Without it every request is refused.
+        "ACCESS_AUD": ""
+      },
+      // The API's Hyperdrive in front of the Neon devnet database: the app's every statement still runs as
+      // heat_operator, through SET LOCAL ROLE in its transactions (src/db.ts).
+      "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "4226d6abb4c54484a3e6ab28a6b2a421" }],
+      // The API's bucket: Bundle Radar's evidence packs, and the audit log's daily exports at operator-audit/.
+      "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "top-pad-blobs-devnet" }]
+    }
+  }
+}
