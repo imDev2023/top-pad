@@ -258,8 +258,56 @@ export const vampAppeals = pgTable(
     status: text("status", { enum: ["open", "upheld", "denied"] }).notNull().default("open"),
     createdAt: createdAt(),
     decidedAt: timestamp("decided_at", { withTimezone: true }),
+    /** The operator who decided it, by the email Cloudflare Access signed them in with, and the review it was decided in. */
+    decidedBy: text("decided_by"),
+    reviewId: uuid("review_id").references(() => launchReviews.id),
   },
   (t) => [index("vamp_appeals_status_idx").on(t.status, t.createdAt), index("vamp_appeals_creator_idx").on(t.creatorId)],
+);
+
+/**
+ * An operator's decision on a refused launch (spec 6.2, 6.6, #54): a creator's ticker, name and image as Vamp Shield
+ * refused them, with any appeals the creator sent, either cleared, so the creator may launch them, or kept refused.
+ */
+export const launchReviews = pgTable(
+  "launch_reviews",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    creatorId: uuid("creator_id")
+      .notNull()
+      .references(() => creators.id),
+    ticker: text("ticker").notNull(),
+    name: text("name").notNull(),
+    imageSha256: text("image_sha256"),
+    decision: text("decision", { enum: ["cleared", "kept"] }).notNull(),
+    /** Why, in the operator's words. */
+    note: text("note").notNull(),
+    operator: text("operator").notNull(),
+    decidedAt: timestamp("decided_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("launch_reviews_launch_idx").on(t.creatorId, t.ticker, t.name)],
+);
+
+/**
+ * What a cleared review lets its creator launch (spec 6.2): a ticker, a name or an image (by its SHA-256) that Vamp Shield
+ * refused as a Protected coin's. The creator's own checks then pass it, as the operator found it no copy; anyone else is
+ * still refused.
+ */
+export const vampClearances = pgTable(
+  "vamp_clearances",
+  {
+    creatorId: uuid("creator_id")
+      .notNull()
+      .references(() => creators.id),
+    field: text("field", { enum: ["ticker", "name", "image"] }).notNull(),
+    /** The ticker or name as Vamp Shield's verdict writes it, or the image's SHA-256. */
+    value: text("value").notNull(),
+    reviewId: uuid("review_id")
+      .notNull()
+      .references(() => launchReviews.id),
+    clearedAt: timestamp("cleared_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.creatorId, t.field, t.value] })],
 );
 
 /**
@@ -839,6 +887,21 @@ export const linkageHubs = pgTable("linkage_hubs", {
   /** What it is, for the operator: "Binance hot wallet 3". */
   label: text("label").notNull(),
   createdAt: createdAt(),
+  /** The operator who named it in the operator app (#54). */
+  addedBy: text("added_by"),
+});
+
+/**
+ * Wallets an operator cleared for future Fair Opens (spec 6.3, 6.6): in a Fair Open whose deposits open after the
+ * clearance, the linkage pipeline neither ties the wallet to the creator nor merges it into another wallet's person, so
+ * it holds a seat of its own; a Fair Open already taking deposits keeps the refusal or merge it gave.
+ */
+export const walletClearances = pgTable("wallet_clearances", {
+  wallet: text("wallet").primaryKey(),
+  /** Why, in the operator's words. */
+  note: text("note").notNull(),
+  operator: text("operator").notNull(),
+  clearedAt: timestamp("cleared_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 /**
@@ -860,6 +923,9 @@ export const admissionReviews = pgTable(
     createdAt: createdAt(),
     /** Once an operator has dealt with it (#54). */
     resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    /** How: the wallet cleared for future Fair Opens, the funding root named a hub, or the refusal or merge kept. */
+    resolution: text("resolution", { enum: ["cleared", "hub", "kept"] }),
+    resolvedBy: text("resolved_by"),
   },
   (t) => [primaryKey({ columns: [t.launch, t.wallet, t.kind] }), index("admission_reviews_open_idx").on(t.createdAt).where(sql`${t.resolvedAt} is null`)],
 );
@@ -982,4 +1048,39 @@ export const quoteConfigPairs = pgTable(
     retiredAt: timestamp("retired_at", { withTimezone: true }),
   },
   (t) => [index("quote_config_pairs_quote_idx").on(t.quoteMint, t.madeAt)],
+);
+
+/** What an operator can do in the operator app, each written to the audit log as it is done. */
+export const OPERATOR_ACTIONS = [
+  "launch_cleared",
+  "launch_kept",
+  "wallet_cleared",
+  "admission_kept",
+  "hub_added",
+  "hub_removed",
+  "evidence_opened",
+  "audit_exported",
+] as const;
+export type OperatorAction = (typeof OPERATOR_ACTIONS)[number];
+
+/**
+ * The audit log (spec 10.2, 10.4, #54): one row for every action an operator takes in the operator app, written in the
+ * same transaction as the action. Append-only twice over: the operator app writes as `heat_operator`, which may insert
+ * and read these rows but neither update nor delete them, and a trigger refuses any update, delete or truncate from any
+ * role (migration 0016). The operator app's daily job exports each day's rows to R2.
+ */
+export const auditLog = pgTable(
+  "audit_log",
+  {
+    id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+    /** The operator, by the email Cloudflare Access signed them in with. */
+    operator: text("operator").notNull(),
+    action: text("action", { enum: OPERATOR_ACTIONS }).notNull(),
+    /** What it acted on: `appeal:<id>`, `launch:<creator>:<ticker>`, `wallet:<address>`, `case:<mint>`, `day:<date>`. */
+    subject: text("subject").notNull(),
+    /** What was done and why, as the operator gave it. */
+    detail: jsonb("detail").notNull(),
+  },
+  (t) => [index("audit_log_at_idx").on(t.at)],
 );
