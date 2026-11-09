@@ -18,32 +18,32 @@ const startOf = (day: string) => new Date(`${day}T00:00:00.000Z`);
 /** The store the export writes to: R2, or a test's stand-in. */
 export type AuditStore = Pick<R2Bucket, "head" | "put">;
 
-export type ExportSummary = { exported: { day: string; rows: number }[]; alreadyThere: number; through: string | null };
+export type ExportSummary = { exported: { day: string; rows: number }[]; alreadyThere: number; through: string };
 
 /**
- * Writes every whole day not yet in R2, from the day of the log's first row (or 35 days back, whichever is later) up to
- * yesterday. A row written in the last seconds of a day can commit just after midnight, so the Cron Trigger runs well
- * into the next day (00:15 UTC).
+ * Writes every whole day not yet in R2, from the day of the log's first row (or 35 days back, whichever is later; or
+ * yesterday alone while the log is empty) up to yesterday. A row written in the last seconds of a day can commit just
+ * after midnight, so the Cron Trigger runs well into the next day (00:15 UTC).
  */
 export async function exportAudit(db: Db, store: AuditStore, now = new Date()): Promise<ExportSummary> {
   const yesterday = dayOf(new Date(now.getTime() - DAY_MS));
   const [first] = await asOperator(db, (tx) => tx.select({ at: sql<Date | string | null>`min(${auditLog.at})` }).from(auditLog));
-  if (!first?.at) return { exported: [], alreadyThere: 0, through: null };
-  const firstDay = dayOf(new Date(first.at));
+  const firstDay = first?.at ? dayOf(new Date(first.at)) : yesterday;
   const earliest = dayOf(new Date(startOf(yesterday).getTime() - (LOOKBACK_DAYS - 1) * DAY_MS));
   const exported: ExportSummary["exported"] = [];
   let alreadyThere = 0;
-  for (let day = firstDay > earliest ? firstDay : earliest; day <= yesterday; day = dayOf(new Date(startOf(day).getTime() + DAY_MS))) {
+  const from = [firstDay, yesterday].sort()[0]!;
+  for (let day = from > earliest ? from : earliest; day <= yesterday; day = dayOf(new Date(startOf(day).getTime() + DAY_MS))) {
     if (await store.head(auditKey(day))) {
       alreadyThere++;
       continue;
     }
-    const from = startOf(day);
+    const start = startOf(day);
     const rows = await asOperator(db, (tx) =>
       tx
         .select()
         .from(auditLog)
-        .where(and(gte(auditLog.at, from), lt(auditLog.at, new Date(from.getTime() + DAY_MS))))
+        .where(and(gte(auditLog.at, start), lt(auditLog.at, new Date(start.getTime() + DAY_MS))))
         .orderBy(asc(auditLog.id)),
     );
     const body = rows.map((r) => JSON.stringify({ ...r, at: r.at.toISOString() })).join("\n");

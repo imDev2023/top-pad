@@ -347,6 +347,10 @@ describe("the audit log", () => {
     expect(eighth.customMetadata.rows).toBe("1");
     // A second run writes nothing again.
     expect(await exportAudit(db, store as unknown as AuditStore, now)).toMatchObject({ exported: [], alreadyThere: days.length });
+    // Before the log's first row, yesterday is written all the same, empty: every run leaves its day in R2.
+    const early = new MemoryBucket();
+    expect(await exportAudit(db, early as unknown as AuditStore, new Date("2026-11-01T00:15:00Z"))).toEqual({ exported: [{ day: "2026-10-31", rows: 0 }], alreadyThere: 0, through: "2026-10-31" });
+    expect(early.objects.get(auditKey("2026-10-31"))).toEqual({ body: "", customMetadata: { rows: "0", exportedAt: "2026-11-01T00:15:00.000Z" } });
   });
 
   it("runs the export from the daily Cron Trigger, kept in job_runs", async () => {
