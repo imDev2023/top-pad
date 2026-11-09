@@ -14,7 +14,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { admissionMessage, ED25519_PROGRAM_ADDRESS, FAIR_OPEN_PROGRAM_ADDRESS, fairOpenAccounts, seatAddress, seatOutcome, Tier } from "@top-pad/chain";
 import { CLAIM_DISCRIMINATOR, DEPOSIT_DISCRIMINATOR, getDepositInstructionDataDecoder, MARK_FAILED_DISCRIMINATOR, WITHDRAW_FAILED_DISCRIMINATOR } from "@top-pad/clients/fair-open";
 import { FairOpen, FairOpenRefusal, PreparedFairOpenTransaction, VerifiedWallet, VerifyMessage, VerifyRefusal } from "@top-pad/contract";
-import { admissionReviews, admissions, createDb, creators, creatorWallets, fairOpens, fairOpenSeatEvents, linkageHubs, pools, walletFundings, walletVerifications, type Db } from "@top-pad/db";
+import { admissionReviews, admissions, createDb, creators, creatorWallets, fairOpens, fairOpenSeatEvents, linkageHubs, pools, walletClearances, walletFundings, walletVerifications, type Db } from "@top-pad/db";
 import { createTestDatabase } from "@top-pad/db/testing";
 import { app } from "./index";
 import { decode, Fakes, fairOpenLaunch, fairOpenSeat, ORIGINS, testBindings, testContext, testKeypair } from "./test/fakes";
@@ -50,7 +50,7 @@ beforeEach(async () => {
   fakes = new Fakes();
   indexedNow = [];
   vi.stubGlobal("fetch", fakes.fetch);
-  for (const table of [admissions, admissionReviews, walletVerifications, walletFundings, linkageHubs, fairOpenSeatEvents, fairOpens, creatorWallets, pools]) await db.delete(table);
+  for (const table of [admissions, admissionReviews, walletClearances, walletVerifications, walletFundings, linkageHubs, fairOpenSeatEvents, fairOpens, creatorWallets, pools]) await db.delete(table);
 });
 afterEach(() => vi.unstubAllGlobals());
 
@@ -526,6 +526,48 @@ describe("the linkage pipeline at admission", () => {
     fakes.fund(faucet, c);
     fakes.fund(faucet, d);
     expect((await view(launch, c)).you!.admission).toMatchObject({ admitted: true, via: "none", linked: null });
+  });
+
+  it("lets a wallet an operator cleared deposit in Fair Opens whose deposits open after the clearance, and only those", async () => {
+    // The clearance was made two minutes ago, in the operator app (#54).
+    const clearedAt = new Date(Date.now() - 120_000);
+    const creator = random();
+    const funded = random();
+    fakes.fund(creator, funded);
+    await db.insert(walletClearances).values({ wallet: funded, note: "a friend's gift, not the creator's farm", operator: "operator@heat.test", clearedAt });
+    // A Fair Open already taking deposits when it was cleared keeps its refusal.
+    const before = await launchOnChain({ ago: 300n, creator });
+    expect((await refusal(await post(`/fair-opens/${before.launch}/deposit`, { wallet: funded, amount: `${STEP}` }))).error).toMatch(/^The Creator wallet funded this wallet, directly\./);
+    // A later one admits it as a person of its own.
+    const after = await launchOnChain({ ago: 60n, creator });
+    expect((await view(after.launch, funded)).you!.admission).toMatchObject({ admitted: true, tier: "unverified", via: "none", linked: null });
+    await prepared(await post(`/fair-opens/${after.launch}/deposit`, { wallet: funded, amount: `${STEP}` }));
+
+    // A merge lifts the same way: two wallets from one source share a seat, unless one of them was cleared.
+    const source = random();
+    const [holder, friend] = [random(), random()];
+    fakes.fund(source, holder);
+    fakes.fund(source, friend);
+    await db.insert(walletClearances).values({ wallet: friend, note: "funded by a shared custodian", operator: "operator@heat.test", clearedAt });
+    const { launch } = await launchOnChain({ ago: 60n });
+    const first = await prepared(await post(`/fair-opens/${launch}/deposit`, { wallet: holder, amount: `${STEP}` }));
+    const person = personIn(first.message);
+    fakes.accounts.set(await seatAddress(launch, person), fairOpenSeat({ launch, wallet: holder, person: new Uint8Array(person), tier: Tier.Unverified, deposit: STEP }));
+    const theirs = await prepared(await post(`/fair-opens/${launch}/deposit`, { wallet: friend, amount: `${STEP}` }));
+    expect(personIn(theirs.message)).not.toEqual(person);
+    // Neither admission of a cleared wallet is a case for the queue.
+    expect((await db.select().from(admissionReviews)).map((r) => r.wallet)).not.toContain(friend);
+  });
+
+  it("never lets a clearance admit a wallet verified for the creator's own X account", async () => {
+    const cookie = await linkX({ id: "7301", username: "two_wallets" });
+    const creatorWallet = await verified(cookie);
+    const second = await verified(cookie);
+    const [record] = await db.select().from(creators).where((await import("drizzle-orm")).eq(creators.xUserId, "7301"));
+    await db.insert(creatorWallets).values({ creatorId: record!.id, wallet: creatorWallet, via: "first_launch", proof: "proof" });
+    await db.insert(walletClearances).values({ wallet: second, note: "asked nicely", operator: "operator@heat.test", clearedAt: new Date(Date.now() - 120_000) });
+    const { launch } = await launchOnChain({ ago: 60n, creator: creatorWallet });
+    expect((await refusal(await post(`/fair-opens/${launch}/deposit`, { wallet: second, amount: `${STEP}` }))).error).toMatch(/^This wallet is verified for the creator's own X account/);
   });
 
   it("counts a wallet funded from where a verified wallet's SOL came from as that person, Scored", async () => {
