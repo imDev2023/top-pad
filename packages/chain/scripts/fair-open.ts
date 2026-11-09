@@ -125,4 +125,4 @@ const file = join(ladders, `${launch}.json`);
 writeFileSync(file, JSON.stringify({ launch, nonce: nonce.address, rungs: ladder.map((r) => ({ rung: `${r.rung}`, transaction: r.transaction })) }, null, 1));
 const sizes = ladder.map((r) => r.bytes);
 console.log(`Ladder of ${ladder.length} rungs signed (${Math.min(...sizes)} to ${Math.max(...sizes)} bytes each), in ${file}.`);
-console.log(`Its page: https://top-pad-web-devnet.imdev2023.workers.dev/fair-open/${launch}`);
+console.log(`Its page: https://top-pad-web-devnet.rc-labs.workers.dev/fair-open/${launch}`);
