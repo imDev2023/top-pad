@@ -34,9 +34,10 @@
       "triggers": { "crons": ["15 0 * * *"] },
       "vars": {
         "CLUSTER": "devnet",
-        // The audience tag of the Access application "Heat operator (devnet)", which allows the owner's email alone
-        // (made on 2026-11-09, #54). Without it every request is refused.
-        "ACCESS_AUD": ""
+        // The audience tag of the Access application on this Worker, which the owner applied in the dashboard on
+        // 2026-11-09 (Workers & Pages, Access, all traffic, the policy "Cloudflare account - Allow": the account's one
+        // member, the owner; sessions of 24 h). Every request Access did not sign in for it is refused (#54).
+        "ACCESS_AUD": "2dd4e0a909a1dd504a2459ee16d79d5ead50cd11e1e51c1df94ead70b1e266de"
       },
       // The API's Hyperdrive in front of the Neon devnet database: the app's every statement still runs as
       // heat_operator, through SET LOCAL ROLE in its transactions (src/db.ts).
