@@ -37,9 +37,9 @@ import { bank, chainTime, fund, programCompute, rpc, send } from "./devnet";
 import { admitted, closeNonce, deposit, depositorsOf, markFailed, newPerson, quoteHeld, recoverDeposits, refundAll, scheduleFairOpen, seatOf, sweepDepositors } from "./fairOpen";
 
 const keys = ["keeper.json", "admission.json", "bank.json"].every((name) => existsSync(join(homedir(), ".config/top-pad/devnet", name)));
-const API = process.env.HEAT_API_URL || "https://top-pad-api-devnet.imdev2023.workers.dev";
+const API = process.env.HEAT_API_URL || "https://top-pad-api-devnet.rc-labs.workers.dev";
 // The API takes writes only from Heat's own pages (`sameOriginWrites`), so the test names the page's origin as a browser would.
-const WEB = process.env.HEAT_WEB_URL || "https://top-pad-web-devnet.imdev2023.workers.dev";
+const WEB = process.env.HEAT_WEB_URL || "https://top-pad-web-devnet.rc-labs.workers.dev";
 const USDC: QuoteToken = { mint: DEVNET_USDC, tokenProgram: TOKEN_PROGRAM_ADDRESS };
 const SOL = 1_000_000_000n;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));

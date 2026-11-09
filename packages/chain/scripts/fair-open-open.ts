@@ -165,7 +165,7 @@ if (account.status === LaunchStatus.Opened) {
     await keeperSends(`push of ${batch.length}`, await pushInstructions({ launch, mint: account.mint, payer: keeper, seats: batch, computeUnitPrice: 0n, quote }));
   }
   const pool = await dbcPoolAddress(account.dbcConfig, account.mint, account.quoteMint);
-  console.log(`The coin ${account.mint}, pool ${pool}: https://top-pad-web-devnet.imdev2023.workers.dev/coin/${account.mint}`);
+  console.log(`The coin ${account.mint}, pool ${pool}: https://top-pad-web-devnet.rc-labs.workers.dev/coin/${account.mint}`);
 }
 
 // The nonce's rent goes back to the creator once the launch has opened or failed.

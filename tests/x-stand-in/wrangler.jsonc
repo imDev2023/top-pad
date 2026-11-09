@@ -12,7 +12,7 @@
     "devnet": {
       "name": "top-pad-x-stand-in-devnet",
       "workers_dev": true,
-      "vars": { "CALLBACKS": "https://top-pad-api-devnet.imdev2023.workers.dev/auth/x/callback" }
+      "vars": { "CALLBACKS": "https://top-pad-api-devnet.rc-labs.workers.dev/auth/x/callback" }
     }
   }
 }

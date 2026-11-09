@@ -65,15 +65,15 @@
       "triggers": { "crons": ["*/5 * * * *", "* * * * *"] },
       "vars": {
         "CLUSTER": "devnet",
-        "WEB_ORIGIN": "https://top-pad-web-devnet.imdev2023.workers.dev",
-        "API_ORIGIN": "https://top-pad-api-devnet.imdev2023.workers.dev",
+        "WEB_ORIGIN": "https://top-pad-web-devnet.rc-labs.workers.dev",
+        "API_ORIGIN": "https://top-pad-api-devnet.rc-labs.workers.dev",
         "KEEPER_FLOAT_MIN_LAMPORTS": "250000000",
         // X is stood in (tests/x-stand-in) until Heat has its own X app (owner, 2026-10-29); its client is no secret. The
         // real app replaces these four with the secrets X_CLIENT_ID and X_CLIENT_SECRET.
         "X_CLIENT_ID": "x-stand-in",
         "X_CLIENT_SECRET": "x-stand-in-has-no-secret",
-        "X_AUTHORIZE_URL": "https://top-pad-x-stand-in-devnet.imdev2023.workers.dev/i/oauth2/authorize",
-        "X_API_URL": "https://top-pad-x-stand-in-devnet.imdev2023.workers.dev"
+        "X_AUTHORIZE_URL": "https://top-pad-x-stand-in-devnet.rc-labs.workers.dev/i/oauth2/authorize",
+        "X_API_URL": "https://top-pad-x-stand-in-devnet.rc-labs.workers.dev"
       },
       // `top-pad-devnet`, in front of the Neon devnet database (spec 10.4), with its query cache off: Hyperdrive never
       // invalidates a cached read on a write, and our reads must see the last write.

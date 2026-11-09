@@ -287,7 +287,7 @@ describe("the queue", () => {
   });
 
   it("refuses a form posted from anywhere but the app's own pages", async () => {
-    const res = await post(`/admissions/${launchAccount}/${wallet(2)}`, { decision: "cleared", note: "forged" }, { origin: "https://top-pad-web-devnet.imdev2023.workers.dev" });
+    const res = await post(`/admissions/${launchAccount}/${wallet(2)}`, { decision: "cleared", note: "forged" }, { origin: "https://top-pad-web-devnet.rc-labs.workers.dev" });
     expect(res.status).toBe(403);
     expect(await db.select().from(walletClearances)).toEqual([]);
   });
