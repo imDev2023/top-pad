@@ -113,6 +113,13 @@
       "when": 1794023886822,
       "tag": "0015_depositor_tiers",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1794204903399,
+      "tag": "0016_operator_app",
+      "breakpoints": true
     }
   ]
 }
