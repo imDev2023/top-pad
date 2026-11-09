@@ -60,7 +60,7 @@ jobs:
           sh -c "$(curl -sSfL --retry 5 --retry-all-errors --retry-delay 10 https://release.anza.xyz/v3.1.10/install)"
           echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
       # Through the API's asset route, as `gh release download` fetches: on 2026-11-09 github.com's release download path
-      # answered 504 for an hour while the API served the same file (#54). Tried five times.
+      # answered 504 for at least a quarter of an hour while the API served the same file (#54). Tried five times.
       - name: Install Anchor 1.2.1
         env:
           GH_TOKEN: ${{ github.token }}
