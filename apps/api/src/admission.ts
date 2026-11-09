@@ -20,10 +20,10 @@ import {
   type Address,
   type ReadonlyUint8Array,
 } from "@solana/kit";
-import { and, eq, isNotNull, ne, sql } from "drizzle-orm";
+import { and, eq, isNotNull, lt, ne, sql } from "drizzle-orm";
 import { admissionMessage, FAIR_OPEN_PROGRAM_ADDRESS, signAdmission, Tier, tierCap, type Admission, type HeatCluster } from "@top-pad/chain";
 import type { DepositorTier } from "@top-pad/contract";
-import { admissionReviews, admissions, creators, creatorWallets, linkageHubs, walletVerifications, type Db } from "@top-pad/db";
+import { admissionReviews, admissions, creators, creatorWallets, linkageHubs, walletClearances, walletVerifications, type Db } from "@top-pad/db";
 import { FundingUnreadable, traceFunding, type FundingSource, type FundingTrace } from "@top-pad/indexer";
 import type { SecretBinding } from "./env";
 
@@ -113,6 +113,8 @@ export type Person = {
   trace: FundingTrace;
   /** When the linkage pipeline put it in another wallet's person: why, as the wallet is told. */
   linked: string | null;
+  /** Whether an operator cleared it for this Fair Open: then nothing ties it to the creator or merges it (spec 6.3). */
+  cleared: boolean;
 };
 
 type XAccount = { xUserId: string; handle: string; via: "x" | "creator_wallet" };
@@ -163,21 +165,38 @@ function linkedText(trace: FundingTrace, handle: string | null) {
 }
 
 /**
- * The person a wallet is, and the tier that makes them: Scored by a verified X account, its own or that of the wallets
- * its SOL came from with it; else Unverified, as the person of the wallet its SOL came from. Throws `FundingUnreadable`.
+ * Whether an operator cleared the wallet (`wallet_clearances`, from the operator app, #54) before this Fair Open's
+ * deposits opened: a clearance counts for future Fair Opens only (spec 6.3), so one already taking deposits keeps the
+ * refusal or merge it gave.
  */
-export async function personOf(db: Db, linkage: Linkage, wallet: Address): Promise<Person> {
-  const trace = await traceOf(db, linkage, wallet);
-  const own = await xAccountOf(db, wallet);
-  if (own) return { cluster: `x:${own.xUserId}`, tier: "scored", via: own.via, handle: own.handle, trace, linked: null };
-  const rooted = trace.root !== wallet ? ((await xAccountOf(db, trace.root)) ?? (await xAccountByRoot(db, trace.root, wallet))) : await xAccountByRoot(db, wallet, wallet);
-  if (rooted) return { cluster: `x:${rooted.xUserId}`, tier: "scored", via: "linked", handle: rooted.handle, trace, linked: linkedText(trace, rooted.handle) };
-  if (trace.root !== wallet) return { cluster: `wallet:${trace.root}`, tier: "unverified", via: "linked", handle: null, trace, linked: linkedText(trace, null) };
-  return { cluster: `wallet:${wallet}`, tier: "unverified", via: "none", handle: null, trace, linked: null };
+async function clearedFor(db: Db, wallet: string, depositsOpenAt: bigint): Promise<boolean> {
+  const [row] = await db
+    .select({ wallet: walletClearances.wallet })
+    .from(walletClearances)
+    .where(and(eq(walletClearances.wallet, wallet), lt(walletClearances.clearedAt, new Date(Number(depositsOpenAt) * 1000))));
+  return row !== undefined;
 }
 
-/** A launch as admission needs it. */
-export type AdmittingLaunch = { launch: Address; creator: Address; step: bigint };
+/**
+ * The person a wallet is in a Fair Open, and the tier that makes them: Scored by a verified X account, its own or that
+ * of the wallets its SOL came from with it; else Unverified, as the person of the wallet its SOL came from. A wallet an
+ * operator cleared before the Fair Open's deposits opened is its own person whatever funded it. Throws
+ * `FundingUnreadable`.
+ */
+export async function personOf(db: Db, linkage: Linkage, wallet: Address, launch: { depositsOpenAt: bigint }): Promise<Person> {
+  const trace = await traceOf(db, linkage, wallet);
+  const own = await xAccountOf(db, wallet);
+  const cleared = await clearedFor(db, wallet, launch.depositsOpenAt);
+  if (own) return { cluster: `x:${own.xUserId}`, tier: "scored", via: own.via, handle: own.handle, trace, linked: null, cleared };
+  if (cleared) return { cluster: `wallet:${wallet}`, tier: "unverified", via: "none", handle: null, trace, linked: null, cleared };
+  const rooted = trace.root !== wallet ? ((await xAccountOf(db, trace.root)) ?? (await xAccountByRoot(db, trace.root, wallet))) : await xAccountByRoot(db, wallet, wallet);
+  if (rooted) return { cluster: `x:${rooted.xUserId}`, tier: "scored", via: "linked", handle: rooted.handle, trace, linked: linkedText(trace, rooted.handle), cleared };
+  if (trace.root !== wallet) return { cluster: `wallet:${trace.root}`, tier: "unverified", via: "linked", handle: null, trace, linked: linkedText(trace, null), cleared };
+  return { cluster: `wallet:${wallet}`, tier: "unverified", via: "none", handle: null, trace, linked: null, cleared };
+}
+
+/** A launch as admission needs it; `depositsOpenAt` in unix seconds. */
+export type AdmittingLaunch = { launch: Address; creator: Address; step: bigint; depositsOpenAt: bigint };
 
 /** A seat's wallet as the page shows it. */
 const short = (wallet: string) => `${wallet.slice(0, 4)}…${wallet.slice(-4)}`;
@@ -202,12 +221,15 @@ async function record(db: Db, launch: AdmittingLaunch, wallet: Address, person: 
  */
 async function creatorTie(db: Db, linkage: Linkage, launch: AdmittingLaunch, wallet: Address, person: Person): Promise<Review | null> {
   if (wallet === launch.creator) return null;
-  const creator = await personOf(db, linkage, launch.creator);
+  const creator = await personOf(db, linkage, launch.creator, launch);
   const tie = (why: string) => ({
     kind: "refused" as const,
     reason: `${why} Wallets tied to the creator cannot deposit in their Fair Open. ${STILL_BUY}`,
     evidence: { wallet: person.trace, creator: creator.trace },
   });
+  const ownX = person.cluster === creator.cluster && person.via !== "linked";
+  // A clearance lifts what the linkage pipeline concluded, never a wallet verified for the creator's own X account.
+  if (person.cleared) return ownX ? tie("This wallet is verified for the creator's own X account: the creator deposits from their Creator wallet alone.") : null;
   // A hub funds everyone, the creator included, and ties nobody: on devnet, Heat's bank is often the creator too.
   if (person.trace.funders.includes(launch.creator) && !linkage.hubs.has(launch.creator)) return tie(`The Creator wallet funded this wallet, ${route(person.trace, launch.creator)}.`);
   if (creator.trace.funders.includes(wallet) && !linkage.hubs.has(wallet)) return tie(`This wallet funded the Creator wallet, ${route(creator.trace, wallet)}.`);

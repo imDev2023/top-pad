@@ -4,7 +4,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 // Imported before ./index and ./test/fakes, so its mock below is made before the fakes, which import it, are loaded.
 import { CLUSTERS } from "@top-pad/chain";
 import { ImageVerdict, LaunchRefusal, PreparedLaunch, VampAppeal, VampAppeals, VampShieldVerdict } from "@top-pad/contract";
-import { createDb, launches, protectedCoins, protectedImages, vampChecks, type Db } from "@top-pad/db";
+import { createDb, creators, launches, launchReviews, protectedCoins, protectedImages, vampChecks, vampClearances, type Db } from "@top-pad/db";
 import { createTestDatabase } from "@top-pad/db/testing";
 import { app } from "./index";
 import { protectHeatCoin, upsertListed } from "./protectedSet";
@@ -306,6 +306,47 @@ describe("a launch Vamp Shield judges as it is prepared", () => {
       expect(refused.status, ticker).toBe(422);
       expect(LaunchRefusal.parse(await refused.json()).verdict?.verdicts.ticker).toMatchObject({ status: "refused", match: { mint: first.mint, source: "heat", url: `${ORIGINS.web}/coin/${first.mint}` } });
     }
+  });
+});
+
+describe("a refusal an operator cleared", () => {
+  it("lets that creator launch the cleared ticker and image, unlabelled, and refuses them to anyone else", async () => {
+    const cookie = await linkX();
+    const [creator] = await db.select().from(creators).where(eq(creators.xUserId, `${creatorId - 1}`));
+    const copy = image("cleared-copy");
+    const dihedral = fakeSignatures("cleared-copy").pdq.dihedral;
+    dihedral[5] = flipBits(BONK_IMAGE.pdq.bits, 2);
+    await looksAs(copy, { pdq: { bits: dihedral[0]!, quality: 80, dihedral }, sscd: fakeSignatures("cleared-copy").sscd });
+    const coin = { ticker: "B0NK", name: "Frog Relaunch", image: copy };
+    const refusedTicker = await prepareInstant(cookie, { ...coin, wallet: (await testKeypair()).signer.address });
+    expect(LaunchRefusal.parse(await refusedTicker.json()).verdict?.verdicts.ticker.status).toBe("refused");
+
+    // The operator clears the ticker (in the operator app, #54): the image is judged next, and still refused.
+    const review = async (fields: { field: "ticker" | "image"; value: string }[]) => {
+      const [row] = await db.insert(launchReviews).values({ creatorId: creator!.id, ticker: "B0NK", name: "Frog Relaunch", imageSha256: await sha256(copy), decision: "cleared", note: "the original team relaunching", operator: "operator@heat.test" }).returning();
+      await db.insert(vampClearances).values(fields.map((f) => ({ creatorId: creator!.id, ...f, reviewId: row!.id })));
+    };
+    await review([{ field: "ticker", value: "B0NK" }]);
+    const live = VampShieldVerdict.parse(await (await post("/vamp-shield/check", { ticker: "b0nk", name: "Frog Relaunch" }, cookie)).json());
+    expect(live.verdicts.ticker).toEqual({ status: "clear", reason: "Heat's operator cleared this ticker for you after review.", match: null });
+    const refusedImage = await prepareInstant(cookie, { ...coin, wallet: (await testKeypair()).signer.address });
+    expect(refusedImage.status).toBe(422);
+    expect(LaunchRefusal.parse(await refusedImage.json())).toMatchObject({ imageVerdict: { status: "refused" } });
+
+    // Cleared too, the launch goes ahead with no "looks like" label.
+    await review([{ field: "image", value: await sha256(copy) }]);
+    const imageCheck = ImageVerdict.parse(await (await checkImage(copy, cookie)).json());
+    expect(imageCheck.verdict).toEqual({ status: "clear", reason: "Heat's operator cleared this image for you after review.", match: null });
+    const res = await prepareInstant(cookie, { ...coin, wallet: (await testKeypair()).signer.address });
+    expect(res.status, JSON.stringify(await res.clone().json())).toBe(201);
+    const [row] = await db.select().from(launches).where(eq(launches.id, PreparedLaunch.parse(await res.json()).id));
+    expect(row!.looksLike).toBeNull();
+
+    // Another creator, or nobody signed in, is refused as before.
+    const other = await linkX();
+    const theirs = await prepareInstant(other, { ...coin, wallet: (await testKeypair()).signer.address });
+    expect(LaunchRefusal.parse(await theirs.json()).verdict?.verdicts.ticker.status).toBe("refused");
+    expect((await textVerdict("B0NK", "Frog Relaunch")).verdicts.ticker.status).toBe("refused");
   });
 });
 

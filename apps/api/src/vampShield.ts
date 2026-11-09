@@ -19,7 +19,7 @@ import {
   type VampAppeal,
   type VampShieldVerdict,
 } from "@top-pad/contract";
-import { imageChecks, protectedCoins, vampAppeals, vampChecks, type Db } from "@top-pad/db";
+import { imageChecks, protectedCoins, vampAppeals, vampChecks, vampClearances, type Db } from "@top-pad/db";
 import {
   candidateKeys,
   FOLD_VERSION,
@@ -48,6 +48,24 @@ import { ORIENTATIONS, visionOf, type Signatures } from "./vision";
 
 const clear: FieldVerdict = { status: "clear", reason: null, match: null };
 const refused = (reason: string, match: FieldVerdict["match"] = null): FieldVerdict => ({ status: "refused", reason, match });
+
+type ClearedField = "ticker" | "name" | "image";
+/** A field an operator cleared for its creator after review: it passes, with no label (spec 6.2, 6.6). */
+const cleared = (field: ClearedField): FieldVerdict => ({ status: "clear", reason: `Heat's operator cleared this ${field} for you after review.`, match: null });
+
+/**
+ * Which of a creator's ticker, name and image an operator cleared (`vamp_clearances`, made in the operator app, #54):
+ * the creator may launch them though they match a Protected coin. Only that creator: anyone else is still refused.
+ */
+async function clearedFields(db: Db, creatorId: string | null | undefined, values: Partial<Record<ClearedField, string>>): Promise<Set<ClearedField>> {
+  const asked = (Object.entries(values) as [ClearedField, string | undefined][]).filter((e): e is [ClearedField, string] => !!e[1]);
+  if (!creatorId || asked.length === 0) return new Set();
+  const rows = await db
+    .select({ field: vampClearances.field })
+    .from(vampClearances)
+    .where(and(eq(vampClearances.creatorId, creatorId), or(...asked.map(([field, value]) => and(eq(vampClearances.field, field), eq(vampClearances.value, value))))));
+  return new Set(rows.map((r) => r.field));
+}
 
 const COLUMNS = {
   ticker: { strict: protectedCoins.tickerStrict, loose: protectedCoins.tickerLoose, core: protectedCoins.tickerCore },
@@ -132,8 +150,11 @@ export function protectedMatch(cfg: Config, coin: MatchedCoin): ProtectedMatch {
 /** The text's verdict and its near matches, which become the launch's labels. */
 export type TextCheck = { verdict: VampShieldVerdict; matched: MatchedCoin[]; near: Near[] };
 
-/** Vamp Shield's verdict on a ticker and a name: the rules first, then the Protected coins, exact and near. */
-export async function checkText(db: Db, cfg: Config, tickerInput: string, nameInput: string): Promise<TextCheck> {
+/**
+ * Vamp Shield's verdict on a ticker and a name: the rules first, then the Protected coins, exact and near. For a known
+ * creator, a field an operator cleared for them passes whatever Protected coin it matches, with no label.
+ */
+export async function checkText(db: Db, cfg: Config, tickerInput: string, nameInput: string, creatorId?: string | null): Promise<TextCheck> {
   const ticker = tickerVerdict(tickerInput);
   const name = nameVerdict(nameInput);
   const verdicts: Record<Field, FieldVerdict> = {
@@ -154,8 +175,16 @@ export async function checkText(db: Db, cfg: Config, tickerInput: string, nameIn
       if (match && verdicts[field].status === "clear") verdicts[field] = refused(match.reason, protectedMatch(cfg, byMint.get(match.coin.mint)!));
     }
   }
-  const nearOnes = nearMatches(keys, near, found);
+  const allNear = nearMatches(keys, near, found);
+  // Only a field matched to a Protected coin can be cleared: one the rules refuse cannot launch as it is.
+  const matched = (f: Field) => verdicts[f].match !== null || allNear.some((n) => n.field === f);
+  const clearedOnes = await clearedFields(db, creatorId, { ticker: matched("ticker") ? tickerText : undefined, name: matched("name") ? nameText : undefined });
+  const nearOnes = allNear.filter((n) => !clearedOnes.has(n.field));
   for (const field of ["ticker", "name"] as const) {
+    if (clearedOnes.has(field)) {
+      verdicts[field] = cleared(field);
+      continue;
+    }
     const first = nearOnes.find((n) => n.field === field);
     if (first && verdicts[field].status === "clear") {
       verdicts[field] = { status: "looks_like", reason: first.reason, match: protectedMatch(cfg, byMint.get(first.coin.mint)!) };
@@ -219,7 +248,9 @@ export const firstRefusal = (v: VampShieldVerdict) =>
 export async function checkRoute(c: Context<AppEnv>) {
   const body = VampShieldCheck.safeParse(await c.req.json().catch(() => null));
   if (!body.success) return c.json({ error: "Send a ticker and a name." }, 400);
-  return c.json((await checkText(c.var.db, c.var.cfg, body.data.ticker, body.data.name)).verdict);
+  // The creator signed in sees what an operator cleared for them as they type.
+  const creator = await sessionCreator(c);
+  return c.json((await checkText(c.var.db, c.var.cfg, body.data.ticker, body.data.name, creator?.id)).verdict);
 }
 
 // Images.
@@ -331,8 +362,8 @@ export type ImageCheck =
 
 const label = (coin: MatchedCoin) => looksLikeName(coin);
 
-/** Vamp Shield's verdict on a coin's image. */
-export async function checkImage(db: Db, cfg: Config, env: Bindings, bytes: Uint8Array): Promise<ImageCheck> {
+/** Vamp Shield's verdict on a coin's image; for a known creator, an image an operator cleared for them passes, unlabelled. */
+export async function checkImage(db: Db, cfg: Config, env: Bindings, bytes: Uint8Array, creatorId?: string | null): Promise<ImageCheck> {
   const sha256 = await sha256Of(bytes);
   const signed = await signaturesOf(db, env, bytes, sha256);
   if (!signed.ok) return { ok: false, sha256, status: signed.status, verdict: refused(signed.reason) };
@@ -340,7 +371,9 @@ export async function checkImage(db: Db, cfg: Config, env: Bindings, bytes: Uint
   const judgement = judgeImage(nearest);
   let verdict: FieldVerdict = clear;
   let looksLike: LooksLike | null = null;
-  if (judgement.verdict !== "clear") {
+  if (judgement.verdict !== "clear" && (await clearedFields(db, creatorId, { image: sha256 })).has("image")) {
+    verdict = cleared("image");
+  } else if (judgement.verdict !== "clear") {
     const coin = judgement.neighbour.coin as MatchedCoin;
     const match = protectedMatch(cfg, coin);
     if (judgement.verdict === "refused") {
@@ -389,7 +422,7 @@ export async function checkImageRoute(c: Context<AppEnv>) {
   const file = body.image;
   if (!(file instanceof File) || file.size === 0) return c.json({ error: "Send the coin's image." }, 400);
   if (file.size > cfg.maxImageBytes) return c.json({ error: `The image is too large: a coin's image can be at most ${Math.round(cfg.maxImageBytes / 1024)} KB.` }, 413);
-  const check = await checkImage(db, cfg, c.env, new Uint8Array(await file.arrayBuffer()));
+  const check = await checkImage(db, cfg, c.env, new Uint8Array(await file.arrayBuffer()), creator.id);
   if (!check.ok) {
     // Logged too: the rate limit counts every attempt, and the operator sees images the service could not read.
     await db.insert(vampChecks).values({ stage: "image", creatorId: creator.id, imageSha256: check.sha256, outcome: "unchecked", matches: [] });
@@ -466,7 +499,7 @@ const textMatchesOf = (text: VampShieldVerdict) =>
 
 /** The text's verdict a launch is prepared on, its refusal logged: checked before anything else, the image included. */
 export async function judgeLaunchText(db: Db, cfg: Config, at: Preparing, ticker: string, name: string): Promise<TextCheck> {
-  const text = await checkText(db, cfg, ticker, name);
+  const text = await checkText(db, cfg, ticker, name, at.creatorId);
   if (!text.verdict.clear) await logPrepared(db, at, text.verdict, "refused", textMatchesOf(text.verdict), null);
   return text;
 }
@@ -477,7 +510,7 @@ export async function judgeLaunchText(db: Db, cfg: Config, at: Preparing, ticker
  * logged with the launch.
  */
 export async function judgeLaunch(db: Db, cfg: Config, env: Bindings, at: Preparing, text: TextCheck, image: Uint8Array): Promise<LaunchVerdict> {
-  const check = await checkImage(db, cfg, env, image);
+  const check = await checkImage(db, cfg, env, image, at.creatorId);
   if (!check.ok) return { ok: false, status: check.status, error: check.verdict.reason!, text: text.verdict, image: check.verdict, imageSha256: check.sha256 };
   const textMatches = textMatchesOf(text.verdict);
   const imageMatches = check.verdict.match ? [{ field: "image", status: check.verdict.status, coin: check.verdict.match, reason: check.verdict.reason }] : [];

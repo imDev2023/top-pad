@@ -191,11 +191,11 @@ export async function getFairOpen(c: Context<AppEnv>) {
   if (wallet) {
     const linkage = await linkageOf(db, heat, rpcFundingSource(cfg.rpcUrl));
     const seatExists = async (seat: KitAddress) => (await fetchEncodedAccount(rpc, seat, limited())).exists;
-    const admitting = { launch: address as KitAddress, creator: terms.creator, step: terms.step };
+    const admitting = { launch: address as KitAddress, creator: terms.creator, step: terms.step, depositsOpenAt: terms.depositsOpenAt };
     const admissionOf = async (): Promise<FairOpenAdmission> => {
       let person;
       try {
-        person = await personOf(db, linkage, wallet as KitAddress);
+        person = await personOf(db, linkage, wallet as KitAddress, admitting);
       } catch (e) {
         if (e instanceof FundingUnreadable) return { admitted: false, reason: UNREADABLE };
         throw e;
@@ -385,8 +385,9 @@ export async function prepareDeposit(c: Context<AppEnv>) {
   const seatExists = async (seat: KitAddress) => (await fetchEncodedAccount(rpc, seat, limited())).exists;
   let admitted;
   try {
-    const person = await personOf(db, linkage, wallet);
-    admitted = await admit(db, key, linkage, { launch: address, creator: launch.creator, step: launch.step }, wallet, person, at, seatExists);
+    const admitting = { launch: address, creator: launch.creator, step: launch.step, depositsOpenAt: launch.depositsOpenAt };
+    const person = await personOf(db, linkage, wallet, admitting);
+    admitted = await admit(db, key, linkage, admitting, wallet, person, at, seatExists);
   } catch (e) {
     if (e instanceof AdmissionRefused) return refuse(c, 403, { error: e.message, code: "not_admitted" });
     if (e instanceof FundingUnreadable) return refuse(c, 503, { error: UNREADABLE, code: "unavailable" });
