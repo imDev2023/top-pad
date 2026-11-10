@@ -437,20 +437,27 @@ cmd_cloud_setup() {
     say "VPC service $TUNNEL is $service_id, set to $POSTGRES_IP:5432"
   fi
 
-  local hyperdrive_id
-  hyperdrive_id="$(curl -fsS -H "Authorization: Bearer $login_token" "$CF_API/accounts/$account/hyperdrive/configs" |
-    jq -r --arg n "$HYPERDRIVE" '.result[] | select(.name == $n) | .id' | head -1)"
-  if [[ -z "$hyperdrive_id" ]]; then
+  local hyperdrive_id="" attempt
+  hyperdrive_of() {
+    curl -fsS -H "Authorization: Bearer $login_token" "$CF_API/accounts/$account/hyperdrive/configs" |
+      jq -r --arg n "$HYPERDRIVE" '.result[] | select(.name == $n) | .id' | head -1
+  }
+  # Looked up before every try, so a create that landed though wrangler's fetch failed (2026-11-10) is never repeated.
+  for attempt in 1 2 3; do
+    hyperdrive_id="$(hyperdrive_of)"
+    [[ -n "$hyperdrive_id" ]] && break
     # Its query cache off, as the Neon one's (spec 10.4): our reads must see the last write.
-    wr hyperdrive create "$HYPERDRIVE" --service-id "$service_id" --database "$DB" --user "$ROLE" \
-      --password "$(cat "$SECRETS/app-password")" --scheme postgresql --caching-disabled >/dev/null
-    hyperdrive_id="$(curl -fsS -H "Authorization: Bearer $login_token" "$CF_API/accounts/$account/hyperdrive/configs" |
-      jq -r --arg n "$HYPERDRIVE" '.result[] | select(.name == $n) | .id' | head -1)"
-    [[ -n "$hyperdrive_id" ]] || die "could not make the Hyperdrive"
-    say "made Hyperdrive $HYPERDRIVE ($hyperdrive_id)"
-  else
-    say "Hyperdrive $HYPERDRIVE is $hyperdrive_id"
-  fi
+    if wr hyperdrive create "$HYPERDRIVE" --service-id "$service_id" --database "$DB" --user "$ROLE" \
+      --password "$(cat "$SECRETS/app-password")" --scheme postgresql --caching-disabled >/dev/null; then
+      say "made Hyperdrive $HYPERDRIVE"
+    else
+      say "the Hyperdrive's create failed (try $attempt of 3)"
+      sleep 10
+    fi
+  done
+  [[ -n "$hyperdrive_id" ]] || hyperdrive_id="$(hyperdrive_of)"
+  [[ -n "$hyperdrive_id" ]] || die "could not make the Hyperdrive"
+  say "Hyperdrive $HYPERDRIVE is $hyperdrive_id"
   say "done: the devnet Workers' wrangler.jsonc names Hyperdrive $hyperdrive_id"
 }
 
