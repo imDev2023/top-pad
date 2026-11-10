@@ -5,7 +5,7 @@
 # and starts it from there; it is not the test database, `docker compose up -d` at the repo root on port 5452.
 name: top-pad-devnet-db
 
-# Docker keeps every container's log forever unless told otherwise; 30 MB a service is weeks of either.
+# Docker keeps every container's log forever unless told otherwise; 30 MB a service holds months of either.
 x-logging: &logging
   driver: json-file
   options:
