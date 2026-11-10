@@ -5,6 +5,13 @@
 # and starts it from there; it is not the test database, `docker compose up -d` at the repo root on port 5452.
 name: top-pad-devnet-db
 
+# Docker keeps every container's log forever unless told otherwise; 30 MB a service is weeks of either.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
 services:
   postgres:
     # Pinned to Debian bookworm, the base of Neon's Postgres 17 too; the database's collation is Postgres's own builtin
@@ -12,6 +19,7 @@ services:
     image: pgvector/pgvector:0.8.7-pg17-bookworm
     container_name: top-pad-devnet-db
     restart: unless-stopped
+    logging: *logging
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD_FILE: /run/secrets/superuser_password
@@ -42,6 +50,7 @@ services:
     image: cloudflare/cloudflared:2026.10.7
     container_name: top-pad-devnet-db-tunnel
     restart: unless-stopped
+    logging: *logging
     # The tunnel is remotely managed: it carries only what the VPC service names, Postgres's address on this network.
     # HTTP/2, never QUIC: Docker Desktop drops QUIC's UDP here (2026-11-10: "failed to accept QUIC stream: timeout"),
     # and over HTTP/2 a tunnel carries TCP to an address but not private DNS. Its metrics answer `/ready` on this Mac for
