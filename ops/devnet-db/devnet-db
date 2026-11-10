@@ -379,10 +379,11 @@ cmd_cloud_setup() {
   # Only the JSON object: refreshing an expired login prints first.
   login_token="$(printf '%s\n' "$auth" | sed -n '/^{/,/^}/p' | jq -er .token)" ||
     die "no token in wrangler's answer (wrangler login?): $(printf '%s' "$auth" | redact | tail -5)"
-  # The tunnel API with the shared token if it may, else the wrangler login's.
+  # The tunnel API with the wrangler login first, which made the tunnel; the shared token second, which answers a
+  # tunnel list with an empty 200 rather than a refusal (2026-11-10), so it must never be asked first.
   cf() {
     local token
-    for token in "${CLOUDFLARE_API_TOKEN:-}" "$login_token"; do
+    for token in "$login_token" "${CLOUDFLARE_API_TOKEN:-}"; do
       [[ -n "$token" ]] || continue
       if curl -fsS -H "Authorization: Bearer $token" -H "Content-Type: application/json" "$CF_API/accounts/$account$1" "${@:2}" 2>/dev/null; then
         return 0
