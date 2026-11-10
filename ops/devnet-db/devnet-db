@@ -1,0 +1,462 @@
+#!/bin/bash
+# devnet-db: the devnet database on the owner's Mac (#102, spec 10.4).
+# Postgres 17 and the Cloudflare Tunnel the devnet Workers reach it through run in Docker (compose.yml); three launch
+# agents start them at login, keep the Mac awake and dump the database nightly. Run it from the repo:
+#
+#   ops/devnet-db/devnet-db install          copy this folder to ~/.local/share/top-pad/devnet-db (the launch agents run
+#                                            that copy, so a checkout never moves them), make the passwords if missing,
+#                                            start the stack and load the agents; again after any change to this folder
+#   ops/devnet-db/devnet-db uninstall        unload and remove the agents; the data, the backups and the secrets stay
+#   direnv exec . ops/devnet-db/devnet-db cloud-setup
+#                                            the owner, once: the tunnel and its token, the VPC service, the Hyperdrive
+#   ops/devnet-db/devnet-db up | stop        start the stack, opening Docker Desktop if need be | stop it until `up`
+#   ops/devnet-db/devnet-db status           containers, tunnel, logins, backups, agents, and drift from the repo
+#   ops/devnet-db/devnet-db logins on|off    let the Workers' role log in | refuse it and close its sessions
+#   ops/devnet-db/devnet-db backup           dump the database now (the nightly agent's job), keeping the newest 7
+#   ops/devnet-db/devnet-db restore-check [dump]
+#                                            restore a dump (the newest by default) into a scratch database, compare
+#                                            its row counts with the live database's, then drop it
+#   ops/devnet-db/devnet-db restore <dump> --replace
+#                                            replace the database with a dump, after dumping it first (logins off)
+#   ops/devnet-db/devnet-db import <ENV_VAR> fill the empty database from the one whose URL is in $ENV_VAR (logins
+#                                            off), then compare every table's rows: the move from Neon
+#   ops/devnet-db/devnet-db psql [args]      psql on the database as the Workers' role
+#   ops/devnet-db/devnet-db logs [service]   the stack's logs
+set -Eeuo pipefail
+umask 077
+
+INSTALLED="$HOME/.local/share/top-pad/devnet-db"
+BACKUPS="$HOME/.local/share/top-pad/devnet-db-backups"
+SECRETS="$HOME/.config/top-pad/devnet/db"
+LOGS="$HOME/Library/Logs/top-pad"
+AGENTS="$HOME/Library/LaunchAgents"
+LABEL=com.top-pad.devnet-db
+KEEP=7
+DB=toppad
+ROLE=toppad
+CONTAINER=top-pad-devnet-db
+# The tunnel's and the VPC service's name, and the Hyperdrive's, all on the owner's Cloudflare account.
+TUNNEL=top-pad-devnet-db
+HYPERDRIVE=top-pad-devnet-mac
+CF_API=https://api.cloudflare.com/client/v4
+# launchd starts the agents with a bare PATH.
+export PATH="/Applications/Docker.app/Contents/Resources/bin:/usr/local/bin:/opt/homebrew/bin:$PATH:/usr/bin:/bin:/usr/sbin:/sbin"
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+
+say() { printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
+die() {
+  say "error: $*" >&2
+  exit 1
+}
+
+compose() { docker compose --file "$INSTALLED/compose.yml" "$@"; }
+# As the superuser over the container's own socket, which the image trusts; warnings and errors only.
+psql_super() {
+  docker exec -i -e PGOPTIONS='-c client_min_messages=warning' "$CONTAINER" \
+    psql --no-psqlrc --quiet -v ON_ERROR_STOP=1 --username=postgres "$@"
+}
+size_of() { du -h "$1" | awk '{ print $1 }'; }
+
+ensure_docker() {
+  docker info >/dev/null 2>&1 && return
+  say "starting Docker Desktop"
+  open -ga Docker
+  for _ in $(seq 1 120); do
+    docker info >/dev/null 2>&1 && return
+    sleep 5
+  done
+  die "Docker did not start within 10 minutes"
+}
+
+ensure_running() {
+  [[ "$(docker inspect --format '{{.State.Health.Status}}' "$CONTAINER" 2>/dev/null)" == healthy ]] ||
+    die "the database is not up: devnet-db up"
+}
+
+wait_healthy() {
+  for _ in $(seq 1 60); do
+    [[ "$(docker inspect --format '{{.State.Health.Status}}' "$CONTAINER" 2>/dev/null)" == healthy ]] && return
+    sleep 2
+  done
+  die "Postgres is not healthy after 2 minutes: devnet-db logs postgres"
+}
+
+from_repo() {
+  [[ "$here" != "$INSTALLED" ]] || die "run this from the repo: ops/devnet-db/devnet-db $1"
+}
+
+# Every table's rows, as `schema.table<TAB>count` sorted for join(1).
+COUNTS_SQL="select format('%I.%I', table_schema, table_name),
+  (xpath('/row/n/text()', query_to_xml(format('select count(*) as n from %I.%I', table_schema, table_name), false, true, '')))[1]::text
+from information_schema.tables
+where table_type = 'BASE TABLE' and table_schema not in ('pg_catalog', 'information_schema')"
+counts_here() { psql_super --no-align --tuples-only --field-separator=$'\t' --dbname="$1" --command="$COUNTS_SQL" | LC_ALL=C sort; }
+# The URL reaches the container through the environment, never a command line.
+counts_url() {
+  SOURCE_URL="$1" docker exec -e SOURCE_URL "$CONTAINER" \
+    sh -c 'psql --no-psqlrc --no-align --tuples-only --field-separator="$(printf "\t")" --dbname="$SOURCE_URL" --command="$0"' \
+    "$COUNTS_SQL" | LC_ALL=C sort
+}
+
+# Prints both sides' counts per table; fails if any differ.
+compare_counts() {
+  local left=$1 left_file=$2 right=$3 right_file=$4 differ=0 table a b mark
+  printf '%-40s %12s %12s\n' table "$left" "$right"
+  while IFS=$'\t' read -r table a b; do
+    mark=""
+    if [[ "$a" != "$b" ]]; then
+      mark="  <- differs"
+      differ=$((differ + 1))
+    fi
+    printf '%-40s %12s %12s%s\n' "$table" "$a" "$b" "$mark"
+  done < <(join -t $'\t' -a 1 -a 2 -e missing -o 0,1.2,2.2 "$left_file" "$right_file")
+  if ((differ > 0)); then
+    say "$differ tables differ"
+    return 1
+  fi
+  say "every table's rows match ($(wc -l <"$left_file" | tr -d ' ') tables)"
+}
+
+logins_are_off() {
+  [[ "$(psql_super --no-align --tuples-only --dbname=postgres \
+    --command="select rolcanlogin from pg_roles where rolname = '$ROLE'")" == f ]]
+}
+
+# The nightly dumps, oldest first: their names are UTC times, so they sort by time.
+backups() {
+  local dump
+  for dump in "$BACKUPS"/toppad-*.dump; do
+    [[ -e "$dump" ]] && printf '%s\n' "$dump"
+  done
+  return 0
+}
+newest_backup() { backups | tail -1; }
+
+# Drops and remakes a database with Neon's locale, then restores a dump into it in one transaction. Entries for roles
+# this server does not have (Neon's own default privileges, for its `cloud_admin`) are left out.
+restore_into() {
+  local db=$1 dump=$2
+  docker exec -i -u postgres "$CONTAINER" sh -c 'cat > /tmp/restore.dump' <"$dump"
+  docker exec -u postgres "$CONTAINER" pg_restore --list /tmp/restore.dump |
+    awk -v role="$ROLE" '/ DEFAULT ACL / && $NF != role { print ";" $0; next } { print }' >"$work/restore.list"
+  if grep -q '^;.* DEFAULT ACL ' "$work/restore.list"; then
+    say "leaving out: $(grep '^;.* DEFAULT ACL ' "$work/restore.list" | sed 's/^;[0-9]*; [0-9]* [0-9]* //' | paste -sd ',' -)"
+  fi
+  docker exec -i -u postgres "$CONTAINER" sh -c 'cat > /tmp/restore.list' <"$work/restore.list"
+  psql_super --dbname=postgres \
+    --command="DROP DATABASE IF EXISTS \"$db\" WITH (FORCE)" \
+    --command="CREATE DATABASE \"$db\" OWNER $ROLE TEMPLATE template0 ENCODING 'UTF8' LOCALE_PROVIDER builtin BUILTIN_LOCALE 'C.UTF-8' LOCALE 'C.UTF-8'"
+  docker exec -u postgres "$CONTAINER" pg_restore --username=postgres --dbname="$db" --exit-on-error \
+    --single-transaction --use-list=/tmp/restore.list /tmp/restore.dump
+  docker exec -u postgres "$CONTAINER" vacuumdb --username=postgres --analyze-only --quiet --dbname="$db"
+  docker exec "$CONTAINER" rm -f /tmp/restore.dump /tmp/restore.list
+}
+
+agent_plist() { # label, the plist's other keys as XML, then the program and its arguments
+  local label=$1 keys=$2 arg
+  shift 2
+  {
+    printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' \
+      '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+      '<plist version="1.0">' '<dict>' \
+      "  <key>Label</key><string>$label</string>" '  <key>ProgramArguments</key>' '  <array>'
+    for arg in "$@"; do printf '    <string>%s</string>\n' "$arg"; done
+    printf '%s\n' '  </array>' "$keys" \
+      "  <key>StandardOutPath</key><string>$LOGS/devnet-db.log</string>" \
+      "  <key>StandardErrorPath</key><string>$LOGS/devnet-db.log</string>" '</dict>' '</plist>'
+  } >"$AGENTS/$label.plist"
+  chmod 644 "$AGENTS/$label.plist"
+}
+
+cmd_install() {
+  from_repo install
+  mkdir -p "$SECRETS" "$BACKUPS" "$LOGS" "$AGENTS" "$INSTALLED"
+  chmod 700 "$SECRETS"
+  local name
+  # Read once, when the volume is first made; changing them later changes nothing.
+  for name in superuser-password app-password; do
+    if [[ ! -s "$SECRETS/$name" ]]; then
+      openssl rand -hex 24 >"$SECRETS/$name"
+      say "made $SECRETS/$name"
+    fi
+  done
+  rsync -a --delete --exclude .DS_Store "$here/" "$INSTALLED/"
+  chmod -R go+rX "$INSTALLED"
+  say "installed $INSTALLED"
+  cmd_up
+  local uid
+  uid="$(id -u)"
+  agent_plist "$LABEL" '  <key>RunAtLoad</key><true/>' "$INSTALLED/devnet-db" up
+  agent_plist "$LABEL.backup" \
+    '  <key>StartCalendarInterval</key><dict><key>Hour</key><integer>3</integer><key>Minute</key><integer>30</integer></dict>' \
+    "$INSTALLED/devnet-db" backup
+  # System and idle sleep; the display may still sleep.
+  agent_plist "$LABEL.awake" '  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>' /usr/bin/caffeinate -i -m -s
+  for name in "$LABEL" "$LABEL.backup" "$LABEL.awake"; do
+    launchctl bootout "gui/$uid/$name" 2>/dev/null || true
+    launchctl bootstrap "gui/$uid" "$AGENTS/$name.plist"
+  done
+  say "loaded $LABEL, $LABEL.backup (03:30 daily) and $LABEL.awake; logs in $LOGS/devnet-db.log"
+}
+
+cmd_uninstall() {
+  local uid name
+  uid="$(id -u)"
+  for name in "$LABEL" "$LABEL.backup" "$LABEL.awake"; do
+    launchctl bootout "gui/$uid/$name" 2>/dev/null || true
+    rm -f "$AGENTS/$name.plist"
+  done
+  say "agents removed; the stack still runs (devnet-db stop), and the volume, $BACKUPS and $SECRETS stay"
+}
+
+cmd_up() {
+  [[ -f "$INSTALLED/compose.yml" ]] || die "not installed: ops/devnet-db/devnet-db install"
+  ensure_docker
+  if [[ -s "$SECRETS/tunnel-token" ]]; then
+    compose up --detach --remove-orphans
+  else
+    say "no tunnel token yet ($SECRETS/tunnel-token, from cloud-setup): starting Postgres alone"
+    compose up --detach --no-deps postgres
+  fi
+  wait_healthy
+  say "up"
+}
+
+cmd_stop() {
+  compose stop
+  say "stopped until devnet-db up or the next login; the devnet site cannot reach its database meanwhile"
+}
+
+cmd_status() {
+  if ! docker info >/dev/null 2>&1; then
+    say "Docker is not running: the database and the tunnel are down"
+  else
+    compose ps --all --format 'table {{.Name}}\t{{.Status}}'
+    if docker inspect "$CONTAINER" >/dev/null 2>&1 && [[ "$(docker inspect --format '{{.State.Running}}' "$CONTAINER")" == true ]]; then
+      if logins_are_off; then echo "logins: OFF, the Workers' role cannot log in (devnet-db logins on)"; else echo "logins: on"; fi
+      echo "size: $(psql_super --no-align --tuples-only --dbname=postgres --command="select pg_size_pretty(pg_database_size('$DB'))")"
+    fi
+  fi
+  local ready
+  if ready="$(curl -fsS --max-time 3 http://127.0.0.1:20241/ready 2>/dev/null)"; then
+    echo "tunnel: $ready"
+  else
+    echo "tunnel: not ready"
+  fi
+  local newest
+  newest="$(newest_backup)"
+  if [[ -n "$newest" ]]; then
+    echo "backups: $(backups | wc -l | tr -d ' ') in $BACKUPS, newest $(basename "$newest") ($(size_of "$newest"))"
+  else
+    echo "backups: none yet in $BACKUPS"
+  fi
+  local uid name
+  uid="$(id -u)"
+  for name in "$LABEL" "$LABEL.backup" "$LABEL.awake"; do
+    if launchctl print "gui/$uid/$name" >/dev/null 2>&1; then echo "agent $name: loaded"; else echo "agent $name: NOT loaded"; fi
+  done
+  if [[ "$here" != "$INSTALLED" && -d "$INSTALLED" ]]; then
+    if diff -rq --exclude .DS_Store "$here" "$INSTALLED" >/dev/null; then
+      echo "installed copy: same as the repo"
+    else
+      echo "installed copy: DIFFERS from the repo (ops/devnet-db/devnet-db install)"
+    fi
+  fi
+}
+
+cmd_logins() {
+  ensure_running
+  case "${1:-}" in
+  on)
+    psql_super --dbname=postgres --command="ALTER ROLE $ROLE LOGIN"
+    say "logins on: the Workers reach the database again"
+    ;;
+  off)
+    psql_super --dbname=postgres --command="ALTER ROLE $ROLE NOLOGIN"
+    psql_super --no-align --tuples-only --dbname=postgres \
+      --command="select count(pg_terminate_backend(pid)) from pg_stat_activity where usename = '$ROLE'" >/dev/null
+    say "logins off: $ROLE's sessions are closed and no Worker can log in until devnet-db logins on"
+    ;;
+  *) die "usage: devnet-db logins on|off" ;;
+  esac
+}
+
+cmd_backup() {
+  ensure_running
+  mkdir -p "$BACKUPS"
+  local name partial
+  name="toppad-$(date -u +%Y%m%dT%H%M%SZ).dump"
+  partial="$BACKUPS/.$name.partial"
+  docker exec "$CONTAINER" pg_dump --username=postgres --format=custom --dbname="$DB" >"$partial"
+  # A dump pg_restore cannot read is no backup.
+  docker exec -i "$CONTAINER" pg_restore --list <"$partial" >/dev/null
+  mv "$partial" "$BACKUPS/$name"
+  local count
+  count="$(backups | wc -l | tr -d ' ')"
+  if ((count > KEEP)); then
+    backups | head -n $((count - KEEP)) | while IFS= read -r old; do rm -f -- "$old"; done
+  fi
+  say "backup $BACKUPS/$name ($(size_of "$BACKUPS/$name")); keeping the newest $KEEP"
+}
+
+cmd_restore_check() {
+  ensure_running
+  local dump=${1:-$(newest_backup)} check="${DB}_restore_check"
+  [[ -n "$dump" && -f "$dump" ]] || die "no dump to check (devnet-db backup makes one)"
+  say "restoring $dump into $check"
+  restore_into "$check" "$dump"
+  counts_here "$check" >"$work/restored"
+  counts_here "$DB" >"$work/live"
+  compare_counts restored "$work/restored" live "$work/live" ||
+    say "rows written since the dump account for any difference above"
+  psql_super --dbname=postgres --command="DROP DATABASE \"$check\""
+}
+
+cmd_restore() {
+  [[ "${2:-}" == --replace && -f "${1:-}" ]] || die "usage: devnet-db restore <dump> --replace"
+  ensure_running
+  logins_are_off || die "logins are on: devnet-db logins off first, so no Worker writes during the restore"
+  cmd_backup
+  say "replacing $DB with $1"
+  restore_into "$DB" "$1"
+  say "restored; devnet-db logins on lets the Workers back in"
+}
+
+cmd_import() {
+  local var=${1:-}
+  [[ -n "$var" && -n "${!var:-}" ]] ||
+    die "usage: devnet-db import <ENV_VAR>, the source database's URL read from the environment (never printed)"
+  ensure_running
+  logins_are_off || die "logins are on: devnet-db logins off first, so no Worker writes into a half-made database"
+  local tables
+  tables="$(psql_super --no-align --tuples-only --dbname="$DB" \
+    --command="select count(*) from pg_tables where schemaname not in ('pg_catalog', 'information_schema')")"
+  [[ "$tables" == 0 ]] || die "$DB already has $tables tables: import fills only an empty database (restore --replace replaces one)"
+  mkdir -p "$BACKUPS"
+  local dump
+  dump="$BACKUPS/import-$(date -u +%Y%m%dT%H%M%SZ).dump"
+  say "dumping \$$var into $dump"
+  SOURCE_URL="${!var}" docker exec -e SOURCE_URL "$CONTAINER" sh -c 'pg_dump --format=custom --dbname="$SOURCE_URL"' >"$dump.partial"
+  mv "$dump.partial" "$dump"
+  say "restoring into $DB"
+  restore_into "$DB" "$dump"
+  counts_url "${!var}" >"$work/source"
+  counts_here "$DB" >"$work/here"
+  compare_counts source "$work/source" here "$work/here"
+  say "imported; devnet-db logins on lets the Workers in"
+}
+
+cmd_psql() {
+  local tty=()
+  [[ -t 0 ]] && tty=(-t)
+  docker exec -i ${tty[@]+"${tty[@]}"} "$CONTAINER" psql --username="$ROLE" --dbname="$DB" "$@"
+}
+
+cmd_logs() { compose logs --tail=200 "$@"; }
+
+# The owner's step (auto mode refuses to create an ingress tunnel): Cloudflare's side, each part made only if missing.
+cmd_cloud_setup() {
+  from_repo cloud-setup
+  [[ -f "$INSTALLED/compose.yml" && -s "$SECRETS/app-password" ]] || die "run ops/devnet-db/devnet-db install first"
+  [[ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]] || die "CLOUDFLARE_ACCOUNT_ID is unset: run it through direnv exec ."
+  local repo account=$CLOUDFLARE_ACCOUNT_ID login_token
+  repo="$(cd "$here/../.." && pwd)"
+  # Hyperdrive and Workers VPC take the owner's wrangler login, not the shared token (CLAUDE.md, Traps).
+  wr() { (cd "$repo/apps/api" && env -u CLOUDFLARE_API_TOKEN pnpm exec wrangler "$@"); }
+  login_token="$(wr auth token --json 2>/dev/null | jq -er .token)" || die "wrangler is not logged in: wrangler login"
+  # The tunnel API with the shared token if it may, else the wrangler login's.
+  cf() {
+    local token
+    for token in "${CLOUDFLARE_API_TOKEN:-}" "$login_token"; do
+      [[ -n "$token" ]] || continue
+      if curl -fsS -H "Authorization: Bearer $token" -H "Content-Type: application/json" "$CF_API/accounts/$account$1" "${@:2}" 2>/dev/null; then
+        return 0
+      fi
+    done
+    return 1
+  }
+
+  local tunnel_id by_hand="in the dashboard (Workers VPC, Tunnels, Create) name a tunnel $TUNNEL, then run cloud-setup again"
+  tunnel_id="$(cf "/cfd_tunnel?name=$TUNNEL&is_deleted=false" | jq -r '.result[0].id // empty')" ||
+    die "neither the shared token nor the wrangler login may read tunnels: $by_hand"
+  if [[ -z "$tunnel_id" ]]; then
+    tunnel_id="$(cf /cfd_tunnel -X POST -d "{\"name\":\"$TUNNEL\",\"config_src\":\"cloudflare\"}" | jq -er .result.id)" ||
+      die "neither the shared token nor the wrangler login may create a tunnel: $by_hand"
+    say "made tunnel $TUNNEL ($tunnel_id)"
+  else
+    say "tunnel $TUNNEL is $tunnel_id"
+  fi
+  if cf "/cfd_tunnel/$tunnel_id/token" | jq -er .result >"$SECRETS/tunnel-token.new"; then
+    mv "$SECRETS/tunnel-token.new" "$SECRETS/tunnel-token"
+    say "wrote $SECRETS/tunnel-token"
+  else
+    rm -f "$SECRETS/tunnel-token.new"
+    [[ -s "$SECRETS/tunnel-token" ]] ||
+      die "could not read the tunnel's token: put the token from the dashboard's install command for $TUNNEL in $SECRETS/tunnel-token, then run cloud-setup again"
+    say "keeping the token already in $SECRETS/tunnel-token"
+  fi
+  cmd_up
+  for _ in $(seq 1 30); do
+    curl -fsS --max-time 3 http://127.0.0.1:20241/ready >/dev/null 2>&1 && break
+    sleep 2
+  done
+  curl -fsS --max-time 3 http://127.0.0.1:20241/ready >/dev/null 2>&1 || die "the tunnel did not connect: devnet-db logs tunnel"
+  say "tunnel connected"
+
+  local service_id
+  service_id="$(curl -fsS -H "Authorization: Bearer $login_token" "$CF_API/accounts/$account/connectivity/directory/services?per_page=100" |
+    jq -r --arg n "$TUNNEL" '.result[] | select(.name == $n) | .service_id' | head -1)"
+  if [[ -z "$service_id" ]]; then
+    # `postgres` is the compose service, resolved by cloudflared through Docker's DNS. The certificate is self-signed
+    # (initdb/10-heat.sh), since Workers VPC cannot trust a private CA yet.
+    service_id="$(wr vpc service create "$TUNNEL" --type tcp --tcp-port 5432 --app-protocol postgresql \
+      --tunnel-id "$tunnel_id" --hostname postgres --cert-verification-mode disabled |
+      sed -n 's/.*Created VPC service: \([0-9a-f-]*\).*/\1/p')"
+    [[ -n "$service_id" ]] || die "could not make the VPC service"
+    say "made VPC service $TUNNEL ($service_id)"
+  else
+    say "VPC service $TUNNEL is $service_id"
+  fi
+
+  local hyperdrive_id
+  hyperdrive_id="$(curl -fsS -H "Authorization: Bearer $login_token" "$CF_API/accounts/$account/hyperdrive/configs" |
+    jq -r --arg n "$HYPERDRIVE" '.result[] | select(.name == $n) | .id' | head -1)"
+  if [[ -z "$hyperdrive_id" ]]; then
+    # Its query cache off, as the Neon one's (spec 10.4): our reads must see the last write.
+    wr hyperdrive create "$HYPERDRIVE" --service-id "$service_id" --database "$DB" --user "$ROLE" \
+      --password "$(cat "$SECRETS/app-password")" --scheme postgresql --caching-disabled >/dev/null
+    hyperdrive_id="$(curl -fsS -H "Authorization: Bearer $login_token" "$CF_API/accounts/$account/hyperdrive/configs" |
+      jq -r --arg n "$HYPERDRIVE" '.result[] | select(.name == $n) | .id' | head -1)"
+    [[ -n "$hyperdrive_id" ]] || die "could not make the Hyperdrive"
+    say "made Hyperdrive $HYPERDRIVE ($hyperdrive_id)"
+  else
+    say "Hyperdrive $HYPERDRIVE is $hyperdrive_id"
+  fi
+  say "done: the devnet Workers' wrangler.jsonc names Hyperdrive $hyperdrive_id"
+}
+
+command=${1:-}
+[[ $# -gt 0 ]] && shift
+case "$command" in
+install) cmd_install ;;
+uninstall) cmd_uninstall ;;
+cloud-setup) cmd_cloud_setup ;;
+up) cmd_up ;;
+stop) cmd_stop ;;
+status) cmd_status ;;
+logins) cmd_logins "$@" ;;
+backup) cmd_backup ;;
+restore-check) cmd_restore_check "$@" ;;
+restore) cmd_restore "$@" ;;
+import) cmd_import "$@" ;;
+psql) cmd_psql "$@" ;;
+logs) cmd_logs "$@" ;;
+*)
+  sed -n '2,/^set -E/p' "${BASH_SOURCE[0]}" | sed '$d' | sed 's/^# \{0,1\}//'
+  exit 2
+  ;;
+esac

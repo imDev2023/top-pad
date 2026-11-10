@@ -944,6 +944,9 @@ Sources: [Stack](https://github.com/imDev2023/top-pad/issues/17), [Backend desig
 - KV holds only public caches (up to 60 s stale).
 - Durable Object storage holds only live-room state; D1 is not used.
 - One Neon project for devnet **(owner, 2026-10-27)**: Supabase's free plan allows two active projects and both are Stoker's; Convex was weighed and set aside, because the board's trending query, the funding graph, the candle rebuilds and the insert-only audit role are SQL.
+  Moved to the owner's Mac **(owner, 2026-11-08: no paid Neon plan)**, since the cron kept Neon awake and its free compute would have run out around November 17 (section 16).
+  As built ([#102](https://github.com/imDev2023/top-pad/issues/102)): Postgres 17 with pgvector in Docker on the Mac, with Neon's locale (Postgres's builtin `C.UTF-8`), reached by the Workers through Hyperdrive, a Workers VPC service and a Cloudflare Tunnel whose `cloudflared` runs beside it; launch agents start the stack at login, keep the Mac awake and dump the database nightly, keeping seven (`ops/devnet-db`); every row Neon held was imported and counted, and the Neon project is kept, untouched, until the owner deletes it.
+  The devnet site is down whenever the Mac is off, offline or Docker is stopped, and after a reboot until the owner signs in; mainnet's database is a hosted one again, chosen by the mainnet effort.
 - Workers reach Postgres through Hyperdrive with its query cache off ([#39](https://github.com/imDev2023/top-pad/issues/39), 2026-10-29): Hyperdrive never invalidates a cached read when a write lands, and admission, the keeper and the job runner must read what was just written; the only caches are the explicit ones in KV.
 - CI runs lint, typecheck, unit tests and `anchor build`.
 
@@ -1144,6 +1147,7 @@ Unproven, and proved by section 11's tests:
 - Whether Neon's free plan (100 compute-hours a project a month) lasts a month of the always-on indexer and the 15 s trending query; if not, the devnet database moves to a paid plan.
   Measured on 2026-11-02 ([#52](https://github.com/imDev2023/top-pad/issues/52)): the database had been active 37 of November's first 38 hours at 0.25 CU (9.25 compute-hours), since the 5-minute cron's job rows never let it suspend for long, which comes to about 180 compute-hours a month: at this rate the free plan runs out around November 17, and the protected set's minute job keeps it awake too.
   The indexer opens the database only for something new on chain, so an idle Heat lets it sleep ([#42](https://github.com/imDev2023/top-pad/issues/42)); on 2026-10-29 the project had used 0.33 of its 100 compute-hours, and the 5-minute cron's job rows may still keep it awake.
+  Settled ([#102](https://github.com/imDev2023/top-pad/issues/102)): it does not last (54 of the 100 compute-hours were gone by November 10), and the owner chose no paid plan, so the devnet database moved to the owner's Mac (10.4).
 - The LaserStream Container source, untested until the paid Helius plan is bought; the devnet build tests the WebSocket source instead.
 
 Risks that devnet cannot settle:
@@ -1157,6 +1161,8 @@ Risks that devnet cannot settle:
 - **Linkage**: no Solana linkage method has published accuracy; the pipeline follows first funding only, so funding through exchanges or busy wallets evades it, and a friend who funded another honest depositor shares their seat until an operator hears the case (6.3, [#48](https://github.com/imDev2023/top-pad/issues/48)).
 - **Issuer powers on xStocks** ([ADR 0007](adr/0007-stock-priced-coins-on-meteora-quotes.md)): the issuer can pause a stock, freezing its coins' trading and any Fair Open refunds or pushes until it unpauses, and can move tokens out of any account, Heat's vaults and DBC's pools included; Heat labels both and cannot prevent them.
 - **Prior art**: "fair launch on Meteora" has already been used as a scam wrapper (Cryptstarter and Harmonized), so every promise must be checkable on chain, not just claimed.
+- **The devnet database on one Mac** ([#102](https://github.com/imDev2023/top-pad/issues/102)): the devnet site is only up while the owner's Mac is on, online and running Docker, and stays down after a reboot until the owner signs in (FileVault); the nightly dumps sit on the same disk as the database; and Workers VPC, which carries Hyperdrive to it, is in beta, free until priced, with Hyperdrive's tunnel-and-Access route as the fallback.
+  None of it reaches mainnet, whose database is hosted.
 
 ## 17. Sources
 
