@@ -1,6 +1,6 @@
 # The devnet database on the owner's Mac (#102, spec 10.4): Postgres 17 with pgvector, and the Cloudflare Tunnel the
 # devnet Workers reach it through (Hyperdrive `top-pad-devnet-mac`, then the Workers VPC service `top-pad-devnet-db`,
-# then this tunnel, `top-pad-devnet-db`, to the `postgres` service here).
+# then this tunnel, `top-pad-devnet-db`, to the `postgres` service here at 172.30.102.10:5432).
 # Run it only through `ops/devnet-db/devnet-db`, whose `install` copies this folder to ~/.local/share/top-pad/devnet-db
 # and starts it from there; it is not the test database, `docker compose up -d` at the repo root on port 5452.
 name: top-pad-devnet-db
@@ -24,6 +24,11 @@ services:
       - data:/var/lib/postgresql/data
       # Runs once, when the volume is empty.
       - ./initdb:/docker-entrypoint-initdb.d:ro
+    networks:
+      # A fixed address, which is what the VPC service names: the tunnel runs over HTTP/2 (below), and through it Cloudflare
+      # can reach an address but cannot resolve a name.
+      devnet-db:
+        ipv4_address: 172.30.102.10
     shm_size: 256mb
     healthcheck:
       # Over TCP, which the image's first-start server does not listen on, so first-start setup never looks healthy.
@@ -37,14 +42,24 @@ services:
     image: cloudflare/cloudflared:2026.10.7
     container_name: top-pad-devnet-db-tunnel
     restart: unless-stopped
-    # The tunnel is remotely managed: it carries only what the VPC service names, `postgres:5432` on this network,
-    # resolved by Docker's DNS. Its metrics answer `/ready` on this Mac for `devnet-db status`.
-    command: ["tunnel", "--no-autoupdate", "--metrics", "0.0.0.0:20241", "run"]
+    # The tunnel is remotely managed: it carries only what the VPC service names, Postgres's address on this network.
+    # HTTP/2, never QUIC: Docker Desktop drops QUIC's UDP here (2026-11-10: "failed to accept QUIC stream: timeout"),
+    # and over HTTP/2 a tunnel carries TCP to an address but not private DNS. Its metrics answer `/ready` on this Mac for
+    # `devnet-db status`.
+    command: ["tunnel", "--no-autoupdate", "--protocol", "http2", "--metrics", "0.0.0.0:20241", "run"]
     environment:
       TUNNEL_TOKEN_FILE: /run/secrets/tunnel_token
     secrets: [tunnel_token]
+    networks: [devnet-db]
     ports:
       - "127.0.0.1:20241:20241"
+
+networks:
+  devnet-db:
+    name: top-pad-devnet-db
+    ipam:
+      config:
+        - subnet: 172.30.102.0/24
 
 volumes:
   data:

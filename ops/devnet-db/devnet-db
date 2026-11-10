@@ -8,7 +8,7 @@
 #                                            start the stack and load the agents; again after any change to this folder
 #   ops/devnet-db/devnet-db uninstall        unload and remove the agents; the data, the backups and the secrets stay
 #   direnv exec . ops/devnet-db/devnet-db cloud-setup
-#                                            the owner, once: the tunnel and its token, the VPC service, the Hyperdrive
+#                                            the owner: the tunnel and its token, the VPC service, the Hyperdrive
 #   ops/devnet-db/devnet-db up | stop        start the stack, opening Docker Desktop if need be | stop it until `up`
 #   ops/devnet-db/devnet-db status           containers, tunnel, logins, backups, agents, and drift from the repo
 #   ops/devnet-db/devnet-db logins on|off    let the Workers' role log in | refuse it and close its sessions
@@ -38,6 +38,8 @@ CONTAINER=top-pad-devnet-db
 # The tunnel's and the VPC service's name, and the Hyperdrive's, all on the owner's Cloudflare account.
 TUNNEL=top-pad-devnet-db
 HYPERDRIVE=top-pad-devnet-mac
+# Postgres on the compose network (compose.yml), where the VPC service sends the tunnel's connections.
+POSTGRES_IP=172.30.102.10
 CF_API=https://api.cloudflare.com/client/v4
 # launchd starts the agents with a bare PATH, so Docker's own folder comes after it; never before the caller's PATH,
 # whose node and pnpm win (this Mac's /usr/local/bin holds a Node 18 that today's pnpm cannot run on).
@@ -360,10 +362,13 @@ cmd_psql() {
 
 cmd_logs() { compose logs --tail=200 "$@"; }
 
-# The owner's step (auto mode refuses to create an ingress tunnel): Cloudflare's side, each part made only if missing.
+# The owner's step (auto mode refuses to create an ingress tunnel): Cloudflare's side, the tunnel and the Hyperdrive
+# made if missing, the VPC service made or set to what compose.yml needs; run it again at any time.
 cmd_cloud_setup() {
   from_repo cloud-setup
   [[ -f "$INSTALLED/compose.yml" && -s "$SECRETS/app-password" ]] || die "run ops/devnet-db/devnet-db install first"
+  diff -rq --exclude .DS_Store "$here" "$INSTALLED" >/dev/null ||
+    die "the installed copy differs from the repo: run ops/devnet-db/devnet-db install first"
   [[ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]] || die "CLOUDFLARE_ACCOUNT_ID is unset: run it through direnv exec ."
   local repo account=$CLOUDFLARE_ACCOUNT_ID login_token
   repo="$(cd "$here/../.." && pwd)"
@@ -416,16 +421,19 @@ cmd_cloud_setup() {
   local service_id
   service_id="$(curl -fsS -H "Authorization: Bearer $login_token" "$CF_API/accounts/$account/connectivity/directory/services?per_page=100" |
     jq -r --arg n "$TUNNEL" '.result[] | select(.name == $n) | .service_id' | head -1)"
+  # Postgres's fixed address in compose.yml, not a name: over the tunnel's HTTP/2 Cloudflare cannot resolve one. The
+  # certificate is self-signed (initdb/10-heat.sh), since Workers VPC cannot trust a private CA yet.
+  local service=(--type tcp --tcp-port 5432 --app-protocol postgresql --tunnel-id "$tunnel_id" --ipv4 "$POSTGRES_IP"
+    --cert-verification-mode disabled)
   if [[ -z "$service_id" ]]; then
-    # `postgres` is the compose service, resolved by cloudflared through Docker's DNS. The certificate is self-signed
-    # (initdb/10-heat.sh), since Workers VPC cannot trust a private CA yet.
-    service_id="$(wr vpc service create "$TUNNEL" --type tcp --tcp-port 5432 --app-protocol postgresql \
-      --tunnel-id "$tunnel_id" --hostname postgres --cert-verification-mode disabled |
+    service_id="$(wr vpc service create "$TUNNEL" "${service[@]}" |
       sed -n 's/.*Created VPC service: \([0-9a-f-]*\).*/\1/p')"
     [[ -n "$service_id" ]] || die "could not make the VPC service"
     say "made VPC service $TUNNEL ($service_id)"
   else
-    say "VPC service $TUNNEL is $service_id"
+    # Brought to these settings whatever it held.
+    wr vpc service update "$service_id" --name "$TUNNEL" "${service[@]}" >/dev/null
+    say "VPC service $TUNNEL is $service_id, set to $POSTGRES_IP:5432"
   fi
 
   local hyperdrive_id
