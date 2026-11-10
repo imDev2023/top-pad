@@ -75,9 +75,10 @@
         "X_AUTHORIZE_URL": "https://top-pad-x-stand-in-devnet.imdev2023.workers.dev/i/oauth2/authorize",
         "X_API_URL": "https://top-pad-x-stand-in-devnet.imdev2023.workers.dev"
       },
-      // `top-pad-devnet`, in front of the Neon devnet database (spec 10.4), with its query cache off: Hyperdrive never
+      // `top-pad-devnet-mac`, in front of the devnet database on the owner's Mac through the Workers VPC service and the
+      // tunnel `top-pad-devnet-db` (ops/devnet-db, spec 10.4, #102), with its query cache off: Hyperdrive never
       // invalidates a cached read on a write, and our reads must see the last write.
-      "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "4226d6abb4c54484a3e6ab28a6b2a421" }],
+      "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "94fd2dace938401bab209dc57bd20bb8" }],
       "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "top-pad-blobs-devnet" }],
       "durable_objects": {
         "bindings": [
