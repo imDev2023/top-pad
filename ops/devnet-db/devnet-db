@@ -367,7 +367,9 @@ cmd_cloud_setup() {
   repo="$(cd "$here/../.." && pwd)"
   # Hyperdrive and Workers VPC take the owner's wrangler login, not the shared token (CLAUDE.md, Traps).
   wr() { (cd "$repo/apps/api" && env -u CLOUDFLARE_API_TOKEN pnpm exec wrangler "$@"); }
-  login_token="$(wr auth token --json 2>/dev/null | jq -er .token)" || die "wrangler is not logged in: wrangler login"
+  # Only the JSON object: refreshing an expired login prints first.
+  login_token="$(wr auth token --json 2>/dev/null | sed -n '/^{/,/^}/p' | jq -er .token)" ||
+    die "wrangler is not logged in: wrangler login"
   # The tunnel API with the shared token if it may, else the wrangler login's.
   cf() {
     local token
