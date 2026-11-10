@@ -354,7 +354,8 @@ export class Indexer extends DurableObject<Bindings> {
 
   /**
    * Reconciliation, asking the chain first: an account with nothing past its cursor needs no database, so a quiet Heat
-   * lets the devnet database sleep (Neon scales to zero after 5 idle minutes; spec 16) rather than waking it every minute.
+   * leaves the database alone rather than querying it every minute, which lets a hosted one that scales to zero sleep (as
+   * Neon did for devnet until #102; spec 16).
    */
   private async reconcile() {
     const source = rpcSource(config(this.env).rpcUrl);

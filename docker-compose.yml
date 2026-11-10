@@ -1,4 +1,4 @@
-# Local development database: `docker compose up -d`. Devnet runs on Neon through Hyperdrive (spec 10.4).
+# Local development and test database: `docker compose up -d`. The devnet database is another, in ops/devnet-db (spec 10.4).
 services:
   postgres:
     image: pgvector/pgvector:pg17

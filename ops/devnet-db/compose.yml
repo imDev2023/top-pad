@@ -1,0 +1,60 @@
+# The devnet database on the owner's Mac (#102, spec 10.4): Postgres 17 with pgvector, and the Cloudflare Tunnel the
+# devnet Workers reach it through (Hyperdrive `top-pad-devnet-mac`, then the Workers VPC service `top-pad-devnet-db`,
+# then this tunnel, `top-pad-devnet-db`, to the `postgres` service here).
+# Run it only through `ops/devnet-db/devnet-db`, whose `install` copies this folder to ~/.local/share/top-pad/devnet-db
+# and starts it from there; it is not the test database, `docker compose up -d` at the repo root on port 5452.
+name: top-pad-devnet-db
+
+services:
+  postgres:
+    # Pinned to Debian bookworm, the base of Neon's Postgres 17 too; the database's collation is Postgres's own builtin
+    # C.UTF-8 (initdb/10-heat.sh), so no libc upgrade can reorder an index.
+    image: pgvector/pgvector:0.8.7-pg17-bookworm
+    container_name: top-pad-devnet-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/superuser_password
+      TOPPAD_PASSWORD_FILE: /run/secrets/app_password
+    secrets: [superuser_password, app_password]
+    ports:
+      # For this Mac's own tools only (migrations, scripts, `devnet-db psql`); the Workers come in through the tunnel.
+      - "127.0.0.1:5453:5432"
+    volumes:
+      - data:/var/lib/postgresql/data
+      # Runs once, when the volume is empty.
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    shm_size: 256mb
+    healthcheck:
+      # Over TCP, which the image's first-start server does not listen on, so first-start setup never looks healthy.
+      test: ["CMD", "pg_isready", "--host=127.0.0.1", "--username=postgres", "--dbname=toppad"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+
+  tunnel:
+    image: cloudflare/cloudflared:2026.10.7
+    container_name: top-pad-devnet-db-tunnel
+    restart: unless-stopped
+    # The tunnel is remotely managed: it carries only what the VPC service names, `postgres:5432` on this network,
+    # resolved by Docker's DNS. Its metrics answer `/ready` on this Mac for `devnet-db status`.
+    command: ["tunnel", "--no-autoupdate", "--metrics", "0.0.0.0:20241", "run"]
+    environment:
+      TUNNEL_TOKEN_FILE: /run/secrets/tunnel_token
+    secrets: [tunnel_token]
+    ports:
+      - "127.0.0.1:20241:20241"
+
+volumes:
+  data:
+    # Named outright so no compose project name can orphan it; `devnet-db` never removes it.
+    name: top-pad-devnet-db
+
+secrets:
+  superuser_password:
+    file: ${HOME}/.config/top-pad/devnet/db/superuser-password
+  app_password:
+    file: ${HOME}/.config/top-pad/devnet/db/app-password
+  tunnel_token:
+    file: ${HOME}/.config/top-pad/devnet/db/tunnel-token
