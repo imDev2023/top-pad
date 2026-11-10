@@ -39,8 +39,10 @@ CONTAINER=top-pad-devnet-db
 TUNNEL=top-pad-devnet-db
 HYPERDRIVE=top-pad-devnet-mac
 CF_API=https://api.cloudflare.com/client/v4
-# launchd starts the agents with a bare PATH.
-export PATH="/Applications/Docker.app/Contents/Resources/bin:/usr/local/bin:/opt/homebrew/bin:$PATH:/usr/bin:/bin:/usr/sbin:/sbin"
+# launchd starts the agents with a bare PATH, so Docker's own folder comes after it; never before the caller's PATH,
+# whose node and pnpm win (this Mac's /usr/local/bin holds a Node 18 that today's pnpm cannot run on).
+export PATH="$PATH:/Applications/Docker.app/Contents/Resources/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+redact() { sed -E 's/[A-Za-z0-9_.-]{24,}/<redacted>/g'; }
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 work="$(mktemp -d)"
@@ -367,9 +369,11 @@ cmd_cloud_setup() {
   repo="$(cd "$here/../.." && pwd)"
   # Hyperdrive and Workers VPC take the owner's wrangler login, not the shared token (CLAUDE.md, Traps).
   wr() { (cd "$repo/apps/api" && env -u CLOUDFLARE_API_TOKEN pnpm exec wrangler "$@"); }
+  local auth
+  auth="$(wr auth token --json 2>&1)" || die "wrangler auth token failed: $(printf '%s' "$auth" | redact | tail -5)"
   # Only the JSON object: refreshing an expired login prints first.
-  login_token="$(wr auth token --json 2>/dev/null | sed -n '/^{/,/^}/p' | jq -er .token)" ||
-    die "wrangler is not logged in: wrangler login"
+  login_token="$(printf '%s\n' "$auth" | sed -n '/^{/,/^}/p' | jq -er .token)" ||
+    die "no token in wrangler's answer (wrangler login?): $(printf '%s' "$auth" | redact | tail -5)"
   # The tunnel API with the shared token if it may, else the wrangler login's.
   cf() {
     local token
