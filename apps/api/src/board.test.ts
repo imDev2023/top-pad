@@ -27,7 +27,7 @@ import { createTestDatabase } from "@top-pad/db/testing";
 import { featuredOf, snapshotCoinRecords } from "./board";
 import { config } from "./env";
 import { app } from "./index";
-import { Fakes, MemoryBlobs, testBindings, testContext, testKeypair } from "./test/fakes";
+import { dbcPool, Fakes, MemoryBlobs, testBindings, testContext, testKeypair } from "./test/fakes";
 
 // The keeper key the cluster records is swapped for a test key: the real one lives only in Secrets Store (spec 10.3).
 vi.mock("@top-pad/chain", async (importOriginal) => {
@@ -383,8 +383,12 @@ describe("search", () => {
 });
 
 describe("the CoinRecord list", () => {
-  /** The coin's `CoinRecord` on the fake chain, registered at `at`. */
-  function onChain(c: { mint: string; pool: string }, at: Date, fairOpenLaunch?: string) {
+  /** The coin's `CoinRecord` on the fake chain, registered at `at`, and its pool on `config`. */
+  async function onChain(c: { mint: string; pool: string }, at: Date, fairOpenLaunch?: string, config: string = fairOpenLaunch ? fairOpenConfig : instant) {
+    fakes.accounts.set(
+      c.pool,
+      dbcPool({ config: config as Address, creator: await addr(), mint: c.mint as Address, baseVault: await addr(), quoteVault: await addr(), partnerQuoteFee: 0n, activationPoint: 0n }),
+    );
     const data = getCoinRecordEncoder().encode({
       mint: c.mint as Address,
       pool: c.pool as Address,
@@ -407,9 +411,11 @@ describe("the CoinRecord list", () => {
     await db.insert(fairOpens).values({ ...(await fairOpenRow(launch)), mint: b.mint, pool: b.pool, status: "opened" });
     const c = await coin("CCC", { at: new Date(today.getTime() + MIN) });
     const around = await coin("DDD", { at: new Date(today.getTime() - 5 * HOUR), heat: false });
-    onChain(a, a.createdAt);
-    onChain(b, b.createdAt, launch);
-    onChain(c, c.createdAt);
+    await onChain(a, a.createdAt);
+    await onChain(b, b.createdAt, launch);
+    await onChain(c, c.createdAt);
+    // A coin registered on a config Heat does not list, as devnet's rehearsal configs are: never in a snapshot.
+    await onChain({ mint: await addr(), pool: await addr() }, new Date(today.getTime() - 3 * HOUR), undefined, await addr());
 
     const first = CoinRecordList.parse(await (await request("/coin-records?limit=2")).json());
     expect(first.coins.map((r) => r.mint)).toEqual([a.mint, b.mint]);
@@ -422,14 +428,15 @@ describe("the CoinRecord list", () => {
 
     const env = testBindings(url, { KEEPER_KEY: JSON.stringify(Array.from(keeper().secret)), BLOBS: new MemoryBlobs() });
     const made = await snapshotCoinRecords(db, config(env), { get: async () => env.KEEPER_KEY as string }, env.BLOBS);
-    expect(made).toEqual({ day: new Date(today.getTime() - DAY).toISOString().slice(0, 10), coins: 2, chainCoins: 2, mismatches: { missing: [], extra: [], different: [] } });
+    expect(made).toEqual({ day: new Date(today.getTime() - DAY).toISOString().slice(0, 10), coins: 2, chainCoins: 2, mismatches: { missing: [], extra: [], different: [], outside: 1 } });
     expect(await snapshotCoinRecords(db, config(env), { get: async () => env.KEEPER_KEY as string }, env.BLOBS)).toMatchObject({ skipped: "made already" });
 
     const res = await app.request("/coin-records/snapshots/latest", {}, env, ctx);
     const snapshot = CoinRecordSnapshot.parse(await res.json());
     const body = await verifySnapshot(snapshot, keeper().signer.address);
     expect(body.coins.map((r) => r.mint)).toEqual([a.mint, b.mint]);
-    expect(body).toMatchObject({ cluster: "devnet", through: today.toISOString(), program: FEE_PROGRAM_ADDRESS });
+    expect(body).toMatchObject({ cluster: "devnet", through: today.toISOString(), program: FEE_PROGRAM_ADDRESS, configs: [instant, fairOpenConfig].sort() });
+    expect(body.coins[0]).toMatchObject({ config: instant });
     const byDay = CoinRecordSnapshot.parse(await (await app.request(`/coin-records/snapshots/${snapshot.day}`, {}, env, ctx)).json());
     expect(byDay.signature).toBe(snapshot.signature);
   });
@@ -438,11 +445,11 @@ describe("the CoinRecord list", () => {
     const today = new Date(Math.floor(Date.now() / DAY) * DAY);
     const a = await coin("EEE", { at: new Date(today.getTime() - 2 * HOUR) });
     const missed = { mint: await addr(), pool: await addr() };
-    onChain(a, a.createdAt);
-    onChain(missed, new Date(today.getTime() - HOUR));
+    await onChain(a, a.createdAt);
+    await onChain(missed, new Date(today.getTime() - HOUR));
     const env = testBindings(url, { KEEPER_KEY: JSON.stringify(Array.from(keeper().secret)), BLOBS: new MemoryBlobs() });
     const made = await snapshotCoinRecords(db, config(env), { get: async () => env.KEEPER_KEY as string }, env.BLOBS);
-    expect(made).toMatchObject({ coins: 1, chainCoins: 2, mismatches: { missing: [missed.mint], extra: [], different: [] } });
+    expect(made).toMatchObject({ coins: 1, chainCoins: 2, mismatches: { missing: [missed.mint], extra: [], different: [], outside: 0 } });
   });
 });
 

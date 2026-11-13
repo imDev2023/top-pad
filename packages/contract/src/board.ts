@@ -110,6 +110,8 @@ export type SearchResults = z.infer<typeof SearchResults>;
 export const CoinRecordEntry = z.object({
   mint: Address,
   pool: Address,
+  /** The DBC config its pool is on: one of Heat's (spec 3.2), the pool account's to say. */
+  config: Address,
   launchMode: z.enum(["instant", "fair_open"]),
   /** The Fair Open launch account it opened from; null for an Instant launch. */
   fairOpenLaunch: Address.nullable(),
@@ -140,6 +142,11 @@ export const CoinRecordSnapshotBody = z.object({
   through: z.iso.datetime(),
   program: Address,
   launchKey: Address,
+  /**
+   * The DBC configs Heat lists coins on: each quote's pairs, the retired ones too. A `CoinRecord` whose pool is on another
+   * config (devnet's rehearsal configs, whose coins are never Heat's) is not listed.
+   */
+  configs: z.array(Address),
   coins: z.array(CoinRecordEntry),
 });
 export type CoinRecordSnapshotBody = z.infer<typeof CoinRecordSnapshotBody>;

@@ -7,7 +7,7 @@ import { and, asc, desc, eq, gt, inArray, isNull, lte, or, sql, type SQL } from 
 import type { Context } from "hono";
 import { COIN_SUPPLY, compareCoinRecords, FEE_PROGRAM_ADDRESS, marketCapOfSqrtPrice, readCoinRecords, signSnapshot, type HeatCluster } from "@top-pad/chain";
 import type { Board, BoardCoin, CalendarEntry, CoinRecordEntry, CoinRecordList, CoinRecordSnapshot, CoinRecordSnapshotBody, CreatorSummary, QuoteInfo, SearchResults, TrendingFigures } from "@top-pad/contract";
-import { coinRadar, coinRecordSnapshots, coins, creators, fairOpens, fairOpenSeatEvents, graduations, launches, pools, type Db } from "@top-pad/db";
+import { coinRadar, coinRecordSnapshots, coins, creators, fairOpens, fairOpenSeatEvents, graduations, launches, pools, quoteConfigPairs, type Db } from "@top-pad/db";
 import { trendingOf } from "@top-pad/indexer";
 import { summaryOf } from "./creatorRecord";
 import type { BlobStore, Bindings, Config, SecretBinding } from "./env";
@@ -334,6 +334,7 @@ async function recordEntries(db: Db, where: SQL | undefined, limit?: number): Pr
   return rows.map(({ coin, fairOpen }) => ({
     mint: coin.mint,
     pool: coin.pool,
+    config: coin.config,
     launchMode: coin.launchMode,
     fairOpenLaunch: fairOpen,
     slot: coin.createdSlot,
@@ -414,7 +415,10 @@ export async function snapshotCoinRecords(db: Db, cfg: Config, keeperKey: Secret
   if (done) return { day, skipped: "made already" };
 
   const entries = await recordEntries(db, sql`${coins.createdAt} < ${through.toISOString()}::timestamptz`);
-  const snapshot: CoinRecordSnapshotBody = { version: 1, cluster: cfg.cluster, day, through: through.toISOString(), program: FEE_PROGRAM_ADDRESS, launchKey, coins: entries };
+  const pairs = await db.select({ fairOpen: quoteConfigPairs.fairOpenConfig, instant: quoteConfigPairs.instantConfig }).from(quoteConfigPairs);
+  const heatConfigs = cfg.heat?.configs ? [cfg.heat.configs.fairOpen, cfg.heat.configs.instant] : [];
+  const configs = [...new Set([...heatConfigs, ...pairs.flatMap((p) => [p.fairOpen, p.instant])])].sort();
+  const snapshot: CoinRecordSnapshotBody = { version: 1, cluster: cfg.cluster, day, through: through.toISOString(), program: FEE_PROGRAM_ADDRESS, launchKey, configs, coins: entries };
   const body = JSON.stringify(snapshot);
   const keeper = await loadKeeper(keeperKey, launchKey);
   const signed = await signSnapshot(body, keeper.signer);
@@ -423,8 +427,8 @@ export async function snapshotCoinRecords(db: Db, cfg: Config, keeperKey: Secret
   let mismatches: ReturnType<typeof compareCoinRecords> | null = null;
   try {
     const chain = await readCoinRecords(createSolanaRpc(cfg.rpcUrl), AbortSignal.timeout(30_000));
-    chainCoins = chain.filter((r) => new Date(r.registeredAt) < through).length;
-    mismatches = compareCoinRecords(entries, chain, through);
+    chainCoins = chain.filter((r) => new Date(r.registeredAt) < through && r.config !== null && configs.includes(r.config)).length;
+    mismatches = compareCoinRecords(entries, chain, through, configs);
   } catch (e) {
     console.error("reading the CoinRecord accounts failed", e);
   }
