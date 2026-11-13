@@ -1,19 +1,28 @@
-import { quoteText, type QuoteUnit } from "@/lib/format";
+import { quoteText, shortAddress, type QuoteUnit } from "@/lib/format";
 import styles from "./Launch.module.css";
 import { when } from "./Schedule";
+
+/** Who made a coin, as its card names them: their linked X handle, else their Creator wallet (ADR 0008). */
+export type CardCreator = { handle: string | null; wallet: string | null };
+
+function CreatorChip({ creator }: { creator: CardCreator }) {
+  if (creator.handle) return <span className="chip chip-info">@{creator.handle}</span>;
+  if (creator.wallet) return <span className="chip chip-info mono">{shortAddress(creator.wallet)}</span>;
+  return null;
+}
 
 /** A coin as traders will see it on its row: its picture, ticker and name, and the facts that travel with it. */
 export function CoinCard({
   ticker,
   name,
   imageUrl,
-  handle,
+  creator,
   mode,
 }: {
   ticker: string;
   name: string;
   imageUrl: string | null;
-  handle: string | null;
+  creator: CardCreator;
   mode: "instant" | "fairOpen";
 }) {
   const initials = (ticker || name || "?").slice(0, 2).toUpperCase();
@@ -31,7 +40,7 @@ export function CoinCard({
         <span className={styles.coinName}>{name || "Your coin's name"}</span>
         <span className="row">
           <span className="chip chip-neutral">{mode === "instant" ? "Instant launch" : "Fair Open"}</span>
-          {handle && <span className="chip chip-info">@{handle}</span>}
+          <CreatorChip creator={creator} />
         </span>
       </div>
     </div>
@@ -43,7 +52,7 @@ export function CoinCard({
  * time, the creator and the terms show.
  */
 export function SealedCard({
-  handle,
+  creator,
   teaser,
   opensAt,
   minRaise,
@@ -51,7 +60,7 @@ export function SealedCard({
   quote,
   scheduled = false,
 }: {
-  handle: string | null;
+  creator: CardCreator;
   teaser: string;
   /** Once scheduled, a launch with no teaser shows none rather than the placeholder that invites one. */
   scheduled?: boolean;
@@ -76,7 +85,7 @@ export function SealedCard({
           <span className="chip chip-neutral">10-minute window</span>
           {potCap && <span className="chip chip-neutral">pot up to {quoteText(potCap, quote, 2)}</span>}
           {minRaise > 0n && <span className="chip chip-neutral">min {quoteText(minRaise, quote, 2)}</span>}
-          {handle && <span className="chip chip-info">@{handle}</span>}
+          <CreatorChip creator={creator} />
         </span>
       </div>
     </div>

@@ -68,7 +68,7 @@ export function VerifyOnce({ view, account, admission, onChanged }: { view: Fair
         </p>
       )}
       {admission.tier === "unverified" ? (
-        me === undefined ? null : me === null ? (
+        me === undefined ? null : !me?.x ? (
           <div className={styles.verifyAction}>
             <a className="btn btn-sm" href={linkXUrl(returnTo)}>
               Link X

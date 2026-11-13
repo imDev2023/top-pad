@@ -6,8 +6,10 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { FieldVerdict, ImageVerdict, Me, VampAppeal, VampShieldVerdict } from "@top-pad/contract";
-import { checkVampShield, getAppeals, getImageVerdict, getMe, linkXUrl, submitAppeal } from "@/lib/api";
+import { checkVampShield, getAppeals, getImageVerdict, getMe, submitAppeal } from "@/lib/api";
+import { shortAddress } from "@/lib/format";
 import { coinLabel, Matched } from "../launch/VampVerdict";
+import { WalletSignIn } from "../WalletSignIn";
 import styles from "./Appeal.module.css";
 
 const STATUS = { open: { tone: "info", text: "Open" }, upheld: { tone: "go", text: "Upheld" }, denied: { tone: "stop", text: "Denied" } } as const;
@@ -22,15 +24,16 @@ export function AppealForm({ ticker, name, imageSha256 }: { ticker: string; name
   const [sending, setSending] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [sent, setSent] = useState<VampAppeal | null>(null);
-  const returnTo = `/appeal?${new URLSearchParams({ ticker, name, ...(imageSha256 ? { image: imageSha256 } : {}) })}`;
+  // What the signed-in creator's own record holds: their appeals, and their own verdict on the image.
+  const signedIn = (m: Me | null) => {
+    setMe(m);
+    if (m) getAppeals().then((a) => setAppeals(a.appeals), () => setAppeals([]));
+    if (m && imageSha256) getImageVerdict(imageSha256).then(setImage, () => undefined);
+  };
 
   useEffect(() => {
     getMe()
-      .then((m) => {
-        setMe(m);
-        if (m) getAppeals().then((a) => setAppeals(a.appeals), () => setAppeals([]));
-        if (m && imageSha256) getImageVerdict(imageSha256).then(setImage, () => undefined);
-      })
+      .then(signedIn)
       .catch(() => setMe(null));
     if (ticker || name) checkVampShield(ticker, name).then(setVerdict, () => undefined);
   }, [ticker, name, imageSha256]);
@@ -99,13 +102,11 @@ export function AppealForm({ ticker, name, imageSha256 }: { ticker: string; name
           Your appeal
         </h2>
         {me === undefined ? (
-          <p className="note">Checking whether this browser has linked X…</p>
+          <p className="note">Checking whether this browser is signed in…</p>
         ) : !me ? (
           <div className="stack">
-            <p className="muted">An appeal comes from the creator who was refused: link the X account you launch with.</p>
-            <a className="btn btn-go" href={linkXUrl(returnTo)}>
-              Link X
-            </a>
+            <p className="muted">An appeal comes from the creator who was refused: sign in with the wallet you launch from.</p>
+            <WalletSignIn me={me} connectNote="Connect your Creator wallet, the one that was refused." onSignedIn={signedIn} />
           </div>
         ) : sent ? (
           <div className="verdict verdict-info" role="status" data-testid="appeal-sent">
@@ -146,7 +147,10 @@ export function AppealForm({ ticker, name, imageSha256 }: { ticker: string; name
                 placeholder="For example: we are the original's team, and its X account links to this one."
                 onChange={(e) => setMessage(e.target.value)}
               />
-              <span className="note">Signed in as @{me.x.handle}. The operators may ask you to prove control of the original.</span>
+              <span className="note">
+                Signed in as {me.x ? `@${me.x.handle}` : me.creatorWallet ? <span className="mono">{shortAddress(me.creatorWallet)}</span> : "your X account"}. The operators may
+                ask you to prove control of the original.
+              </span>
             </div>
             {problem && (
               <div className="verdict verdict-stop" role="alert">

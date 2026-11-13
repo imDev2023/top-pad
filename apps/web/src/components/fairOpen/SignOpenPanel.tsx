@@ -1,13 +1,16 @@
 "use client";
 
 // The creator's own panel when their wallet could not sign the ladder at scheduling (ADR 0005's fallback): once the
-// window has closed, it asks the Creator wallet to sign the one open the pot covers, and Heat's keeper sends it.
+// window has closed, it asks the Creator wallet to sign the one open the pot covers, and Heat's keeper sends it. The rung
+// shows the sealed coin, so the API hands it only to the creator signed in with that Creator wallet (ADR 0008), which
+// the panel asks for first when the browser is not.
 import { useSignTransaction } from "@solana/react";
 import type { UiWalletAccount } from "@wallet-standard/react";
-import { useState } from "react";
-import type { FairOpen } from "@top-pad/contract";
-import { ApiProblem, linkXUrl, prepareOpenSignature, submitOpenSignature } from "@/lib/api";
+import { useEffect, useState } from "react";
+import type { FairOpen, Me } from "@top-pad/contract";
+import { ApiProblem, getMe, prepareOpenSignature, submitOpenSignature } from "@/lib/api";
 import type { SolanaChain } from "../WalletProvider";
+import { signedInAs, WalletSignIn } from "../WalletSignIn";
 import { clock } from "./FairOpenPage";
 import styles from "./FairOpen.module.css";
 
@@ -18,14 +21,18 @@ export function SignOpenPanel({ view, account, chain, at, onSigned }: { view: Fa
   const signTransaction = useSignTransaction(account, chain);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
-  // The rung shows the sealed coin, so the API hands it only to the X account that scheduled the launch.
-  const [needsX, setNeedsX] = useState(false);
+  const [me, setMe] = useState<Me | null | undefined>(undefined);
+  useEffect(() => {
+    getMe()
+      .then(setMe)
+      .catch(() => setMe(null));
+  }, []);
+  const signedIn = signedInAs(me, account.address);
   const due = view.phase === "due";
 
   async function sign() {
     setBusy(true);
     setProblem(null);
-    setNeedsX(false);
     try {
       const rung = await prepareOpenSignature(view.launch, account.address);
       const { signedTransaction } = await signTransaction({ transaction: toBytes(rung.transaction) });
@@ -34,7 +41,8 @@ export function SignOpenPanel({ view, account, chain, at, onSigned }: { view: Fa
       onSigned();
     } catch (e) {
       const error = e as { code?: number; message?: string };
-      setNeedsX(e instanceof ApiProblem && e.status === 403);
+      // Signed out meanwhile, or signed in as someone else: the panel asks for the sign-in again.
+      if (e instanceof ApiProblem && e.status === 403) setMe(await getMe().catch(() => null));
       setProblem(
         e instanceof ApiProblem
           ? e.message
@@ -57,13 +65,22 @@ export function SignOpenPanel({ view, account, chain, at, onSigned }: { view: Fa
           <b>Signed</b>
           <span className="note">Heat&apos;s keeper is sending it: the coin opens in seconds.</span>
         </div>
+      ) : me !== undefined && !signedIn ? (
+        <>
+          <p className="note">
+            {due
+              ? `The window has closed. Sign in with your Creator wallet to sign your open: it must run by ${clock(view.lateAt, at)}, or the launch fails and every deposit comes back.`
+              : `You chose to sign your open at the open. Sign in with your Creator wallet now, then keep this page open: at ${clock(view.opensAt, at)} it asks your wallet for one signature.`}
+          </p>
+          <WalletSignIn me={me} connectNote="Connect your Creator wallet." onSignedIn={setMe} />
+        </>
       ) : due ? (
         <>
           <p className="note">
             The window has closed, so what the pot buys is known. Sign your open now: it must run by {clock(view.lateAt, at)}, or the launch fails and every
             deposit comes back.
           </p>
-          <button type="button" className="btn btn-go" onClick={sign} disabled={busy}>
+          <button type="button" className="btn btn-go" onClick={sign} disabled={busy || me === undefined}>
             {busy ? "Signing…" : "Sign your open"}
           </button>
         </>
@@ -76,15 +93,7 @@ export function SignOpenPanel({ view, account, chain, at, onSigned }: { view: Fa
       {problem && (
         <div className="verdict verdict-stop" role="alert">
           <b>The open is not signed</b>
-          <span className="note">
-            {problem}
-            {needsX && (
-              <>
-                {" "}
-                <a href={linkXUrl(`/fair-open/${view.launch}`)}>Link X</a>
-              </>
-            )}
-          </span>
+          <span className="note">{problem}</span>
         </div>
       )}
     </section>

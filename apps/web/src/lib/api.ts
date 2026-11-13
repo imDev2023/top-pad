@@ -27,6 +27,7 @@ import {
   VampShieldVerdict,
   VerifiedWallet,
   VerifyMessage,
+  WalletSignInMessage,
   type VampAppealForm,
   type CandleSeconds,
   type ClaimRequest,
@@ -103,8 +104,14 @@ export async function getPlatformOrNull(): Promise<Platform | null> {
   }
 }
 
-/** The Creator this browser linked, or null when it has not linked X. */
+/** The Creator this browser is signed in as, by its wallet or by X, or null when it is signed in neither way. */
 export const getMe = (): Promise<Me | null> => call(Me.nullable(), "/me");
+
+/** Signing in with a wallet (ADR 0008): the Sign In With Solana message the wallet signs, taken once within ten minutes. */
+export const walletSignInMessage = (wallet: string) => call(WalletSignInMessage, "/auth/wallet/message", postJson({ wallet }));
+
+/** The signed message, base64 signature: the browser is signed in as the wallet's Creator record from now on. */
+export const walletSignIn = (wallet: string, message: string, signature: string) => call(Me, "/auth/wallet", postJson({ wallet, message, signature }));
 
 /** "Verify once" (spec 6.3): the message the wallet signs for the X account this browser linked. */
 export const verifyMessage = (wallet: string) => call(VerifyMessage, "/verify/message", postJson({ wallet }));

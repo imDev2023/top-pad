@@ -1,9 +1,9 @@
 "use client";
 
-// The launch flow (spec 9, screen 4): link X, choose the launch mode and the quote the coin is priced in (ADR 0007), with
-// the quote's Quote Risk Labels, enter the coin with Vamp Shield's live verdicts,
-// then for a Fair Open, the default, its schedule and one approval that signs its open in advance (spec 2.1 steps 2 to
-// 8), or for an Instant launch its one signature; done.
+// The launch flow (spec 9, screen 4): connect a wallet and sign in with it, X offered once as optional (ADR 0008); choose
+// the launch mode and the quote the coin is priced in (ADR 0007), with the quote's Quote Risk Labels; enter the coin with
+// Vamp Shield's live verdicts; then for a Fair Open, the default, its schedule and one approval that signs its open in
+// advance (spec 2.1 steps 2 to 8), or for an Instant launch its one signature; done.
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -15,6 +15,7 @@ import type { FittedImage } from "@/lib/image";
 import { QuoteLabels } from "../quote/QuoteLabels";
 import { WalletButton } from "../WalletButton";
 import { useWallet } from "../WalletProvider";
+import { signedInAs, WalletSignIn } from "../WalletSignIn";
 import { CoinCard, SealedCard } from "./CoinCard";
 import { ImagePicker } from "./ImagePicker";
 import { EMPTY_SCHEDULE, readSchedule, Schedule, span, when, type ScheduleDraft } from "./Schedule";
@@ -23,18 +24,19 @@ import { SignLaunch } from "./SignLaunch";
 import { VampVerdict, type ImageCheckState } from "./VampVerdict";
 import styles from "./Launch.module.css";
 
-type LinkOutcome = "linked" | "denied" | "failed" | null;
+type LinkOutcome = "linked" | "denied" | "failed" | "taken" | null;
 type Mode = "fairOpen" | "instant";
 
 const STEPS = {
-  instant: ["Link X", "Launch mode", "Coin", "Sign", "Done"],
-  fairOpen: ["Link X", "Launch mode", "Coin", "Schedule", "Sign", "Done"],
+  instant: ["Connect wallet", "Launch mode", "Coin", "Sign", "Done"],
+  fairOpen: ["Connect wallet", "Launch mode", "Coin", "Schedule", "Sign", "Done"],
 } as const;
 type StepName = (typeof STEPS)[Mode][number];
 const LINK_NOTES: Record<Exclude<LinkOutcome, null>, { tone: "go" | "caution" | "stop"; text: string }> = {
   linked: { tone: "go", text: "Your X account is linked." },
-  denied: { tone: "caution", text: "You declined on X. Every launch needs a linked X account." },
-  failed: { tone: "stop", text: "Linking X did not go through. Try again." },
+  denied: { tone: "caution", text: "You declined on X. Linking X is optional: you can launch without it." },
+  failed: { tone: "stop", text: "Linking X did not go through. Try again, or launch without it." },
+  taken: { tone: "caution", text: "That X account is linked to another Creator record, or yours has another one. Nothing changed." },
 };
 
 const utf8Bytes = (text: string) => new TextEncoder().encode(text).length;
@@ -74,6 +76,8 @@ export function LaunchFlow({ linkOutcome: arrived }: { linkOutcome: LinkOutcome 
   const heading = useRef<HTMLHeadingElement>(null);
   // Set when the creator moves between steps, so the new step's heading takes focus then, and only then.
   const moved = useRef(false);
+  // A browser already signed in as the connected wallet starts at the launch mode, once: Back still reaches the first step.
+  const skipped = useRef(false);
 
   useEffect(() => {
     Promise.all([getPlatform(), getMe(), getQuotes().catch(() => null)])
@@ -82,7 +86,6 @@ export function LaunchFlow({ linkOutcome: arrived }: { linkOutcome: LinkOutcome 
         setMe(m);
         setQuotes(q?.quotes ?? []);
         setQuoteMint((chosen) => chosen ?? q?.quotes.find((quote) => quote.offered)?.mint ?? q?.quotes[0]?.mint ?? null);
-        if (m) setStep(1);
       })
       .catch((e: Error) => {
         setMe(null);
@@ -102,6 +105,14 @@ export function LaunchFlow({ linkOutcome: arrived }: { linkOutcome: LinkOutcome 
     moved.current = true;
     setStep(next);
   };
+
+  const signedIn = signedInAs(me, account?.address);
+  // The wallet reconnects a moment after the page loads, so this waits for both it and the session.
+  useEffect(() => {
+    if (!signedIn || skipped.current) return;
+    skipped.current = true;
+    setStep((s) => (s === 0 ? 1 : s));
+  }, [signedIn]);
 
   const imageUrl = useMemo(() => (image ? URL.createObjectURL(image.blob) : null), [image]);
   useEffect(() => () => void (imageUrl && URL.revokeObjectURL(imageUrl)), [imageUrl]);
@@ -180,7 +191,7 @@ export function LaunchFlow({ linkOutcome: arrived }: { linkOutcome: LinkOutcome 
   const creatorWallet = me?.creatorWallet ?? null;
   const wrongWallet = account && creatorWallet && account.address !== creatorWallet;
 
-  async function unlink() {
+  async function signOut() {
     await logout().catch(() => undefined);
     setMe(null);
     goTo(0);
@@ -210,8 +221,8 @@ export function LaunchFlow({ linkOutcome: arrived }: { linkOutcome: LinkOutcome 
   const scheduled = terms && pot ? readSchedule(schedule, terms, pot, now) : null;
   const modeOpen = platform ? (mode === "instant" ? platform.launchModes.instant : platform.launchModes.fairOpen) : false;
   const canContinue =
-    at === "Link X"
-      ? !!me
+    at === "Connect wallet"
+      ? signedIn
       : at === "Launch mode"
         ? modeOpen && quote?.offered === true
         : at === "Coin"
@@ -274,31 +285,33 @@ export function LaunchFlow({ linkOutcome: arrived }: { linkOutcome: LinkOutcome 
         )}
 
         <section className={`panel ${styles.body}`} aria-labelledby="step-heading">
-          {at === "Link X" && (
+          {at === "Connect wallet" && (
             <>
               <h2 id="step-heading" ref={heading} tabIndex={-1}>
-                Link your X account
+                Connect your wallet
               </h2>
               <p className="muted">
-                Every launch needs one. Your Creator record belongs to it, and your handle goes into the coin&apos;s details,
-                so traders see who made it wherever the coin shows.
+                Anyone can launch with a wallet. It becomes your Creator wallet: the only one that signs your launches, and the coin&apos;s creator on every
+                terminal. Signing in costs nothing.
               </p>
               {me === undefined ? (
-                <p className="note">Checking whether this browser has linked X…</p>
-              ) : me ? (
-                <Linked me={me} onUnlink={unlink} />
-              ) : platform && !platform.xLinking ? (
-                <div className="verdict verdict-caution">
-                  <b>Linking X is not open on this deployment yet</b>
-                  <span className="note">Its X app has not been set up. Launching needs it.</span>
-                </div>
+                <p className="note">Checking whether this browser is signed in…</p>
+              ) : signedIn && me ? (
+                <SignedIn me={me} xLinking={platform?.xLinking ?? false} onSignOut={signOut} />
               ) : (
-                <div className="row">
-                  <a className="btn btn-go" href={linkXUrl("/launch")}>
-                    Link X
-                  </a>
-                  <span className="note">You will authorize Heat on X, which only reads your name and handle.</span>
-                </div>
+                <WalletSignIn
+                  me={me}
+                  connectNote={
+                    me?.creatorWallet
+                      ? `This browser is signed in as ${shortAddress(me.creatorWallet)}. Connect that wallet to go on.`
+                      : "Connect the wallet you launch from. Heat never moves anything without your approval."
+                  }
+                  onSignedIn={(m) => {
+                    setMe(m);
+                    skipped.current = true;
+                    goTo(1);
+                  }}
+                />
               )}
             </>
           )}
@@ -631,10 +644,10 @@ export function LaunchFlow({ linkOutcome: arrived }: { linkOutcome: LinkOutcome 
         <h3 id="preview-heading">What traders will see</h3>
         <span className="eyebrow">{mode === "instant" ? "Coin card at launch" : "Launch calendar entry"}</span>
         {mode === "instant" ? (
-          <CoinCard ticker={ticker} name={nameRule.ok ? nameRule.name : name.trim()} imageUrl={imageUrl} handle={me?.x.handle ?? null} mode={mode} />
+          <CoinCard ticker={ticker} name={nameRule.ok ? nameRule.name : name.trim()} imageUrl={imageUrl} creator={creatorOf(me)} mode={mode} />
         ) : (
           <SealedCard
-            handle={me?.x.handle ?? null}
+            creator={creatorOf(me)}
             teaser={teaserPreview}
             opensAt={opensAtPreview}
             minRaise={scheduled?.ok ? scheduled.minRaise : 0n}
@@ -695,8 +708,8 @@ function WalletGate({
         <div className="verdict verdict-stop" role="alert">
           <b>This is not your Creator wallet</b>
           <span className="note">
-            Your launches are signed by <span className="mono">{shortAddress(creatorWallet!)}</span>. Connect that wallet to launch; a new Creator wallet
-            comes by a handover the old one signs.
+            You are signed in as <span className="mono">{shortAddress(creatorWallet!)}</span>, which signs your launches. Connect that wallet, or go back to
+            the first step and sign in with this one.
           </span>
         </div>
       ) : (
@@ -712,26 +725,41 @@ function WalletGate({
   );
 }
 
-function Linked({ me, onUnlink }: { me: Me; onUnlink: () => void }) {
+/** Who the coin's card names: the linked X handle, else the Creator wallet. */
+const creatorOf = (me: Me | null | undefined) => ({ handle: me?.x?.handle ?? null, wallet: me?.creatorWallet ?? null });
+
+/** The browser signed in as the connected wallet, and X offered once, never required (ADR 0008). */
+function SignedIn({ me, xLinking, onSignOut }: { me: Me; xLinking: boolean; onSignOut: () => void }) {
   return (
-    <div className="verdict verdict-go">
-      <b>Linked as @{me.x.handle}</b>
-      <span className="note">
-        {me.creatorWallet ? (
-          <>
-            Creator wallet: <span className="mono">{shortAddress(me.creatorWallet)}</span>. It is the only wallet that can sign your
-            launches.
-          </>
-        ) : (
-          "Your first launch makes the wallet that signs it your Creator wallet, the only one that can sign your launches."
-        )}{" "}
-        {me.launches > 0 ? `${me.launches} launch${me.launches === 1 ? "" : "es"} so far.` : "Record: first launch."}
-      </span>
-      <span>
-        <button type="button" className={styles.linkButton} onClick={onUnlink}>
-          Not you? Sign out
-        </button>
-      </span>
+    <div className="stack">
+      <div className="verdict verdict-go" data-testid="signed-in">
+        <b>
+          Signed in as <span className="mono">{shortAddress(me.creatorWallet!)}</span>
+        </b>
+        <span className="note">
+          Your Creator wallet: the only wallet that can sign your launches.{" "}
+          {me.launches > 0 ? `${me.launches} launch${me.launches === 1 ? "" : "es"} so far.` : "Record: first launch."}
+        </span>
+        <span>
+          <button type="button" className={styles.linkButton} onClick={onSignOut}>
+            Not you? Sign out
+          </button>
+        </span>
+      </div>
+      {me.x ? (
+        <p className="note" data-testid="x-linked">
+          X: <b>@{me.x.handle}</b>, shown on your record and in your coins&apos; details.
+        </p>
+      ) : (
+        xLinking && (
+          <div className={styles.optionalX}>
+            <a className="btn btn-sm" href={linkXUrl("/launch")}>
+              Link X
+            </a>
+            <span className="note">Optional. Your handle then shows on your record and in your coins&apos; details, and your wallets can deposit as Scored.</span>
+          </div>
+        )
+      )}
     </div>
   );
 }

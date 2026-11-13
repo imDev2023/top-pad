@@ -522,6 +522,16 @@
   text-decoration: underline;
 }
 
+/* X, offered once on the first step and never required (ADR 0008). */
+.optionalX {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
 @media (max-width: 900px) {
   .layout {
     grid-template-columns: minmax(0, 1fr);
