@@ -50,7 +50,7 @@ export function CreatorPage() {
       </header>
       {account ? (
         <>
-          <HandoverOffersPanel key={`offers-${account.address}-${version}`} account={account} onTaken={changed} />
+          <HandoverOffersPanel key={`offers-${account.address}`} account={account} onTaken={changed} />
           {me && <RotationPanel key={`rotation-${account.address}`} account={account} me={me} onRequested={changed} />}
           {record && <CreatorSummaryCard summary={record} label="Your Creator record" />}
           <EarningsPanel key={account.address} account={account} chain={chain} onChanged={async () => changed()} />

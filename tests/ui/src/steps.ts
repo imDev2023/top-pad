@@ -67,6 +67,15 @@ export async function expectVampClear(page: Page) {
   await expect(page.getByTestId("vamp-headline")).toHaveText("Clear", { timeout: 90_000 });
 }
 
+/**
+ * Waits for Vamp Shield to let the coin launch: clear, or labelled "looks like" a protected coin, which launches with the
+ * label. For a spec that needs a coin rather than Vamp Shield's verdict: drawn pictures are often near a protected test
+ * coin's (#107).
+ */
+export async function expectVampLaunchable(page: Page) {
+  await expect(page.getByTestId("vamp-headline")).toHaveText(/^(Clear|Launches labelled)/, { timeout: 90_000 });
+}
+
 /** An address as the pages and the API shorten it. */
 export const short = (a: string) => `${a.slice(0, 4)}\u{2026}${a.slice(-4)}`;
 export const newTicker = () => `E2E${Math.random().toString(36).slice(2, 7).toUpperCase().replace(/[^A-Z0-9]/g, "X")}`;
@@ -126,14 +135,14 @@ export async function linkXOnLaunch(page: Page): Promise<string> {
 /**
  * Signs in with `creator`'s wallet as a creator new to Heat, launches an Instant launch signed by it, and leaves the page
  * on the Done step; with `linked`, the browser is signed in already and the creator launches again; with `linkX`, the
- * creator links X before launching, and the handle comes back. The coin's name gets the ticker's ending, and its
+ * creator links X before launching, and the handle comes back; with `looksLike`, a "looks like" label does not stop it. The coin's name gets the ticker's ending, and its
  * picture is drawn for the run (uniqueCoinImage).
  */
 export async function launchCoin(
   page: Page,
   creator: KeyPairSigner,
   coin: { name: string; ticker: string },
-  { linked = false, linkX = false }: { linked?: boolean; linkX?: boolean } = {},
+  { linked = false, linkX = false, looksLike = false }: { linked?: boolean; linkX?: boolean; looksLike?: boolean } = {},
 ): Promise<{ mint: string; wallet: TestWallet; handle: string | null }> {
   const wallet = await installTestWallet(page, creator);
   await page.goto("/launch");
@@ -146,7 +155,8 @@ export async function launchCoin(
   await page.getByLabel("Ticker").fill(coin.ticker);
   await page.getByLabel("Name").fill(runName(coin.name, coin.ticker));
   await page.locator('input[type="file"]').setInputFiles(await uniqueCoinImage(page, coin.ticker));
-  await expectVampClear(page);
+  if (looksLike) await expectVampLaunchable(page);
+  else await expectVampClear(page);
   await page.getByRole("button", { name: "Continue" }).click();
   await page.getByRole("button", { name: "Launch", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Launched" })).toBeVisible({ timeout: 150_000 });

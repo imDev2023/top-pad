@@ -58,6 +58,10 @@
   white-space: nowrap;
 }
 
+.nowrap {
+  white-space: nowrap;
+}
+
 .current {
   display: grid;
   justify-items: end;
@@ -483,6 +487,18 @@
   .current {
     justify-items: start;
     text-align: left;
+  }
+
+  /* A handle is the record's identity: on a phone it wraps rather than hides behind an ellipsis. */
+  .title h1 {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .avatar,
+  .monogram {
+    width: 44px;
+    height: 44px;
   }
 
   .factGrid div,

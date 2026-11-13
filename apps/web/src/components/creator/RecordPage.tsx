@@ -60,7 +60,7 @@ export function RecordPage({ initial }: { initial: CreatorRecord }) {
               <CreatorMarks summary={summary} />
               {summary.x && (
                 <a href={`https://x.com/${summary.x.handle}`} target="_blank" rel="noreferrer" className="chip chip-info">
-                  X: @{summary.x.handle}
+                  On X
                 </a>
               )}
               <span className="note">Since {dayOf(summary.since)}</span>
@@ -97,7 +97,10 @@ export function RecordPage({ initial }: { initial: CreatorRecord }) {
           <div data-testid="fact-launches">
             <dt>Launches</dt>
             <dd className="num">
-              {record.launches.instant} Instant · {record.launches.fairOpen.opened} Fair Open{record.launches.fairOpen.opened === 1 ? "" : "s"}
+              <span className={styles.nowrap}>{record.launches.instant} Instant</span> ·{" "}
+              <span className={styles.nowrap}>
+                {record.launches.fairOpen.opened} Fair Open{record.launches.fairOpen.opened === 1 ? "" : "s"}
+              </span>
             </dd>
             <dd className="note">
               {record.launches.fairOpen.failed} Fair Open{record.launches.fairOpen.failed === 1 ? "" : "s"} failed, {record.launches.fairOpen.scheduled} scheduled

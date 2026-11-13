@@ -182,7 +182,7 @@ test("a creator hands over a coin's creator role and their Creator wallet; the r
   let launched: Address | null = null;
   try {
     // The creator links X and launches; the heir is another creator, signed in with a wallet only.
-    const { mint, handle } = await launchCoin(page, creator, { name: "Heat Record", ticker: newTicker() }, { linkX: true });
+    const { mint, handle } = await launchCoin(page, creator, { name: "Heat Record", ticker: newTicker() }, { linkX: true, looksLike: true });
     launched = address(mint);
     const coin = await expect
       .poll(async () => (await fetch(`${TARGET.api}/coins/${mint}`)).status, { timeout: 60_000 })
