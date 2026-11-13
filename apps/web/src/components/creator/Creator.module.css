@@ -158,16 +158,18 @@
   padding: 6px 0;
 }
 
-/* A quote's coins, when the wallet holds coins in more than one. */
+/* A quote's coins, when the wallet holds coins in more than one: its name, then what waits in it. */
 .quoteHead {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 4px 12px;
+  gap: 2px 12px;
+  padding: 12px 22px 6px;
+}
+
+.quoteHead h3,
+.quoteHead p {
   margin: 0;
-  padding: 12px 22px 4px;
-  font-size: 1rem;
-  font-weight: 600;
 }
 
 .columns,
@@ -298,6 +300,10 @@
     display: none;
   }
 
+  .quoteHead {
+    padding: 14px 16px 2px;
+  }
+
   /* On a phone each coin is a card: its name across the top, its figures in two columns below. */
   .coin {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -355,8 +361,4 @@
   .roleForm {
     justify-self: stretch;
   }
-}
-
-.quoteHead .note {
-  font-weight: 400;
 }

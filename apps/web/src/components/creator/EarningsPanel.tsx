@@ -138,12 +138,12 @@ export function EarningsPanel({ account, chain, onChanged }: { account: UiWallet
             data-testid="earnings-quote"
           >
             {withCoins.length > 1 && (
-              <h3 className={styles.quoteHead}>
-                Priced in {group.quote.symbol}
-                <span className="note">
+              <div className={styles.quoteHead}>
+                <h3>Priced in {group.quote.symbol}</h3>
+                <p className="note">
                   <span className="num">{earned(group.waiting, group.quote)}</span> waiting, claimed in a transaction of its own
-                </span>
-              </h3>
+                </p>
+              </div>
             )}
             <div className={styles.columns} aria-hidden="true">
               <span>Coin</span>
