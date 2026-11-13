@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { bigint, bit, boolean, index, integer, jsonb, numeric, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid, vector } from "drizzle-orm/pg-core";
+import { bigint, bit, boolean, check, index, integer, jsonb, numeric, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid, vector } from "drizzle-orm/pg-core";
 
 // Postgres is the only system of record (spec 10.4). The job runner's three tables are Stoker's (commit 43e196b,
 // packages/db/src/schema.ts), with only the alert kinds this build raises.
@@ -53,23 +53,32 @@ export const indexerCursors = pgTable("indexer_cursors", {
 
 const createdAt = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
 
-/** A Creator (spec 7): the person behind a launch, known by an X account, which every launch needs. */
-export const creators = pgTable("creators", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  /** X's numeric user id: the record's identity, which a handle change does not touch. */
-  xUserId: text("x_user_id").notNull().unique(),
-  /** The handle, name and picture as X last gave them, at the latest link. */
-  xHandle: text("x_handle").notNull(),
-  xName: text("x_name").notNull(),
-  xAvatarUrl: text("x_avatar_url"),
-  createdAt: createdAt(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+/**
+ * A Creator (spec 7, ADR 0008): the person behind a launch, known by their Creator wallet (`creator_wallets`), with an X
+ * account linked or not. A record starts when a wallet signs in, or when a browser links X before any wallet has; the X
+ * columns are all set or all null.
+ */
+export const creators = pgTable(
+  "creators",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** X's numeric user id, when an X account is linked: one record at most per X account, which a handle change does not touch. */
+    xUserId: text("x_user_id").unique(),
+    /** The handle, name and picture as X last gave them, at the latest link. */
+    xHandle: text("x_handle"),
+    xName: text("x_name"),
+    xAvatarUrl: text("x_avatar_url"),
+    createdAt: createdAt(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [check("creators_x_all_or_none", sql`(${t.xUserId} is null) = (${t.xHandle} is null) and (${t.xUserId} is null) = (${t.xName} is null)`)],
+);
 
 /**
  * Each record's Creator wallets over time (spec 7): the current one has no `ended_at`. A record has one current wallet
- * and a wallet is current for one record at most. The first is the wallet that signs the record's first launch, its
- * signature on that transaction being the proof it controls the wallet.
+ * and a wallet is current for one record at most. The first is the wallet that signed in (ADR 0008), its signature on the
+ * sign-in message being the proof it controls the wallet, or, for a record that linked X before any wallet signed in, the
+ * wallet that signs its first launch, its signature on that transaction the proof.
  */
 export const creatorWallets = pgTable(
   "creator_wallets",
@@ -79,9 +88,11 @@ export const creatorWallets = pgTable(
       .notNull()
       .references(() => creators.id),
     wallet: text("wallet").notNull(),
-    via: text("via", { enum: ["first_launch", "handover", "rotation"] }).notNull(),
-    /** The signature of the transaction the wallet signed to prove it. */
+    via: text("via", { enum: ["sign_in", "first_launch", "handover", "rotation"] }).notNull(),
+    /** The signature the wallet made to prove it, base58: of its sign-in message, or of the transaction it signed. */
     proof: text("proof").notNull(),
+    /** For a wallet that signed in, the message its proof signs, so anyone can check it again. */
+    proofMessage: text("proof_message"),
     startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
     endedAt: timestamp("ended_at", { withTimezone: true }),
   },
@@ -91,7 +102,10 @@ export const creatorWallets = pgTable(
   ],
 );
 
-/** A browser signed in by linking X: its cookie holds a random token, and only the token's SHA-256 is kept here. */
+/**
+ * A browser signed in (ADR 0008), with its wallet or by linking X: its cookie holds a random token, and only the token's
+ * SHA-256 is kept here.
+ */
 export const sessions = pgTable(
   "sessions",
   {
@@ -99,10 +113,28 @@ export const sessions = pgTable(
     creatorId: uuid("creator_id")
       .notNull()
       .references(() => creators.id, { onDelete: "cascade" }),
+    /** The wallet that signed in, the record's Creator wallet then; null for a session X started. */
+    wallet: text("wallet"),
     createdAt: createdAt(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   },
   (t) => [index("sessions_creator_idx").on(t.creatorId), index("sessions_expires_idx").on(t.expiresAt)],
+);
+
+/**
+ * A Sign In With Solana message Heat gave a wallet and is waiting for it to sign (ADR 0008): taken once, before it expires,
+ * so a signature can be neither replayed nor kept for later.
+ */
+export const walletSignIns = pgTable(
+  "wallet_sign_ins",
+  {
+    nonce: text("nonce").primaryKey(),
+    wallet: text("wallet").notNull(),
+    /** The message exactly as given: the signature must be over these bytes. */
+    message: text("message").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [index("wallet_sign_ins_expires_idx").on(t.expiresAt)],
 );
 
 /** An X OAuth 2.0 authorization in flight: the state the browser carries back, and the PKCE verifier only we hold. */

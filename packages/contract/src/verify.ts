@@ -22,7 +22,7 @@ export type VerifiedWallet = z.infer<typeof VerifiedWallet>;
 
 export const VerifyRefusal = z.object({
   error: z.string(),
-  /** `signed_out`: no X account is linked in this browser; `taken`: the wallet is another person's. */
+  /** `signed_out`: this browser has no linked X account, signed in or not; `taken`: the wallet is another person's. */
   code: z.enum(["invalid", "signed_out", "taken"]),
 });
 export type VerifyRefusal = z.infer<typeof VerifyRefusal>;

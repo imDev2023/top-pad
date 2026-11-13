@@ -33,12 +33,16 @@ export const Platform = z.object({
 export type Platform = z.infer<typeof Platform>;
 
 /**
- * `GET /me`: the Creator this browser is signed in as, by the X account it linked (spec 7); `null` when it has linked none,
- * an answer rather than an error, so a first visit logs nothing in the browser's console.
+ * `GET /me`: the Creator this browser is signed in as (spec 7, ADR 0008), by its wallet or by the X account it linked;
+ * `null` when it is signed in neither way, an answer rather than an error, so a first visit logs nothing in the browser's
+ * console.
  */
 export const Me = z.object({
-  x: z.object({ handle: z.string(), name: z.string(), avatarUrl: z.string().url().nullable() }),
-  /** The record's Creator wallet; null until the record's first launch makes the wallet that signs it the one. */
+  /** The X account linked to the record, which shows on it and in its coins' metadata; null when none is. */
+  x: z.object({ handle: z.string(), name: z.string(), avatarUrl: z.string().url().nullable() }).nullable(),
+  /** The wallet this browser signed in with; null for a browser signed in by linking X. */
+  wallet: Address.nullable(),
+  /** The record's Creator wallet; null only for a record that linked X and has had no wallet sign in or launch yet. */
   creatorWallet: Address.nullable(),
   launches: z.number().int().nonnegative(),
 });
@@ -50,7 +54,7 @@ export type Me = z.infer<typeof Me>;
  */
 export const LaunchRefusal = ApiError.extend({
   code: z.enum([
-    "not_linked",
+    "signed_out",
     "unavailable",
     "invalid",
     "vamp_shield",

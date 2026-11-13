@@ -120,6 +120,13 @@
       "when": 1794204903399,
       "tag": "0016_operator_app",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1794549214401,
+      "tag": "0017_wallet_sign_in",
+      "breakpoints": true
     }
   ]
 }
