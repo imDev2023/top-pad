@@ -19,7 +19,8 @@
     "devnet-usdc": "tsx scripts/devnet-usdc.ts",
     "quote-settings": "tsx scripts/quote-settings.ts",
     "xstock-stand-in": "tsx scripts/xstock-stand-in.ts",
-    "xstock-multiplier": "tsx scripts/xstock-multiplier.ts"
+    "xstock-multiplier": "tsx scripts/xstock-multiplier.ts",
+    "token-2022-quote": "tsx scripts/token-2022-quote.ts"
   },
   "dependencies": {
     "@solana-program/address-lookup-table": "^0.15.0",

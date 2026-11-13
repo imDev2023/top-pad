@@ -13,6 +13,13 @@ export const TOKEN_2022_NATIVE_MINT = address("9pan9bMn5HatX4EJdBwg9VgCa7Uz5HL8N
  * creates its devnet TokenBadge (#26).
  */
 export const DEVNET_XSTOCK_STAND_IN = address("Wm7nXsHnoHJm3NemWaLbnxd7QkmeHLALucsFC4qTUNK");
+/**
+ * Devnet's Token-2022 test quote (#91), made on 2026-11-13 by `pnpm --filter @top-pad/chain token-2022-quote devnet
+ * --send`: Metadata Pointer and Token Metadata only, which DBC takes with no TokenBadge, 8 decimals, Heat's devnet bank its
+ * mint authority. `tests/devnet` prices coins in it to run a Token-2022 quote through Graduation against Meteora's
+ * deployed programs; it is never offered, so `CLUSTERS` does not list it.
+ */
+export const DEVNET_TOKEN_2022_TEST_QUOTE = address("ABuYPpu4XgwPowARd3uwLHPoM1dDGztVUQDFE823L2PV");
 /** How Token-2022 stores an unset optional authority: 32 zero bytes. */
 const NONE = address("11111111111111111111111111111111");
 
