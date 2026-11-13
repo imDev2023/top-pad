@@ -10,6 +10,7 @@ import {
   fairOpens,
   fairOpenSeatEvents,
   feeClaims,
+  poolCreatorTransfers,
   graduations,
   indexedTransactions,
   launches,
@@ -39,7 +40,7 @@ beforeAll(async () => {
 });
 afterAll(() => cleanup());
 beforeEach(async () => {
-  for (const table of [candles, trades, coins, launches, creators, pools, indexedTransactions, windowClaims, feeClaims, fairOpens, fairOpenSeatEvents, graduations, lpFeeClaims]) {
+  for (const table of [candles, trades, coins, launches, creators, pools, indexedTransactions, windowClaims, feeClaims, fairOpens, fairOpenSeatEvents, graduations, lpFeeClaims, poolCreatorTransfers]) {
     await db.delete(table);
   }
 });
@@ -172,6 +173,25 @@ describe("indexing Heat's transactions", () => {
       [1, 0],
       [0, 1],
     ]);
+  });
+
+  it("writes a coin's creator role handed to another wallet, once, and hands it to the live rooms", async () => {
+    const { handle, published, asked } = handler();
+    const transfer = fixture("creator-role-transfer");
+    expect(await indexTransactions(db, handle, [transfer, transfer])).toEqual({ transactions: 1, creatorTransfers: 1 });
+    expect(asked).toEqual([]);
+    expect(await db.select().from(poolCreatorTransfers)).toEqual([
+      {
+        signature: transfer.transaction.signatures[0],
+        eventIndex: 0,
+        slot: transfer.slot,
+        at: new Date(transfer.blockTime! * 1000),
+        pool: "5TJZCmAKtqkHiKxz9BD3maz2wbZuHhErpTj3fJJzUUPV",
+        fromWallet: "9WapEvnCHXXZxit89R2S9cGAzmPXNYRJwcUQdapvC7tL",
+        toWallet: "FWj76KgZN8Gqp28ue4bjpntCKsKqVeYa7hZGY6rybVHQ",
+      },
+    ]);
+    expect(published.map((p) => p.creatorTransfers.length)).toEqual([1]);
   });
 
   it("indexes again a transaction that older code indexed without knowing its claim", async () => {

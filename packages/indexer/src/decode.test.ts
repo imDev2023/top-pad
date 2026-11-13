@@ -151,6 +151,7 @@ describe("decoding a transaction", () => {
       lpFeeClaims: [],
       windowClaims: [],
       feeClaims: [],
+      creatorTransfers: [],
       fairOpens: [],
       fairOpenOpens: [],
       seatEvents: [],
@@ -265,5 +266,20 @@ describe("decoding a Graduation", () => {
       { eventIndex: 0, pool: DAMM_POOL, mint: MINT, position: CREATOR_POSITION, owner: CREATOR, quoteAmount: 1_396_534n, coinAmount: 0n },
     ]);
     expect(creatorClaim.feeClaims).toEqual([expect.objectContaining({ mint: MINT, creator: CREATOR, creatorAmount: 1_265_823n, treasuryAmount: 1_265_823n })]);
+  });
+
+  it("finds a coin's creator role handed to another wallet, on Heat's configs only", () => {
+    // tests/ui/src/creator.spec.ts on 2026-11-06: the launcher handed its coin's DBC creator role to an heir.
+    const decoded = decodeTransaction(fixture("creator-role-transfer"), HEAT);
+    expect(decoded.creatorTransfers).toEqual([
+      {
+        eventIndex: 0,
+        pool: "5TJZCmAKtqkHiKxz9BD3maz2wbZuHhErpTj3fJJzUUPV",
+        config: instant,
+        from: "9WapEvnCHXXZxit89R2S9cGAzmPXNYRJwcUQdapvC7tL",
+        to: "FWj76KgZN8Gqp28ue4bjpntCKsKqVeYa7hZGY6rybVHQ",
+      },
+    ]);
+    expect(decodeTransaction(fixture("creator-role-transfer"), new Set([fairOpen])).creatorTransfers).toEqual([]);
   });
 });

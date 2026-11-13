@@ -89,10 +89,15 @@ export const creatorWallets = pgTable(
       .references(() => creators.id),
     wallet: text("wallet").notNull(),
     via: text("via", { enum: ["sign_in", "first_launch", "handover", "rotation"] }).notNull(),
-    /** The signature the wallet made to prove it, base58: of its sign-in message, or of the transaction it signed. */
+    /**
+     * The signature the wallet made to prove it, base58: of its sign-in message, of the transaction it signed, or of the
+     * handover or rotation message that made it the Creator wallet.
+     */
     proof: text("proof").notNull(),
-    /** For a wallet that signed in, the message its proof signs, so anyone can check it again. */
+    /** For a wallet that signed a message, the message its proof signs, so anyone can check it again. */
     proofMessage: text("proof_message"),
+    /** The handover or rotation that made it the Creator wallet (`wallet_changes`), which holds the rest of its proof. */
+    changeId: uuid("change_id").references(() => walletChanges.id),
     startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
     endedAt: timestamp("ended_at", { withTimezone: true }),
   },
@@ -115,6 +120,11 @@ export const sessions = pgTable(
       .references(() => creators.id, { onDelete: "cascade" }),
     /** The wallet that signed in, the record's Creator wallet then; null for a session X started. */
     wallet: text("wallet"),
+    /**
+     * When this browser last authorized its record's X account at X: a session X started, or one that linked X or
+     * authorized it again. A rotation through X asks for a recent one (spec 7).
+     */
+    xAt: timestamp("x_at", { withTimezone: true }),
     createdAt: createdAt(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   },
@@ -122,19 +132,70 @@ export const sessions = pgTable(
 );
 
 /**
- * A Sign In With Solana message Heat gave a wallet and is waiting for it to sign (ADR 0008): taken once, before it expires,
- * so a signature can be neither replayed nor kept for later.
+ * A message Heat gave a wallet and is waiting for it to sign: a Sign In With Solana message (ADR 0008), or one that hands
+ * over a Creator wallet, asks for a rotation through X or cancels either (spec 7). Taken once, before it expires, and only
+ * for its purpose, so a signature can be neither replayed, kept for later nor used for something else.
  */
 export const walletSignIns = pgTable(
   "wallet_sign_ins",
   {
     nonce: text("nonce").primaryKey(),
     wallet: text("wallet").notNull(),
+    purpose: text("purpose", { enum: ["sign_in", "handover", "rotation", "cancel"] })
+      .notNull()
+      .default("sign_in"),
     /** The message exactly as given: the signature must be over these bytes. */
     message: text("message").notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   },
   (t) => [index("wallet_sign_ins_expires_idx").on(t.expiresAt)],
+);
+
+/**
+ * Each change of a record's Creator wallet that is not its first (spec 7): a handover, which the old wallet offers by
+ * signing its message and the new wallet takes by signing the same message; or a rotation through the record's X
+ * account, for a lost wallet, which the new wallet signs and which takes effect after a public 7-day cooldown unless the
+ * current Creator wallet signs its cancellation. One pending change per record at a time.
+ */
+export const walletChanges = pgTable(
+  "wallet_changes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    creatorId: uuid("creator_id")
+      .notNull()
+      .references(() => creators.id),
+    kind: text("kind", { enum: ["handover", "rotation"] }).notNull(),
+    /** The Creator wallet when it was asked for, and the wallet that replaces it. */
+    fromWallet: text("from_wallet").notNull(),
+    toWallet: text("to_wallet").notNull(),
+    /** The message: both wallets sign a handover's; a rotation's new wallet signs its own. */
+    message: text("message").notNull(),
+    /** A handover's old wallet's signature, base58. */
+    fromSignature: text("from_signature"),
+    /** The new wallet's signature, base58: a handover's once taken, a rotation's from its request. */
+    toSignature: text("to_signature"),
+    /** A rotation's X account, as it was when it asked. */
+    xUserId: text("x_user_id"),
+    xHandle: text("x_handle"),
+    status: text("status", { enum: ["pending", "completed", "cancelled", "expired", "void"] })
+      .notNull()
+      .default("pending"),
+    requestedAt: timestamp("requested_at", { withTimezone: true }).notNull().defaultNow(),
+    /** When a handover's offer lapses untaken. */
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    /** When a rotation takes effect, unless cancelled: 7 days after it was asked for. */
+    effectiveAt: timestamp("effective_at", { withTimezone: true }),
+    /** The current Creator wallet's cancellation, the message it signed and its signature, base58. */
+    cancelMessage: text("cancel_message"),
+    cancelSignature: text("cancel_signature"),
+    /** When it completed, was cancelled, lapsed, or was void: its new wallet became another record's Creator wallet first. */
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("wallet_changes_pending_per_creator").on(t.creatorId).where(sql`${t.status} = 'pending'`),
+    index("wallet_changes_creator_idx").on(t.creatorId, t.requestedAt),
+    index("wallet_changes_to_idx").on(t.toWallet, t.status),
+  ],
 );
 
 /** An X OAuth 2.0 authorization in flight: the state the browser carries back, and the PKCE verifier only we hold. */
@@ -685,6 +746,30 @@ export const indexedTransactions = pgTable("indexed_transactions", {
   signers: text("signers").array(),
   indexedAt: timestamp("indexed_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * Every hand-over of a Heat config pool's DBC creator role (spec 7), from DBC's `EvtUpdatePoolCreator`, made on Heat's site
+ * or not: Creator Earnings follow the role, while the coin stays on its launcher's record. Keyed by its transaction and
+ * its place among the transaction's hand-overs.
+ */
+export const poolCreatorTransfers = pgTable(
+  "pool_creator_transfers",
+  {
+    signature: text("signature").notNull(),
+    eventIndex: integer("event_index").notNull(),
+    slot: bigint("slot", { mode: "number" }).notNull(),
+    /** The block's time. */
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    pool: text("pool").notNull(),
+    fromWallet: text("from_wallet").notNull(),
+    toWallet: text("to_wallet").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.signature, t.eventIndex] }),
+    index("pool_creator_transfers_pool_idx").on(t.pool, t.slot),
+    index("pool_creator_transfers_to_idx").on(t.toWallet),
+  ],
+);
 
 /**
  * Each pool's window claim (spec 4, 5.2), from the fee program's `WindowFeesClaimed`: once per pool, the first claim of

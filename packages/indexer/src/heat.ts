@@ -1,7 +1,8 @@
 // What the indexer writes for Heat (spec 10.2): the pools on Heat's configs, the coins the fee program registers, every
 // trade with its candles, on the curve and after Graduation on the coin's DAMM v2 pool, the fee program's claims, each
 // coin's Graduation with its surplus, leftover and LP fee claims, and each Fair Open with its open, its Creator lock, its
-// Tax Share and its seats' deposits, withdrawals, deliveries, Tax Shares and refunds.
+// Tax Share and its seats' deposits, withdrawals, deliveries, Tax Shares and refunds, and every hand-over of a pool's DBC
+// creator role.
 // Each transaction is written in one database transaction that first claims its signature, so the live source, the
 // browser's fast path and reconciliation can all hand it in and it is written once.
 import { and, eq, inArray, sql } from "drizzle-orm";
@@ -15,6 +16,7 @@ import {
   indexedTransactions,
   launches,
   lpFeeClaims,
+  poolCreatorTransfers,
   pools,
   trades,
   windowClaims,
@@ -26,6 +28,7 @@ import {
   dammPoolsIn,
   decodeTransaction,
   type CoinRegistered,
+  type CreatorRoleTransfer,
   type CurveCompleted,
   type Graduated,
   type GraduatedPoolRef,
@@ -57,6 +60,7 @@ export type Indexed = {
   trades: Trade[];
   windowClaims: WindowClaimed[];
   feeClaims: FeesClaimed[];
+  creatorTransfers: CreatorRoleTransfer[];
   fairOpens: FairOpenCreated[];
   fairOpenOpens: FairOpenOpened[];
   seatEvents: SeatEvent[];
@@ -273,6 +277,12 @@ export function heatHandler({ heat, configs: configsNow, refreshConfigs, blockIn
           })
           .onConflictDoNothing();
       }
+      for (const r of decoded.creatorTransfers) {
+        await t
+          .insert(poolCreatorTransfers)
+          .values({ signature, eventIndex: r.eventIndex, slot: tx.slot, at: blockTime, pool: r.pool, fromWallet: r.from, toWallet: r.to })
+          .onConflictDoNothing();
+      }
       for (const f of decoded.fairOpens) {
         await t
           .insert(fairOpens)
@@ -383,6 +393,7 @@ export function heatHandler({ heat, configs: configsNow, refreshConfigs, blockIn
         trades: added,
         windowClaims: decoded.windowClaims,
         feeClaims: decoded.feeClaims,
+        creatorTransfers: decoded.creatorTransfers,
         fairOpens: decoded.fairOpens,
         fairOpenOpens: decoded.fairOpenOpens,
         seatEvents: decoded.seatEvents,
@@ -402,6 +413,7 @@ export function heatHandler({ heat, configs: configsNow, refreshConfigs, blockIn
     if (added.length) result.trades = added.length;
     const claims = decoded.windowClaims.length + decoded.feeClaims.length;
     if (claims) result.claims = claims;
+    if (decoded.creatorTransfers.length) result.creatorTransfers = decoded.creatorTransfers.length;
     const fairOpen =
       decoded.fairOpens.length +
       decoded.fairOpenOpens.length +

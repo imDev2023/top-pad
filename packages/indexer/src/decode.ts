@@ -23,11 +23,13 @@ import {
   EVT_CURVE_COMPLETE_EVENT_DISCRIMINATOR,
   EVT_INITIALIZE_POOL_EVENT_DISCRIMINATOR,
   EVT_SWAP3_EVENT_DISCRIMINATOR,
+  EVT_UPDATE_POOL_CREATOR_EVENT_DISCRIMINATOR,
   getInitializeVirtualPoolWithSplTokenInstructionDataDecoder,
   identifyDynamicBondingCurveInstruction,
   parseEvtCurveCompleteEvent,
   parseEvtInitializePoolEvent,
   parseEvtSwap3Event,
+  parseEvtUpdatePoolCreatorEvent,
 } from "@top-pad/clients/dbc";
 import {
   COIN_REGISTERED_EVENT_DISCRIMINATOR,
@@ -154,6 +156,9 @@ export type Graduated = {
 /** The fee program's split of a pool's surplus, or its burn of a migrated pool's leftover (spec 5.2). */
 export type SurplusSplit = { pool: string; mint: string; creator: string; creatorAmount: bigint; treasuryAmount: bigint };
 export type LeftoverBurn = { pool: string; mint: string; withdrawn: bigint; burnt: bigint };
+
+/** A pool's DBC creator role handed to another wallet (DBC's `EvtUpdatePoolCreator`): Creator Earnings follow it (spec 7). */
+export type CreatorRoleTransfer = { eventIndex: number; pool: string; config: string; from: string; to: string };
 
 /** A claim of a graduated pool's position fees (DAMM v2's `EvtClaimPositionFee`): Heat's or the creator's. */
 export type LpFeeClaim = { eventIndex: number; pool: string; mint: string; position: string; owner: string; quoteAmount: bigint; coinAmount: bigint };
@@ -299,6 +304,7 @@ export type Decoded = {
   lpFeeClaims: LpFeeClaim[];
   windowClaims: WindowClaimed[];
   feeClaims: FeesClaimed[];
+  creatorTransfers: CreatorRoleTransfer[];
   fairOpens: FairOpenCreated[];
   fairOpenOpens: FairOpenOpened[];
   seatEvents: SeatEvent[];
@@ -313,6 +319,8 @@ const hex = (bytes: ReadonlyUint8Array) => Array.from(bytes, (b) => b.toString(1
 const EVENT_IX_TAG = new Uint8Array([0xe4, 0x45, 0xa5, 0x2e, 0x51, 0xcb, 0x9a, 0x1d]);
 // DBC's `TradeDirection::QuoteToBase`: the quote in, the coin out.
 const QUOTE_TO_BASE = 1;
+// `transfer_pool_creator` names the virtual pool first and its config second.
+const TRANSFER_CONFIG = 1;
 // `swap` and `swap2` name the trader (`payer`) and the coin (`base_mint`) at these places.
 const SWAP_PAYER = 9;
 const SWAP_BASE_MINT = 7;
@@ -397,6 +405,7 @@ export function decodeTransaction(tx: RawTransaction, configs: ReadonlySet<strin
     lpFeeClaims: [],
     windowClaims: [],
     feeClaims: [],
+    creatorTransfers: [],
     fairOpens: [],
     fairOpenOpens: [],
     seatEvents: [],
@@ -523,6 +532,14 @@ export function decodeTransaction(tx: RawTransaction, configs: ReadonlySet<strin
       // Emitted by the swap that completed the curve, which names the coin.
       if (!swapsSeen.includes(emitter)) throw new Error(`pool ${e.pool}'s curve completed outside a swap`);
       decoded.curveCompletes.push({ pool: e.pool, mint: key(emitter.ix.accounts[SWAP_BASE_MINT]!), config: e.config, quoteReserve: e.quoteReserve });
+    } else if (startsWith(event, EVT_UPDATE_POOL_CREATOR_EVENT_DISCRIMINATOR)) {
+      const e = parseEvtUpdatePoolCreatorEvent(event);
+      if (identify(emitter.data) !== DynamicBondingCurveInstruction.TransferPoolCreator) {
+        throw new Error(`pool ${e.pool}'s creator changed outside transfer_pool_creator`);
+      }
+      const config = key(emitter.ix.accounts[TRANSFER_CONFIG]!);
+      if (!configs.has(config)) continue;
+      decoded.creatorTransfers.push({ eventIndex: decoded.creatorTransfers.length, pool: e.pool, config, from: e.creator, to: e.newCreator });
     } else if (startsWith(event, EVT_INITIALIZE_POOL_EVENT_DISCRIMINATOR)) {
       const e = parseEvtInitializePoolEvent(event);
       if (!configs.has(e.config)) {
