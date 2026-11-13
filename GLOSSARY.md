@@ -80,8 +80,20 @@ The person behind a launch, known by their Creator record.
 _Avoid_: dev, deployer (terminals' words for the Creator wallet); Stoker's "Creator" means the wallet, which here is the Creator wallet
 
 **Creator wallet**:
-The one wallet that signs a Creator's launches and that terminals show as the coin's dev; it changes only by a recorded handover.
+The one wallet that signs a Creator's launches and that terminals show as the coin's dev; it changes only by a recorded handover, or for a lost wallet by a rotation.
 _Avoid_: dev wallet, deployer
+
+**Handover**:
+A change of Creator wallet that the old wallet offers and the new wallet takes, each signing the same message, kept on the Creator record.
+_Avoid_: transfer (a coin's creator role is handed over on chain; the Creator wallet is handed over by signatures)
+
+**Rotation**:
+A change of Creator wallet for a lost one, asked for through the Creator record's linked X account, which takes effect after a public 7-day cooldown unless the current Creator wallet cancels it.
+_Avoid_: recovery, reset
+
+**Creator role**:
+A coin's DBC creator role on chain, which Creator Earnings follow; handing it to another wallet moves the earnings, never the coin off its launcher's Creator record.
+_Avoid_: ownership, dev rights
 
 **Creator record**:
 The public history of a Creator's launches on Heat, tied to their Creator wallet, with their X account if they linked one, and built only from facts anyone can check.
