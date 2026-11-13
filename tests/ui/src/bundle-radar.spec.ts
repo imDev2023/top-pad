@@ -11,86 +11,16 @@
 // Run it alone as `bundle-radar.spec.ts`: a filter of `bundle-radar` alone matches every spec in a checkout whose folder
 // name holds it. Its wallets derive from the bank's key and the run's name, which it logs, so a run stopped partway is
 // swept back with `pnpm exec tsx tests/devnet/src/bundle-sweep.ts <run> <mint>`.
-import { expect, test, type Page } from "@playwright/test";
-import { address, type Address, type KeyPairSigner, type Signature } from "@solana/kit";
-import { BundleRadar, PreparedLaunch } from "@top-pad/contract";
-import { bundleCases, createDb } from "@top-pad/db";
-import {
-  fundDirectly,
-  landings,
-  runWallets,
-  sellAndClose,
-  signedBundle,
-  spray,
-  sweepRun,
-  wrapSol,
-  type BundleCopy,
-} from "@top-pad/tests-devnet/bundle";
-import { devnet, fund, swap, sweep } from "@top-pad/tests-devnet/devnet";
+import { expect, test } from "@playwright/test";
+import type { Address, Signature } from "@solana/kit";
+import { BundleRadar } from "@top-pad/contract";
+import { bundleCases } from "@top-pad/db";
+import { fundDirectly, landings, runWallets, sellAndClose, sweepRun, wrapSol } from "@top-pad/tests-devnet/bundle";
+import { fund, swap, sweep } from "@top-pad/tests-devnet/devnet";
 import { eq } from "drizzle-orm";
-import { launchCoin, newTicker, pageErrors, snap } from "./steps";
+import { api, BUY, COPIES, database, FUNDED, INSTANT, launchWithBundle, PAST_TAX, SOL, sleep, waitFor, type Attempt } from "./bundler";
+import { pageErrors, snap } from "./steps";
 import { TARGET } from "./target";
-
-const SOL = 1_000_000_000n;
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const INSTANT = devnet.configs!.instant;
-/** Each creation-slot buy, and how many copies of each bundle transaction go out as the launch is sent. */
-const BUY = 300_000n;
-const COPIES = 16;
-/** What each wallet the creator funds gets, and what it buys past the sniper tax. */
-const FUNDED = (35n * SOL) / 1_000n;
-const PAST_TAX = (2n * SOL) / 100n;
-
-const api = async <T>(path: string, schema: { parse(v: unknown): T }) => schema.parse(await (await fetch(`${TARGET.api}${path}`)).json());
-const database = () => createDb(TARGET.name === "devnet" ? process.env.DATABASE_URL! : "postgres://toppad:toppad@127.0.0.1:5452/toppad");
-
-type Attempt = { mint: Address; copies: BundleCopy[]; sniperCopies: BundleCopy[]; submittedAt: number };
-
-/**
- * Launches a coin from the site with the bundle's buys signed the moment the launch is prepared and sent from the moment
- * it is submitted: copies of the two bundle transactions (the Creator wallet with two funded wallets, then the other two)
- * together each round, 100 ms apart for 1.6 s, the sniper's from the ninth round. On devnet the launch service's creation
- * landed 0.4 to 1.4 s after the submit (2026-11-02), and the copies sent before it fail for their fee alone.
- */
-async function launchWithBundle(page: Page, creator: KeyPairSigner, funded: KeyPairSigner[], sniper: KeyPairSigner, linked: boolean): Promise<Attempt> {
-  let signing: Promise<[BundleCopy[], BundleCopy[]]> | null = null;
-  let sent: Promise<void> | null = null;
-  let mint: Address | null = null;
-  let submittedAt = 0;
-  const onResponse = async (res: import("@playwright/test").Response) => {
-    if (res.request().method() !== "POST" || new URL(res.url()).pathname !== "/launches" || !res.ok()) return;
-    const prepared = PreparedLaunch.parse(await res.json());
-    if (prepared.mode !== "instant") return;
-    const coin = (mint = address(prepared.mint));
-    signing = Promise.all([
-      signedBundle([[creator, funded[0]!, funded[1]!], [funded[2]!, funded[3]!]], coin, INSTANT, BUY, COPIES),
-      signedBundle([[sniper]], coin, INSTANT, BUY, COPIES - 8),
-    ]);
-  };
-  const onRequest = (req: import("@playwright/test").Request) => {
-    if (req.method() !== "POST" || !/\/launches\/[^/]+\/submit$/.test(new URL(req.url()).pathname)) return;
-    submittedAt = Date.now();
-    sent = (async () => {
-      const [bundle, snipes] = await signing!;
-      // Both bundle transactions at once each round; the sniper joins from the ninth: a buy in the four transactions right
-      // after the creation is a direct link by spec 6.5, so the sniper, to be only labelled, must land further down.
-      const rounds: BundleCopy[][] = [];
-      for (let i = 0; i < bundle.length; i += 2) rounds.push([...bundle.slice(i, i + 2), ...(i >= 16 && snipes.length ? [snipes.shift()!] : [])]);
-      await spray(rounds, 100);
-    })();
-  };
-  page.on("response", onResponse);
-  page.on("request", onRequest);
-  try {
-    await launchCoin(page, creator, { name: "Radar Bundle", ticker: newTicker() }, { linked });
-  } finally {
-    page.off("response", onResponse);
-    page.off("request", onRequest);
-  }
-  await sent;
-  const [copies, sniperCopies] = await signing!;
-  return { mint: mint!, copies, sniperCopies, submittedAt };
-}
 
 test("Bundle Radar flags a creator's bundle within seconds, and a case opens an hour after the open", async ({ page: first }) => {
   test.setTimeout(90 * 60_000);
@@ -131,7 +61,7 @@ test("Bundle Radar flags a creator's bundle within seconds, and a case opens an 
         errors = pageErrors(page);
       }
       // The creator links X once; a launch again keeps its record and Creator wallet.
-      attempt = await launchWithBundle(page, creator, funded, sniper, tries > 0);
+      attempt = await launchWithBundle(page, creator, funded, sniper, { linked: tries > 0 });
       mint = attempt.mint;
       mints.push(mint);
       const watched = mint;
@@ -244,14 +174,3 @@ test("Bundle Radar flags a creator's bundle within seconds, and a case opens an 
     await close();
   }
 });
-
-/** Asks `read` every half second until `ok` holds of its answer, for at most `ms`. */
-async function waitFor<T>(read: () => Promise<T>, ok: (t: T) => boolean, ms: number): Promise<T> {
-  const until = Date.now() + ms;
-  for (;;) {
-    const value = await read().catch(() => null);
-    if (value !== null && ok(value)) return value;
-    if (Date.now() > until) throw new Error(`not so within ${ms} ms: ${JSON.stringify(value)?.slice(0, 500)}`);
-    await sleep(500);
-  }
-}
