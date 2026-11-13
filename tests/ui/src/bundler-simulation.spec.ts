@@ -17,6 +17,8 @@
 // but the tax and the fees swept back). It waits out the coin's first hour for its case: about 85 minutes in all. Run it
 // alone as `bundler-simulation.spec.ts` with `e2e:devnet`; its wallets derive from the bank's key and the run's name, which
 // it logs, so a run stopped partway is swept back with `pnpm exec tsx tests/devnet/src/bundle-sweep.ts <run> <mint>`.
+// A run stopped once its case had opened goes on from there with BUNDLER_RESUME="<run> <mint>", which skips the bundle
+// and the hour's wait (the loss was measured by the run that launched it) and confirms the case unless it is confirmed.
 import { expect, test, type Browser, type Page } from "@playwright/test";
 import type { Address, Signature } from "@solana/kit";
 import { BundleRadar, CoinTrades, EnforcementCounts } from "@top-pad/contract";
@@ -26,9 +28,9 @@ import { chainTime, fund, fundedWallets, swap, sweep } from "@top-pad/tests-devn
 import { recoverDeposits, scheduleFairOpen, type ScheduledFairOpen } from "@top-pad/tests-devnet/fair-open";
 import { and, eq, sql } from "drizzle-orm";
 import { api, BUY, COPIES, database, FUNDED, INSTANT, launchWithBundle, PAST_TAX, SOL, sleep, waitFor, type Attempt } from "./bundler";
-import { expectVampLaunchable, newTicker, pageErrors, runName, snap, uniqueCoinImage } from "./steps";
+import { expectVampLaunchable, newTicker, pageErrors, runName, signInOnLaunch, snap, uniqueCoinImage } from "./steps";
 import { TARGET } from "./target";
-import { connectTestWallet } from "./wallet";
+import { connectTestWallet, installTestWallet } from "./wallet";
 
 const OPERATOR = process.env.OPERATOR_URL ?? "http://localhost:8803";
 const SECOND_OPERATOR = process.env.SECOND_OPERATOR_URL ?? "http://localhost:8804";
@@ -81,7 +83,8 @@ test("the bundler simulation: the bundle loses its creation-slot spend, a confir
   let page = first;
   let errors = pageErrors(page);
   await fetch(`${TARGET.api}/indexer`);
-  const run = `bundler-${Date.now()}`;
+  const [resumedRun, resumedMint] = (process.env.BUNDLER_RESUME ?? "").split(/\s+/).filter(Boolean);
+  const run = resumedRun ?? `bundler-${Date.now()}`;
   const { creator, sniper, funded } = await runWallets(run);
   console.log(`bundler simulation ${run}: creator ${creator.address}`);
   const bundleWallets = [creator, ...funded];
@@ -89,102 +92,122 @@ test("the bundler simulation: the bundle loses its creation-slot spend, a confir
   const mints: Address[] = [];
   let other: ScheduledFairOpen | null = null;
   const [otherCreator] = await fundedWallets(SOL / 20n);
+  let coin: Address;
+  let found: typeof bundleCases.$inferSelect | undefined;
   try {
-    // The creator pays each try's pool rent and funds its 4 wallets, with 0.02 SOL over to deposit in another's Fair Open.
-    await fund([creator, sniper], [(SOL * 37n) / 100n, SOL / 20n]);
-    await fundDirectly(creator, funded.map((f) => f.address), FUNDED);
-    for (const w of [...bundleWallets, sniper]) await wrapSol(w, BUY * BigInt(COPIES + 2));
-
-    // The bundle must land in the creation slot: a launch whose buys missed it is launched again, at most 5 times.
-    let attempt: Attempt | null = null;
-    let handle: string | null = null;
-    let creationSlot = 0n;
-    for (let tries = 0; tries < 5; tries++) {
-      if (tries) {
-        await page.close();
-        page = await first.context().newPage();
-        errors = pageErrors(page);
-      }
-      // The creator links X on the first try, so the Bar owes them a direct message; a try again keeps the record.
-      const launched = await launchWithBundle(page, creator, funded, sniper, { linked: tries > 0, linkX: tries === 0 });
-      handle ??= launched.handle;
-      attempt = launched;
-      mints.push(launched.mint);
-      const radar = await waitFor(() => api(`/coins/${launched.mint}/radar`, BundleRadar), (r) => r.creation.blockIndex !== null, 60_000);
-      creationSlot = BigInt(radar.creation.slot);
-      const landed = await landings(launched.copies.map((c) => c.signature));
-      const inSlot = new Set(
-        launched.copies.flatMap((c) => {
-          const l = landed.get(c.signature as Signature);
-          return l && !l.err && l.slot === creationSlot ? c.buyers : [];
-        }),
-      );
-      console.log(`try ${tries + 1}: ${launched.mint}, created in slot ${creationSlot}; ${inSlot.size} bundle wallets bought in it`);
-      if (bundleWallets.every((w) => inSlot.has(w.address))) break;
-      for (const w of [...bundleWallets, sniper]) await sellAndClose(w, launched.mint, INSTANT).catch(() => undefined);
-      for (const w of [...bundleWallets, sniper]) await wrapSol(w, BUY * BigInt(COPIES + 2));
-      attempt = null;
-    }
-    expect(attempt, "the Creator wallet and its 4 wallets each bought in the creation slot").not.toBeNull();
-    expect(handle, "the creator linked X").not.toBeNull();
-    const coin = attempt!.mint;
-    const opened = Date.parse((await api(`/coins/${coin}/radar`, BundleRadar)).openedAt);
-
-    // Bundle Radar labels the coin: the 4 funded wallets linked to the creator.
-    const linked = await waitFor(
-      () => api(`/coins/${coin}/radar`, BundleRadar),
-      (r) => funded.every((f) => r.wallets.some((w) => w.wallet === f.address && w.linked)),
-      120_000,
-    );
-    console.log(`Bundle Radar linked ${linked.linked.wallets} wallets to the creator`);
-    await page.goto(`/coin/${coin}`);
-    await expect(page.getByTestId("radar-linked")).toContainText("wallets linked to the creator", { timeout: 30_000 });
-    await snap(page, "sim-01-radar");
-
-    // Past the sniper tax the 4 wallets buy on, over 1% of supply between them; 2 minutes after the open everyone sells.
-    await sleep(Math.max(0, opened + 65_000 - Date.now()));
-    for (const f of funded) await swap(f, coin, "buy", PAST_TAX);
-    await sleep(Math.max(0, opened + 120_000 - Date.now()));
-    for (const w of [...bundleWallets, sniper]) await sellAndClose(w, coin, INSTANT);
-
-    // The bundle lost at least 97% of what its creation-slot buys spent (spec 11.1).
-    const [radar, trades] = await (async () => {
-      for (;;) {
-        const [r, t] = [await api(`/coins/${coin}/radar`, BundleRadar), await api(`/coins/${coin}/trades?limit=200`, CoinTrades)];
-        if (bundleWallets.every((w) => t.trades.some((x) => x.trader === w.address && x.side === "sell"))) return [r, t.trades] as const;
-        await sleep(2_000);
-      }
-    })();
-    const outcomes = bundleWallets.map((w) => slotOutcome(radar, trades, w.address));
-    const spent = outcomes.reduce((n, o) => n + o.spent, 0n);
-    const back = outcomes.reduce((n, o) => n + o.back, 0n);
-    const lostPpm = PPM - (back * PPM) / spent;
-    console.log(`the bundle's creation-slot buys spent ${spent} lamports and got back ${back}: ${Number(lostPpm) / 10_000}% lost`);
-    expect(spent).toBeGreaterThan(0n);
-    expect(lostPpm).toBeGreaterThanOrEqual(970_000n);
-    await sweep(...funded, sniper);
-
-    // An hour after the open the case job opens the case, with its evidence pack.
-    let found: typeof bundleCases.$inferSelect | undefined;
-    while (!found && Date.now() < opened + 75 * 60_000) {
-      if (TARGET.name === "local" && Date.now() > opened + 60 * 60_000) await fetch(`${TARGET.api}/cdn-cgi/local/scheduled`).catch(() => undefined);
+    if (resumedMint) {
+      coin = resumedMint as Address;
+      mints.push(coin);
       [found] = await db.select().from(bundleCases).where(eq(bundleCases.mint, coin));
-      if (!found) await sleep(30_000);
+      expect(found, `the resumed run's coin ${coin} has a case`).toBeDefined();
+      console.log(`resuming ${run} at its case ${found!.id}, ${found!.status}`);
+      // The first run swept the creator back to the bank: enough again for a Fair Open deposit and the fees.
+      await fund([creator], [(SOL * 4n) / 100n]);
+      await installTestWallet(page, creator);
+      await page.goto("/launch");
+      await signInOnLaunch(page);
+    } else {
+      // The creator pays each try's pool rent and funds its 4 wallets, with 0.02 SOL over to deposit in another's Fair Open.
+      await fund([creator, sniper], [(SOL * 37n) / 100n, SOL / 20n]);
+      await fundDirectly(creator, funded.map((f) => f.address), FUNDED);
+      for (const w of [...bundleWallets, sniper]) await wrapSol(w, BUY * BigInt(COPIES + 2));
+
+      // The bundle must land in the creation slot: a launch whose buys missed it is launched again, at most 5 times.
+      let attempt: Attempt | null = null;
+      let handle: string | null = null;
+      let creationSlot = 0n;
+      for (let tries = 0; tries < 5; tries++) {
+        if (tries) {
+          await page.close();
+          page = await first.context().newPage();
+          errors = pageErrors(page);
+        }
+        // The creator links X on the first try, so the Bar owes them a direct message; a try again keeps the record.
+        const launched = await launchWithBundle(page, creator, funded, sniper, { linked: tries > 0, linkX: tries === 0 });
+        handle ??= launched.handle;
+        attempt = launched;
+        mints.push(launched.mint);
+        const radar = await waitFor(() => api(`/coins/${launched.mint}/radar`, BundleRadar), (r) => r.creation.blockIndex !== null, 60_000);
+        creationSlot = BigInt(radar.creation.slot);
+        const landed = await landings(launched.copies.map((c) => c.signature));
+        const inSlot = new Set(
+          launched.copies.flatMap((c) => {
+            const l = landed.get(c.signature as Signature);
+            return l && !l.err && l.slot === creationSlot ? c.buyers : [];
+          }),
+        );
+        console.log(`try ${tries + 1}: ${launched.mint}, created in slot ${creationSlot}; ${inSlot.size} bundle wallets bought in it`);
+        if (bundleWallets.every((w) => inSlot.has(w.address))) break;
+        for (const w of [...bundleWallets, sniper]) await sellAndClose(w, launched.mint, INSTANT).catch(() => undefined);
+        for (const w of [...bundleWallets, sniper]) await wrapSol(w, BUY * BigInt(COPIES + 2));
+        attempt = null;
+      }
+      expect(attempt, "the Creator wallet and its 4 wallets each bought in the creation slot").not.toBeNull();
+      expect(handle, "the creator linked X").not.toBeNull();
+      coin = attempt!.mint;
+      const opened = Date.parse((await api(`/coins/${coin}/radar`, BundleRadar)).openedAt);
+
+      // Bundle Radar labels the coin: the 4 funded wallets linked to the creator.
+      const linked = await waitFor(
+        () => api(`/coins/${coin}/radar`, BundleRadar),
+        (r) => funded.every((f) => r.wallets.some((w) => w.wallet === f.address && w.linked)),
+        120_000,
+      );
+      console.log(`Bundle Radar linked ${linked.linked.wallets} wallets to the creator`);
+      await page.goto(`/coin/${coin}`);
+      await expect(page.getByTestId("radar-linked")).toContainText("wallets linked to the creator", { timeout: 30_000 });
+      await snap(page, "sim-01-radar");
+
+      // Past the sniper tax the 4 wallets buy on, over 1% of supply between them; 2 minutes after the open everyone sells.
+      await sleep(Math.max(0, opened + 65_000 - Date.now()));
+      for (const f of funded) await swap(f, coin, "buy", PAST_TAX);
+      await sleep(Math.max(0, opened + 120_000 - Date.now()));
+      for (const w of [...bundleWallets, sniper]) await sellAndClose(w, coin, INSTANT);
+
+      // The bundle lost at least 97% of what its creation-slot buys spent (spec 11.1).
+      const [radar, trades] = await (async () => {
+        for (;;) {
+          const [r, t] = [await api(`/coins/${coin}/radar`, BundleRadar), await api(`/coins/${coin}/trades?limit=200`, CoinTrades)];
+          if (bundleWallets.every((w) => t.trades.some((x) => x.trader === w.address && x.side === "sell"))) return [r, t.trades] as const;
+          await sleep(2_000);
+        }
+      })();
+      const outcomes = bundleWallets.map((w) => slotOutcome(radar, trades, w.address));
+      const spent = outcomes.reduce((n, o) => n + o.spent, 0n);
+      const back = outcomes.reduce((n, o) => n + o.back, 0n);
+      const lostPpm = PPM - (back * PPM) / spent;
+      console.log(`the bundle's creation-slot buys spent ${spent} lamports and got back ${back}: ${Number(lostPpm) / 10_000}% lost`);
+      expect(spent).toBeGreaterThan(0n);
+      expect(lostPpm).toBeGreaterThanOrEqual(970_000n);
+      await sweep(...funded, sniper);
+
+      // An hour after the open the case job opens the case, with its evidence pack.
+      while (!found && Date.now() < opened + 75 * 60_000) {
+        if (TARGET.name === "local" && Date.now() > opened + 60 * 60_000) await fetch(`${TARGET.api}/cdn-cgi/local/scheduled`).catch(() => undefined);
+        [found] = await db.select().from(bundleCases).where(eq(bundleCases.mint, coin));
+        if (!found) await sleep(30_000);
+      }
+      expect(found, "a case opened within 75 minutes of the open").toBeDefined();
+      console.log(`case ${found!.id} opened ${((found!.openedAt.getTime() - opened) / 60_000).toFixed(1)} min after the open`);
     }
-    expect(found, "a case opened within 75 minutes of the open").toBeDefined();
-    console.log(`case ${found!.id} opened ${((found!.openedAt.getTime() - opened) / 60_000).toFixed(1)} min after the open`);
 
     // The first operator reads the evidence pack and confirms the case: the creator is barred.
     const operator = await browser.newPage();
-    await operator.goto(`${OPERATOR}/cases/${coin}`);
-    await operator.getByRole("button", { name: "Open the evidence pack" }).click();
-    await expect(operator.getByRole("heading", { name: "Linked wallets" })).toBeVisible();
-    await snap(operator, "sim-02-operator-evidence");
-    await operator.goto(`${OPERATOR}/cases/${coin}`);
-    await expect(operator.getByText("Heat's X account sends them a direct message")).toBeVisible();
-    await snap(operator, "sim-03-operator-case");
-    await decide(operator, /Confirm the case: bar the creator/, `Simulation ${run}: the Creator wallet funded 4 wallets that bought with it in the creation slot.`);
-    const barId = new URL(operator.url()).pathname.split("/").pop()!;
+    let barId: string;
+    if (found!.status === "open") {
+      await operator.goto(`${OPERATOR}/cases/${coin}`);
+      await operator.getByRole("button", { name: "Open the evidence pack" }).click();
+      await expect(operator.getByRole("heading", { name: "Linked wallets" })).toBeVisible();
+      await snap(operator, "sim-02-operator-evidence");
+      await operator.goto(`${OPERATOR}/cases/${coin}`);
+      await expect(operator.getByText("Heat's X account sends them a direct message")).toBeVisible();
+      await snap(operator, "sim-03-operator-case");
+      await decide(operator, /Confirm the case: bar the creator/, `Simulation ${run}: the Creator wallet funded 4 wallets that bought with it in the creation slot.`);
+      barId = new URL(operator.url()).pathname.split("/").pop()!;
+    } else {
+      barId = (await db.select({ id: bars.id }).from(bars).where(eq(bars.caseId, found!.id)))[0]!.id;
+      await operator.goto(`${OPERATOR}/bars/${barId}`);
+    }
     await expect(operator.getByText("Private window", { exact: true })).toBeVisible();
     await snap(operator, "sim-04-operator-bar");
 
@@ -199,8 +222,14 @@ test("the bundler simulation: the bundle loses its creation-slot spend, a confir
     await page.locator('input[type="file"]').setInputFiles(await uniqueCoinImage(page, ticker));
     await expectVampLaunchable(page);
     await page.getByRole("button", { name: "Continue" }).click();
+    const beforeRefusal = errors.length;
     await page.getByRole("button", { name: "Launch", exact: true }).click();
-    await expect(page.getByRole("alert")).toContainText("Heat's launch key no longer co-signs your launches", { timeout: 30_000 });
+    // Not just any alert: Next's route announcer is one too, and empty.
+    await expect(page.getByRole("alert").filter({ hasText: "The launch did not go through" })).toContainText("Heat's launch key no longer co-signs your launches", { timeout: 30_000 });
+    // The refusal is a 403, which the browser logs as a failed load: the one error this page is meant to show.
+    const refusalLogged = errors.findIndex((e, i) => i >= beforeRefusal && e.includes("status of 403"));
+    expect(refusalLogged).toBeGreaterThanOrEqual(0);
+    errors.splice(refusalLogged, 1);
     await snap(page, "sim-05-launch-refused");
     expect(await prepareStatus(page, creator.address)).toMatchObject({ status: 403, body: { code: "barred" } });
 
@@ -221,6 +250,7 @@ test("the bundler simulation: the bundle loses its creation-slot spend, a confir
     await snap(page, "sim-07-appealed");
     // Nobody else sees any of it before the 72 hours are up.
     const outsider = await stranger(browser);
+    const outsiderErrors = pageErrors(outsider);
     await outsider.goto(`/creator/${creator.address}`);
     await expect(outsider.getByTestId("record-name")).toBeVisible();
     await expect(outsider.getByTestId("private-bar")).toHaveCount(0);
@@ -307,6 +337,7 @@ test("the bundler simulation: the bundle loses its creation-slot spend, a confir
     await snap(page, "sim-15-lifted");
     expect((await prepareStatus(page, creator.address)).status).toBe(201);
     expect(errors).toEqual([]);
+    expect(outsiderErrors).toEqual([]);
   } finally {
     if (other) await recoverDeposits(other.launch, creator, [creator]).catch((e) => console.error("bringing back the Fair Open deposit failed", e));
     await sweepRun(run, mints);

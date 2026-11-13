@@ -330,18 +330,8 @@ export const prepareCreatorRole = (mint: string, holder: string, to: string) => 
 /** A sent hand-over, settled by the API against the chain and indexed at once. */
 export const reportCreatorRole = (mint: string, signature: string) => call(CreatorRoleOutcome, `/coins/${encodeURIComponent(mint)}/creator-role/sent`, postJson({ signature }));
 
-/**
- * The record's Bars as its own creator sees them (spec 6.5), private ones included; null for anyone else, whom the API
- * answers 401 or 403 so nothing of a private finding reaches them.
- */
-export async function getPrivateBars(key: string): Promise<PrivateBars | null> {
-  try {
-    return await call(PrivateBars, `/creators/${encodeURIComponent(key)}/bars`);
-  } catch (e) {
-    if (e instanceof ApiProblem && (e.status === 401 || e.status === 403 || e.status === 404)) return null;
-    throw e;
-  }
-}
+/** The record's Bars as its own creator sees them (spec 6.5), private ones included; none for anyone else. */
+export const getPrivateBars = (key: string) => call(PrivateBars, `/creators/${encodeURIComponent(key)}/bars`);
 
 /** The barred creator's reply to the evidence, for the operator. */
 export const replyToBar = (bar: string, body: string) => call(BarReply, `/bars/${encodeURIComponent(bar)}/replies`, postJson({ body }));

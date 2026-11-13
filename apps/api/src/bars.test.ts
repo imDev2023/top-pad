@@ -120,9 +120,10 @@ beforeEach(async () => {
 describe("the private 72-hour window", () => {
   it("shows the Bar only to its own creator, with the evidence pack, and nothing of it in public", async () => {
     const b = await barred(HOUR);
-    expect((await request(`/creators/${b.creatorId}/bars`)).status).toBe(401);
+    // Signed out or signed in as anyone else, the answer is the same as for a record with no Bar.
+    expect(await privateView(b.creatorId, "")).toEqual([]);
     const stranger = await signInWallet(request, (await testKeypair()).signer);
-    expect((await request(`/creators/${b.creatorId}/bars`, { headers: { cookie: stranger } })).status).toBe(403);
+    expect(await privateView(b.creatorId, stranger)).toEqual([]);
 
     const [bar] = await privateView(b.wallet.address, b.cookie);
     expect(bar).toMatchObject({ id: b.barId, coin: { mint: b.mint, ticker: "FROG" }, published: false, liftedAt: null, canAppeal: "first", message: null });

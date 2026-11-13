@@ -418,16 +418,16 @@ export async function getCurrentRecord(c: Context<AppEnv>) {
 
 /**
  * `GET /creators/:key/bars`: the record's Bars with their evidence, replies and appeals (spec 6.5, 9 screen 5), for its
- * own creator only, signed in as the record: nobody else sees a finding before it is published.
+ * own creator only, signed in as the record: nobody else sees a finding before it is published. Anyone else gets none,
+ * with the same answer whether the record has a Bar or not, so the answer gives nothing away; and every visitor's page
+ * asks, so a refusal would put an error in every visitor's console.
  */
 export async function getPrivateBars(c: Context<AppEnv>) {
   const { db } = c.var;
   c.header("cache-control", "no-store");
-  const creator = await sessionCreator(c);
-  if (!creator) return c.json({ error: "Sign in as this record's creator to see its private view." }, 401);
   const id = await resolveRecord(db, c.req.param("key")!);
   if (!id) return c.json({ error: "Heat has no Creator record for this." }, 404);
-  if (id !== creator.id) return c.json({ error: "Only this record's own creator sees its private view." }, 403);
-  const body: PrivateBars = { bars: await privateBars(db, id, await walletsOfRecord(db, id)) };
+  const creator = await sessionCreator(c);
+  const body: PrivateBars = { bars: creator?.id === id ? await privateBars(db, id, await walletsOfRecord(db, id)) : [] };
   return c.json(body);
 }
