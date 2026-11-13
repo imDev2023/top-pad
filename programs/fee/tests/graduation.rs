@@ -46,7 +46,12 @@ impl Test {
     /// A Heat coin's pool whose config graduates at `TARGET` and names the fee claimer as leftover receiver, with the
     /// coin's whole supply minted.
     fn graduating_market(&mut self) -> Market {
-        let market = self.market();
+        self.graduating_market_in(QuoteKind::Spl)
+    }
+
+    /// The same, priced in a quote of `kind`.
+    fn graduating_market_in(&mut self, kind: QuoteKind) -> Market {
+        let market = self.market_in(kind);
         let mut config = self.svm.get_account(&market.coin.config).unwrap();
         put(&mut config.data, CONFIG_MIGRATION_QUOTE_THRESHOLD, &TARGET.to_le_bytes());
         put(&mut config.data, CONFIG_LEFTOVER_RECEIVER, FEE_CLAIMER.as_ref());
@@ -100,7 +105,7 @@ impl Test {
             pool: c.pool,
             quote_vault: market.quote_vault,
             quote_mint: market.quote_mint,
-            token_quote_program: TOKEN_PROGRAM,
+            token_quote_program: market.quote_program,
             dbc_event_authority: dbc::EVENT_AUTHORITY,
             dbc_program: dbc::PROGRAM_ID,
             event_authority: event_authority(),
@@ -140,12 +145,17 @@ impl Test {
     fn graduated(&mut self, market: &Market, owner: &Pubkey, fee_b: u64) -> Graduated {
         let (pool, position, nft_mint, position_nft_account) =
             (Pubkey::new_unique(), Pubkey::new_unique(), Pubkey::new_unique(), Pubkey::new_unique());
-        let (token_a_vault, token_b_vault) = (Pubkey::new_unique(), Pubkey::new_unique());
+        let token_a_vault = Pubkey::new_unique();
         self.set_token_account_data(token_a_vault, token_account_data(&market.coin.mint, &damm_v2::POOL_AUTHORITY, 0));
-        self.set_token_account_data(
-            token_b_vault,
-            token_account_data(&market.quote_mint, &damm_v2::POOL_AUTHORITY, fee_b),
-        );
+        let token_b_vault = if market.quote_program == TOKEN_PROGRAM {
+            let vault = Pubkey::new_unique();
+            self.set_token_account_data(vault, token_account_data(&market.quote_mint, &damm_v2::POOL_AUTHORITY, fee_b));
+            vault
+        } else {
+            let vault = self.open_token_account(&damm_v2::POOL_AUTHORITY, &market.quote_mint, &market.quote_program);
+            self.set_balance(&vault, fee_b);
+            vault
+        };
         self.set_token_account_data(position_nft_account, token_account_data(&nft_mint, owner, 1));
         let mut data = vec![0u8; DAMM_POOL_LEN];
         put(&mut data, 0, &DAMM_POOL_DISCRIMINATOR);
@@ -179,7 +189,7 @@ impl Test {
             mint: market.coin.mint,
             quote_mint: market.quote_mint,
             token_base_program: TOKEN_PROGRAM,
-            token_quote_program: TOKEN_PROGRAM,
+            token_quote_program: market.quote_program,
             damm_event_authority: damm_v2::EVENT_AUTHORITY,
             damm_program: damm_v2::PROGRAM_ID,
             event_authority: event_authority(),
@@ -393,4 +403,44 @@ fn the_fee_program_claims_only_positions_it_owns() {
     let treasury_account = t.quote_account(&market, &treasury);
     assert_refused_by_meteora(t.claim_lp_fees(&market, &creators, treasury_account), "the NFT's owner signs");
     assert_eq!(t.token_balance(&treasury_account), 0);
+}
+
+#[test]
+fn in_an_xstock_graduation_pays_the_quote_through_token_2022_and_waits_while_its_issuer_pauses_it() {
+    // ADR 0007: while an xStock's issuer pauses it, DBC can pay out no surplus and DAMM v2 no position fee; the coin's
+    // own leftover burns regardless, and each claim pays exactly once the quote resumes.
+    let mut t = Test::initialized();
+    let market = t.graduating_market_in(QuoteKind::Xstock);
+    t.complete(&market, 1_000_001);
+    let (creator, treasury) = t.surplus_payees(&market);
+    t.pause_quote(&market, true);
+    let refused = t.claim_surplus(&market, creator, treasury).expect_err("a paused quote moves nothing");
+    assert!(refused.meta.logs.iter().any(|line| line.contains("paused")), "{:?}", refused.meta.logs);
+    assert_eq!((t.token_balance(&creator), t.token_balance(&treasury)), (0, 0));
+
+    // The leftover is the coin, an SPL Token mint the pause does not touch.
+    t.migrate(&market, 12_345);
+    let account = t.coin_account(&market, &FEE_CLAIMER, 0);
+    t.burn_leftover(&market, account).unwrap();
+    assert_eq!(t.supply(&market.coin.mint), SUPPLY - 12_345);
+
+    t.pause_quote(&market, false);
+    t.at(1);
+    let done = t.claim_surplus(&market, creator, treasury).unwrap();
+    println!("claim_surplus in an xStock: {} compute units", done.compute_units_consumed);
+    assert_eq!((t.token_balance(&creator), t.token_balance(&treasury)), (400_000, 400_000));
+    let fee_claimer_account = t.quote_account(&market, &FEE_CLAIMER);
+    assert_eq!(t.token_balance(&fee_claimer_account), 0);
+
+    // Heat's LP fees in the graduated pool: refused while paused, then paid to the treasury's Token-2022 account.
+    let graduated = t.graduated(&market, &FEE_CLAIMER, 123_456);
+    t.pause_quote(&market, true);
+    let refused = t.claim_lp_fees(&market, &graduated, treasury).expect_err("a paused quote moves nothing");
+    assert!(refused.meta.logs.iter().any(|line| line.contains("paused")), "{:?}", refused.meta.logs);
+    t.pause_quote(&market, false);
+    t.at(2);
+    let done = t.claim_lp_fees(&market, &graduated, treasury).unwrap();
+    println!("claim_lp_fees in an xStock: {} compute units", done.compute_units_consumed);
+    assert_eq!(t.token_balance(&treasury), 400_000 + 123_456);
+    assert_eq!(events::<LpFeesClaimed>(&done)[0].amount, 123_456);
 }

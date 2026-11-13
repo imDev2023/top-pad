@@ -3,7 +3,8 @@
 //! quote's own token program; every rent stays in SOL, in the vault. Run in a Token-2022 quote with every extension an
 //! xStock carries (mainnet NVDAx's own mint account, its authorities handed to a test issuer) and in an SPL Token quote
 //! shaped as Circle's USDC. A quote Heat does not take is refused at scheduling, and a paused one fails the open and
-//! holds every refund until its issuer resumes it.
+//! holds every refund until its issuer resumes it; a pause in the window holds deposits and withdrawals, and a pause
+//! after the open holds the pushes, the Creator lock's refund and the Tax Share, each completing once it resumes (#91).
 #![allow(clippy::result_large_err)]
 mod common;
 
@@ -496,5 +497,86 @@ fn fails_in_usdc_with_every_deposit_refunded_in_usdc() {
     let done = t.close_launch(&launch).unwrap();
     println!("USDC close_launch with a stray balance: {} compute units", done.compute_units_consumed);
     assert_eq!(t.quote_held(&creator), 7);
+    assert!(!t.exists(&pot_address(&launch.launch)));
+}
+
+#[test]
+fn a_pause_in_the_window_holds_deposits_and_withdrawals_until_it_resumes() {
+    let (mut t, launch) = scheduled(QuoteKind::Xstock);
+    let (a, b) = (t.depositor(Tier::Verified), t.depositor(Tier::Scored));
+    t.deposit(&launch, &a, 60 * QUOTE_STEP).unwrap();
+
+    // Paused in the window: nobody can add to the pot or take from it, and nothing about either seat changes.
+    t.at(300);
+    t.pause_quote(true);
+    assert!(t.deposit(&launch, &b, 10 * QUOTE_STEP).is_err());
+    assert!(t.deposit(&launch, &a, 10 * QUOTE_STEP).is_err());
+    assert!(t.withdraw(&launch, &a, 10 * QUOTE_STEP).is_err());
+    assert!(!t.exists(&b.seat(&launch)));
+    assert_eq!(t.pot_holds(&launch), 60 * QUOTE_STEP);
+    assert_eq!(t.quote_held(&a.wallet.pubkey()), QUOTE_FUNDS - 60 * QUOTE_STEP);
+
+    // Resumed before the open: both move again, to the raw unit, and the launch opens as if nothing had happened.
+    t.pause_quote(false);
+    t.at(301);
+    t.deposit(&launch, &b, 50 * QUOTE_STEP).unwrap();
+    t.withdraw(&launch, &a, 10 * QUOTE_STEP).unwrap();
+    assert_eq!(t.pot_holds(&launch), 100 * QUOTE_STEP);
+    assert_eq!(t.quote_held(&a.wallet.pubkey()), QUOTE_FUNDS - 50 * QUOTE_STEP);
+    t.at(600);
+    let l: Launch = t.read(&launch.launch);
+    let rung = allocation::rung_at_or_below(l.pot_cap, l.allocation().spend).unwrap();
+    let (_, coin) = t.open(&launch, rung).unwrap();
+    assert_eq!(t.tokens(&coin.quote_vault), Some(rung));
+}
+
+#[test]
+fn a_pause_after_the_open_holds_the_pushes_the_creator_lock_and_the_tax_share_until_it_resumes() {
+    let (mut t, launch) = scheduled(QuoteKind::Xstock);
+    let (people, creator) = with_creator(&mut t, &launch);
+    t.at(600);
+    let l: Launch = t.read(&launch.launch);
+    let rung = allocation::rung_at_or_below(l.pot_cap, l.allocation().spend).unwrap();
+    let (_, coin) = t.open(&launch, rung).unwrap();
+    let l: Launch = t.read(&launch.launch);
+    t.snipe(&coin, 50 * QUOTE_STEP);
+    let owed = t.pot_holds(&launch);
+
+    // Paused after the open: each seat's refund is a transfer of the quote, so no push lands, the creator's coins stay
+    // out of the lock, and the Tax Share cannot be collected once the window ends; every seat stays as it was.
+    t.pause_quote(true);
+    let seats: Vec<&Depositor> = people.iter().take(5).collect();
+    assert!(t.push(&launch, &coin.mint, &seats).is_err());
+    assert!(t.lock_creator(&launch, &coin, &creator).is_err());
+    t.at(600 + 60);
+    assert!(t.collect_tax_share(&launch, &coin).is_err());
+    assert_eq!(t.pot_holds(&launch), owed);
+    for d in &people {
+        assert!(!t.read::<fair_open::Seat>(&d.seat(&launch)).delivered);
+        assert_eq!(t.tokens(&associated_address(&d.wallet.pubkey(), &coin.mint)).unwrap_or(0), 0);
+    }
+
+    // Resumed: every push, the lock, the collection and the Tax Share's pushes complete, each to the raw unit.
+    t.pause_quote(false);
+    t.at(600 + 61);
+    for batch in people.chunks(5) {
+        let seats: Vec<&Depositor> = batch.iter().collect();
+        let befores: Vec<u64> = batch.iter().map(|d| t.quote_held(&d.wallet.pubkey())).collect();
+        let done = t.push(&launch, &coin.mint, &seats).unwrap();
+        for ((d, before), event) in batch.iter().zip(befores).zip(events::<SeatDelivered>(&done)) {
+            let outcome = l.outcome(d.tier, event.deposit);
+            assert_eq!(t.quote_held(&d.wallet.pubkey()) - before, outcome.refund);
+            assert_eq!(t.tokens(&associated_address(&d.wallet.pubkey(), &coin.mint)), Some(outcome.coins));
+        }
+    }
+    let before = t.quote_held(&creator.wallet.pubkey());
+    t.lock_creator(&launch, &coin, &creator).unwrap();
+    assert_eq!(t.quote_held(&creator.wallet.pubkey()) - before, l.outcome(Tier::Scored, 30 * QUOTE_STEP).refund);
+    let collected = events::<TaxShareCollected>(&t.collect_tax_share(&launch, &coin).unwrap())[0].tax_share;
+    let pairs: Vec<(Pubkey, Pubkey)> = people.iter().map(|d| (d.seat(&launch), d.wallet.pubkey())).collect();
+    let paid = events::<TaxSharePaid>(&t.push_tax_share(&launch, &pairs).unwrap());
+    assert_eq!(paid.iter().map(|p| p.amount).sum::<u64>(), collected);
+    assert_eq!(t.pot_holds(&launch), 0);
+    t.close_launch(&launch).unwrap();
     assert!(!t.exists(&pot_address(&launch.launch)));
 }

@@ -2,7 +2,9 @@
 //! FeeConfig, and DBC pools and configs written in DBC's layout. DBC itself never runs here, only our stand-in for its
 //! partner fee claim (tests/dbc-stand-in, built by `pnpm programs`), so a claim moves real tokens out of a pool's vault;
 //! the devnet tests check the same claims against the real DBC. Graduation's claims run against our stand-ins for DBC's
-//! surplus and leftover and for DAMM v2's position fee claim (tests/damm-stand-in) in the same way.
+//! surplus and leftover and for DAMM v2's position fee claim (tests/damm-stand-in) in the same way. A market's quote is
+//! an SPL Token mint, or an xStock: mainnet NVDAx's own Token-2022 mint account with every extension, its issuer powers
+//! handed to the test's issuer, so a claim can be watched to wait while the issuer pauses it (ADR 0007).
 // LiteSVM's failed-transaction metadata is large by design; the helpers here only hand it back to the test.
 #![allow(clippy::result_large_err, dead_code)]
 use {
@@ -33,6 +35,9 @@ const DAMM_STAND_IN: &[u8] = include_bytes!(concat!(env!("CARGO_TARGET_TMPDIR"),
 /// The upgradeable loader, which owns every ProgramData account.
 pub const UPGRADEABLE_LOADER: Pubkey = anchor_lang::solana_program::bpf_loader_upgradeable::ID;
 pub const TOKEN_PROGRAM: Pubkey = anchor_lang::pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+pub const TOKEN_2022: Pubkey = anchor_lang::pubkey!("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+/// Mainnet NVDAx's mint account (`pnpm --filter @top-pad/chain quote-check`), which the Fair Open program's tests use too.
+const NVDAX: &str = include_str!("../../../../packages/chain/src/fixtures/xstock-nvdax.json");
 /// When the tests' pools open, as a Unix timestamp.
 pub const ACTIVATION: i64 = 1_800_000_000;
 
@@ -74,11 +79,22 @@ pub struct DbcCoin {
     pub creator: Pubkey,
 }
 
+/// What a market's quote is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum QuoteKind {
+    /// A new SPL Token mint of 6 decimals, so the tests also show the program never assumes SOL (spec 5.1).
+    Spl,
+    /// An xStock: NVDAx's Token-2022 mint, 8 decimals, Permanent Delegate, Pausable, Scaled UI Amount and the rest.
+    Xstock,
+}
+
 /// A coin's pool with its vaults as real token accounts, on a config whose quote is `quote_mint`: what a claim reads.
 #[derive(Clone, Copy)]
 pub struct Market {
     pub coin: DbcCoin,
     pub quote_mint: Pubkey,
+    /// The quote's token program, which every claim names for it.
+    pub quote_program: Pubkey,
     pub base_vault: Pubkey,
     pub quote_vault: Pubkey,
 }
@@ -89,6 +105,8 @@ pub struct Test {
     pub launch_key: Keypair,
     pub payer: Keypair,
     pub fee_settings: FeeSettings,
+    /// Holds every issuer power of an xStock quote: it pauses and resumes it.
+    pub issuer: Keypair,
 }
 
 impl Test {
@@ -105,7 +123,8 @@ impl Test {
             launch_key: launch_key.pubkey(),
             fair_open_program: Pubkey::new_unique(),
         };
-        let mut t = Test { svm, upgrade_authority: Keypair::new(), launch_key, payer, fee_settings };
+        let mut t =
+            Test { svm, upgrade_authority: Keypair::new(), launch_key, payer, fee_settings, issuer: Keypair::new() };
         t.set_upgrade_authority(Some(t.upgrade_authority.pubkey()));
         t
     }
@@ -243,17 +262,33 @@ impl Test {
         coin
     }
 
-    /// A Heat config's pool, opened at `ACTIVATION`, with its two vaults and its quote: a new mint of 6 decimals, so the
-    /// tests also show the program never assumes SOL (spec 5.1).
+    /// A Heat config's pool, opened at `ACTIVATION`, with its two vaults and its quote: a new SPL Token mint of 6
+    /// decimals.
     pub fn market(&mut self) -> Market {
+        self.market_in(QuoteKind::Spl)
+    }
+
+    /// The same, its quote of `kind`: every account of the quote under the quote's own token program.
+    pub fn market_in(&mut self, kind: QuoteKind) -> Market {
         let coin = self.dbc_coin(fee::FEE_CLAIMER);
         let quote_mint = Pubkey::new_unique();
-        let (base_vault, quote_vault) = (Pubkey::new_unique(), Pubkey::new_unique());
-        self.set_token_account_data(quote_mint, mint_data(6));
+        let base_vault = Pubkey::new_unique();
         self.set_token_account_data(coin.mint, mint_data(6));
         let authority = dbc::POOL_AUTHORITY;
         self.set_token_account_data(base_vault, token_account_data(&coin.mint, &authority, 800_000_000_000_000));
-        self.set_token_account_data(quote_vault, token_account_data(&quote_mint, &authority, 0));
+        let (quote_program, quote_vault) = match kind {
+            QuoteKind::Spl => {
+                let vault = Pubkey::new_unique();
+                self.set_token_account_data(quote_mint, mint_data(6));
+                self.set_token_account_data(vault, token_account_data(&quote_mint, &authority, 0));
+                (TOKEN_PROGRAM, vault)
+            }
+            QuoteKind::Xstock => {
+                let data = xstock_mint_data(&self.issuer.pubkey());
+                self.set_program_account(quote_mint, data, TOKEN_2022);
+                (TOKEN_2022, self.open_token_account(&authority, &quote_mint, &TOKEN_2022))
+            }
+        };
         let mut config = self.svm.get_account(&coin.config).unwrap();
         put(&mut config.data, 8, quote_mint.as_ref());
         self.svm.set_account(coin.config, config).unwrap();
@@ -262,7 +297,42 @@ impl Test {
             put(pool, POOL_QUOTE_VAULT_OFFSET, quote_vault.as_ref());
             put(pool, dbc::POOL_ACTIVATION_POINT_OFFSET, &(ACTIVATION as u64).to_le_bytes());
         });
-        Market { coin, quote_mint, base_vault, quote_vault }
+        Market { coin, quote_mint, quote_program, base_vault, quote_vault }
+    }
+
+    /// `owner`'s associated account of `mint` under `program`, opened empty by the associated token program, which
+    /// gives a Token-2022 account every extension its mint asks of it.
+    pub fn open_token_account(&mut self, owner: &Pubkey, mint: &Pubkey, program: &Pubkey) -> Pubkey {
+        let address = associated_token_address_in(owner, mint, program);
+        let create = Instruction {
+            program_id: fee::ASSOCIATED_TOKEN_PROGRAM,
+            accounts: vec![
+                AccountMeta::new(self.payer.pubkey(), true),
+                AccountMeta::new(address, false),
+                AccountMeta::new_readonly(*owner, false),
+                AccountMeta::new_readonly(*mint, false),
+                AccountMeta::new_readonly(system_program::ID, false),
+                AccountMeta::new_readonly(*program, false),
+            ],
+            data: vec![1],
+        };
+        self.send(&[create], &[]).unwrap();
+        address
+    }
+
+    /// The issuer pauses an xStock quote (Token-2022's `Pausable`: every transfer of it fails), or resumes it.
+    pub fn pause_quote(&mut self, market: &Market, paused: bool) {
+        assert_eq!(market.quote_program, TOKEN_2022, "only an xStock can be paused");
+        let ix = Instruction {
+            program_id: TOKEN_2022,
+            accounts: vec![
+                AccountMeta::new(market.quote_mint, false),
+                AccountMeta::new_readonly(self.issuer.pubkey(), true),
+            ],
+            data: vec![44, if paused { 1 } else { 2 }],
+        };
+        let issuer = self.issuer.insecure_clone();
+        self.send(&[ix], &[&issuer]).unwrap();
     }
 
     /// Trades on a pool as DBC records them: the partner's quote fee grows, and its quote vault holds the fee.
@@ -298,9 +368,13 @@ impl Test {
 
     /// `owner`'s associated account for the market's quote, opened empty if it is not there yet.
     pub fn quote_account(&mut self, market: &Market, owner: &Pubkey) -> Pubkey {
-        let address = associated_token_address(owner, &market.quote_mint);
+        let address = associated_token_address_in(owner, &market.quote_mint, &market.quote_program);
         if self.svm.get_account(&address).is_none() {
-            self.set_token_account_data(address, token_account_data(&market.quote_mint, owner, 0));
+            if market.quote_program == TOKEN_PROGRAM {
+                self.set_token_account_data(address, token_account_data(&market.quote_mint, owner, 0));
+            } else {
+                self.open_token_account(owner, &market.quote_mint, &market.quote_program);
+            }
         }
         address
     }
@@ -437,9 +511,56 @@ pub fn program_data_address() -> Pubkey {
 }
 
 pub fn associated_token_address(owner: &Pubkey, mint: &Pubkey) -> Pubkey {
-    Pubkey::find_program_address(
-        &[owner.as_ref(), TOKEN_PROGRAM.as_ref(), mint.as_ref()],
-        &fee::ASSOCIATED_TOKEN_PROGRAM,
-    )
-    .0
+    associated_token_address_in(owner, mint, &TOKEN_PROGRAM)
+}
+
+pub fn associated_token_address_in(owner: &Pubkey, mint: &Pubkey, program: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(&[owner.as_ref(), program.as_ref(), mint.as_ref()], &fee::ASSOCIATED_TOKEN_PROGRAM).0
+}
+
+/// Token-2022's extensions on NVDAx whose first 32 bytes are an authority the issuer holds: the metadata pointer's,
+/// the permanent delegate, the confidential transfer mint's, the transfer hook's, the token metadata's update
+/// authority, the scaled UI amount's and the pause authority.
+const ISSUER_EXTENSIONS: [u16; 7] = [18, 12, 4, 14, 19, 25, 26];
+
+/// Mainnet NVDAx's mint account, every extension an xStock carries, with no supply and every authority handed to
+/// `issuer`.
+pub fn xstock_mint_data(issuer: &Pubkey) -> Vec<u8> {
+    let fixture: serde_json::Value = serde_json::from_str(NVDAX).unwrap();
+    let mut data = base64_decode(fixture["data"].as_str().unwrap());
+    data[4..36].copy_from_slice(issuer.as_ref());
+    data[36..44].fill(0);
+    data[50..82].copy_from_slice(issuer.as_ref());
+    let mut at = 166;
+    while at + 4 <= data.len() {
+        let kind = u16::from_le_bytes([data[at], data[at + 1]]);
+        let len = u16::from_le_bytes([data[at + 2], data[at + 3]]) as usize;
+        if kind == 0 {
+            break;
+        }
+        if ISSUER_EXTENSIONS.contains(&kind) {
+            data[at + 4..at + 36].copy_from_slice(issuer.as_ref());
+        }
+        at += 4 + len;
+    }
+    data
+}
+
+/// Standard base64, so the tests need no crate for the fixture.
+fn base64_decode(text: &str) -> Vec<u8> {
+    let value = |c: u8| match c {
+        b'A'..=b'Z' => c - b'A',
+        b'a'..=b'z' => c - b'a' + 26,
+        b'0'..=b'9' => c - b'0' + 52,
+        b'+' => 62,
+        b'/' => 63,
+        _ => panic!("not base64: {c}"),
+    };
+    let digits: Vec<u8> = text.bytes().filter(|&c| c != b'=').map(value).collect();
+    let mut out = vec![];
+    for chunk in digits.chunks(4) {
+        let n = chunk.iter().enumerate().fold(0u32, |n, (i, &d)| n | (d as u32) << (18 - 6 * i));
+        out.extend_from_slice(&n.to_be_bytes()[1..chunk.len()]);
+    }
+    out
 }

@@ -35,7 +35,12 @@ impl Test {
 
     /// A Heat coin: a market whose coin the launch key registered, as an Instant launch.
     fn heat_coin(&mut self) -> Market {
-        let market = self.market();
+        self.heat_coin_in(QuoteKind::Spl)
+    }
+
+    /// The same, priced in a quote of `kind`.
+    fn heat_coin_in(&mut self, kind: QuoteKind) -> Market {
+        let market = self.market_in(kind);
         let launch_key = self.launch_key.insecure_clone();
         self.register(&market.coin, &launch_key).unwrap();
         market
@@ -57,7 +62,7 @@ impl Test {
             mint: c.mint,
             quote_mint: market.quote_mint,
             token_base_program: TOKEN_PROGRAM,
-            token_quote_program: TOKEN_PROGRAM,
+            token_quote_program: market.quote_program,
             dbc_event_authority: dbc::EVENT_AUTHORITY,
             dbc_program: dbc::PROGRAM_ID,
             event_authority: event_authority(),
@@ -85,7 +90,7 @@ impl Test {
             mint: c.mint,
             quote_mint: market.quote_mint,
             token_base_program: TOKEN_PROGRAM,
-            token_quote_program: TOKEN_PROGRAM,
+            token_quote_program: market.quote_program,
             dbc_event_authority: dbc::EVENT_AUTHORITY,
             dbc_program: dbc::PROGRAM_ID,
             system_program: anchor_lang::solana_program::system_program::ID,
@@ -114,7 +119,7 @@ impl Test {
             mint: c.mint,
             quote_mint: market.quote_mint,
             token_base_program: TOKEN_PROGRAM,
-            token_quote_program: TOKEN_PROGRAM,
+            token_quote_program: market.quote_program,
             dbc_event_authority: dbc::EVENT_AUTHORITY,
             dbc_program: dbc::PROGRAM_ID,
             event_authority: event_authority(),
@@ -374,7 +379,7 @@ impl Test {
             mint: c.mint,
             quote_mint: market.quote_mint,
             token_base_program: TOKEN_PROGRAM,
-            token_quote_program: TOKEN_PROGRAM,
+            token_quote_program: market.quote_program,
             dbc_event_authority: dbc::EVENT_AUTHORITY,
             dbc_program: dbc::PROGRAM_ID,
             event_authority: event_authority(),
@@ -520,4 +525,60 @@ fn only_the_fee_programs_own_claimer_can_sign_dbcs_claim() {
     let err = t.claim_window(&market, &payees).unwrap_err();
     assert!(err.meta.logs.iter().any(|l| l.contains("not the fee claimer")), "{:?}", err.meta.logs);
     assert_eq!(t.partner_quote_fee(&market), 1_000);
+}
+
+/// A Token-2022 refusal of a paused mint's transfer, which Token-2022 logs; the program's own checks all passed.
+fn assert_paused(result: Sent) {
+    let err = result.expect_err("a paused quote moves nothing");
+    assert!(err.meta.logs.iter().any(|line| line.contains("paused")), "{:?}", err.meta.logs);
+}
+
+#[test]
+fn in_an_xstock_every_claim_pays_the_quote_through_token_2022_and_waits_while_its_issuer_pauses_it() {
+    // ADR 0007: an xStock's issuer can pause it, which stops DBC paying any of its fees out of a pool; nothing is lost,
+    // and the same claims pay exactly once it resumes.
+    let mut t = Test::initialized();
+    let market = t.heat_coin_in(QuoteKind::Xstock);
+    assert_eq!(market.quote_program, TOKEN_2022);
+    let payees = t.payees(&market);
+    t.accrue(&market, 7_920_000);
+
+    // Paused as the Tax window ends: the window claim fails and leaves the window unclaimed.
+    t.at(TAX_WINDOW_SECONDS);
+    t.pause_quote(&market, true);
+    assert_paused(t.claim_window(&market, &payees));
+    assert!(!t.read::<CoinRecord>(&coin_record_address(&market.coin.mint)).window_claimed);
+    assert_eq!((t.partner_quote_fee(&market), t.token_balance(&market.quote_vault)), (7_920_000, 7_920_000));
+
+    t.pause_quote(&market, false);
+    t.at(TAX_WINDOW_SECONDS + 1);
+    let done = t.claim_window(&market, &payees).unwrap();
+    println!("claim_window_fees in an xStock: {} compute units", done.compute_units_consumed);
+    assert_eq!(t.token_balance(&payees.treasury), 7_920_000);
+
+    // Creator Earnings: refused while paused, then paid half and half to the raw unit.
+    t.accrue(&market, 1_001);
+    t.pause_quote(&market, true);
+    t.at(TAX_WINDOW_SECONDS + 2);
+    assert_paused(t.claim_coin_fees(&market, &payees, u64::MAX));
+    assert_eq!((t.partner_quote_fee(&market), t.token_balance(&payees.creator)), (1_001, 0));
+    t.pause_quote(&market, false);
+    t.at(TAX_WINDOW_SECONDS + 3);
+    let done = t.claim_coin_fees(&market, &payees, u64::MAX).unwrap();
+    println!("claim_fees in an xStock: {} compute units", done.compute_units_consumed);
+    assert_eq!(t.balances(&payees), (500, 7_920_000 + 501));
+    assert_eq!((t.partner_quote_fee(&market), t.token_balance(&market.quote_vault)), (0, 0));
+    assert_eq!(t.token_balance(&payees.fee_claimer), 0, "no fee rests with the fee program");
+}
+
+#[test]
+fn in_an_xstock_a_claim_naming_spl_tokens_program_or_accounts_is_refused() {
+    let mut t = Test::initialized();
+    let market = t.heat_coin_in(QuoteKind::Xstock);
+    let payees = t.payees(&market);
+    t.at(TAX_WINDOW_SECONDS);
+    // SPL Token named as the quote's program: the quote accounts it would derive are not the payees' accounts.
+    let misnamed = Market { quote_program: TOKEN_PROGRAM, ..market };
+    assert_error(t.claim_window(&misnamed, &payees), FeeErrorCode::NotTheTreasurysAccount);
+    t.claim_window(&market, &payees).unwrap();
 }
