@@ -5,17 +5,36 @@ import { useSignAndSendTransactions } from "@solana/react";
 import type { UiWalletAccount } from "@wallet-standard/react";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import type { ClaimOutcome, CreatorEarnings, EarningsCoin } from "@top-pad/contract";
+import type { ClaimOutcome, CreatorEarnings, EarningsCoin, EarningsQuote, QuoteInfo } from "@top-pad/contract";
 import { ApiProblem, getEarnings, prepareClaim, prepareCreatorRole, reportClaim, reportCreatorRole } from "@/lib/api";
-import { shortAddress, sol } from "@/lib/format";
+import { quoteText, shortAddress, type QuoteUnit } from "@/lib/format";
 import type { SolanaChain } from "../WalletProvider";
 import { LooksLikeChip } from "../vampShield/LooksLike";
 import styles from "./Creator.module.css";
 
 const SIGN_AND_SEND = "solana:signAndSendTransaction";
-/** Every raw unit shows: a claim pays exactly what the page says, to the lamport. */
-const amount = (lamports: string) => `${sol(lamports, 9)} SOL`;
-const toBytes = (base64: string) => Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+/** Every raw unit shows, through the quote's multiplier: a claim pays exactly what the page says, to the lamport. */
+export const earned = (raw: string, quote: QuoteUnit) => quoteText(raw, quote, quote.decimals);
+/** Amounts in several quotes in a sentence: "0.01 SOL and 0.5 USDC". */
+const inWords = (amounts: { raw: string; quote: QuoteUnit }[]) => {
+  const texts = amounts.map((a) => earned(a.raw, a.quote));
+  return texts.length <= 1 ? (texts[0] ?? "") : `${texts.slice(0, -1).join(", ")} and ${texts.at(-1)}`;
+};
+
+/** One amount a line, each in its own quote. */
+export function QuoteAmounts({ amounts, testId }: { amounts: { raw: string; quote: QuoteInfo }[]; testId?: string }) {
+  return (
+    <span className={styles.amounts} data-testid={testId}>
+      {amounts.map(({ raw, quote }) => (
+        <span key={quote.mint} className={styles.amount}>
+          {earned(raw, quote)}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+const toBytes =(base64: string) => Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
 const declined = (e: unknown) => {
   const error = e as { code?: number; message?: string };
   return error?.code === 4001 || /reject|declin|cancel|denied/i.test(error?.message ?? "");
@@ -29,9 +48,9 @@ type Claim =
 
 /**
  * A wallet's Creator Earnings (spec 4, 7): what waits in each Heat coin whose creator role it holds, read from the chain,
- * with a graduated coin's LP fees from its Meteora pool, and one claim of it all, which pays the amounts shown (LP fees
- * that accrue meanwhile come too). A claim the wallet signs is sent by the wallet, and the
- * API then reads what it paid from the chain.
+ * with a graduated coin's LP fees from its Meteora pool, by the quote each coin is priced in (#99), and one claim of it
+ * all, in one wallet request however many quotes it pays, which pays the amounts shown (LP fees that accrue meanwhile
+ * come too). A claim the wallet signs is sent by the wallet, and the API then reads what it paid from the chain.
  */
 export function EarningsPanel({ account, chain, onChanged }: { account: UiWalletAccount; chain: SolanaChain; onChanged?: () => Promise<void> }) {
   const wallet = account.address;
@@ -69,7 +88,9 @@ export function EarningsPanel({ account, chain, onChanged }: { account: UiWallet
     );
   }
 
-  const claimable = earnings.coins.filter((coin) => BigInt(coin.waiting) > 0n);
+  const claimable = earnings.quotes.flatMap((q) => q.coins.filter((coin) => BigInt(coin.waiting) > 0n));
+  const owed = earnings.quotes.filter((q) => BigInt(q.waiting) > 0n);
+  const withCoins = earnings.quotes.filter((q) => q.coins.length > 0);
   const busy = claim.phase === "preparing" || claim.phase === "signing" || claim.phase === "confirming";
   return (
     <>
@@ -77,26 +98,28 @@ export function EarningsPanel({ account, chain, onChanged }: { account: UiWallet
         <dl className={styles.figures}>
           <div>
             <dt className="eyebrow">Waiting for you</dt>
-            <dd className={`num ${styles.waiting}`} data-testid="earnings-waiting">
-              {amount(earnings.waiting)}
+            <dd className={`num ${styles.waiting}`}>
+              <QuoteAmounts amounts={(owed.length ? owed : earnings.quotes.slice(0, 1)).map((q) => ({ raw: q.waiting, quote: q.quote }))} testId="earnings-waiting" />
             </dd>
           </div>
           <div>
             <dt className="eyebrow">Claimed so far</dt>
-            <dd className={`num ${styles.claimed}`}>{amount(earnings.claimed)}</dd>
+            <dd className={`num ${styles.claimed}`}>
+              <QuoteAmounts amounts={claimedFigures(earnings.quotes).map((q) => ({ raw: q.claimed, quote: q.quote }))} testId="earnings-claimed" />
+            </dd>
           </div>
         </dl>
         <div className={styles.action}>
           {account.features.includes(SIGN_AND_SEND) ? (
-            <ClaimButton account={account} chain={chain} coins={claimable} total={earnings.waiting} busy={busy} onClaim={setClaim} onClaimed={load} />
+            <ClaimButton account={account} chain={chain} coins={claimable} owed={owed} busy={busy} onClaim={setClaim} onClaimed={load} />
           ) : (
             <p className="note">Your wallet can sign but not send a transaction from a page, which a claim needs. Claim with Phantom, Solflare or Backpack.</p>
           )}
         </div>
-        <ClaimStatus claim={claim} />
+        <ClaimStatus claim={claim} quotes={earnings.quotes} />
       </section>
 
-      {earnings.coins.length === 0 ? (
+      {withCoins.length === 0 ? (
         <section className={`panel ${styles.empty}`}>
           <p>
             No Heat coin&apos;s creator role is held by <span className={`mono ${styles.address}`}>{shortAddress(wallet)}</span>. A coin you launch, or one whose
@@ -107,33 +130,67 @@ export function EarningsPanel({ account, chain, onChanged }: { account: UiWallet
           </Link>
         </section>
       ) : (
-        <section className={`panel ${styles.coins}`} aria-label="Your coins">
-          <div className={styles.columns} aria-hidden="true">
-            <span>Coin</span>
-            <span>Waiting</span>
-            <span>Claimed</span>
-          </div>
-          <ul className={styles.list}>
-            {earnings.coins.map((coin) => (
-              <CoinRow
-                key={coin.mint}
-                coin={coin}
-                account={account}
-                chain={chain}
-                onHandedOver={async () => {
-                  await load();
-                  await onChanged?.();
-                }}
-              />
-            ))}
-          </ul>
-        </section>
+        withCoins.map((group) => (
+          <section
+            key={group.quote.mint}
+            className={`panel ${styles.coins}`}
+            aria-label={withCoins.length > 1 ? `Your coins priced in ${group.quote.symbol}` : "Your coins"}
+            data-testid="earnings-quote"
+          >
+            {withCoins.length > 1 && (
+              <h3 className={styles.quoteHead}>
+                Priced in {group.quote.symbol}
+                <span className="note">
+                  <span className="num">{earned(group.waiting, group.quote)}</span> waiting, claimed in a transaction of its own
+                </span>
+              </h3>
+            )}
+            <div className={styles.columns} aria-hidden="true">
+              <span>Coin</span>
+              <span>Waiting</span>
+              <span>Claimed</span>
+            </div>
+            <ul className={styles.list}>
+              {group.coins.map((coin) => (
+                <CoinRow
+                  key={coin.mint}
+                  coin={coin}
+                  quote={group.quote}
+                  account={account}
+                  chain={chain}
+                  onHandedOver={async () => {
+                    await load();
+                    await onChanged?.();
+                  }}
+                />
+              ))}
+            </ul>
+          </section>
+        ))
       )}
     </>
   );
 }
 
-function CoinRow({ coin, account, chain, onHandedOver }: { coin: EarningsCoin; account: UiWalletAccount; chain: SolanaChain; onHandedOver: () => Promise<void> }) {
+/** What claims paid, a line a quote paid in, or SOL's nothing when none has. */
+const claimedFigures = (quotes: EarningsQuote[]) => {
+  const paid = quotes.filter((q) => BigInt(q.claimed) > 0n);
+  return paid.length ? paid : quotes.slice(0, 1);
+};
+
+function CoinRow({
+  coin,
+  quote,
+  account,
+  chain,
+  onHandedOver,
+}: {
+  coin: EarningsCoin;
+  quote: QuoteInfo;
+  account: UiWalletAccount;
+  chain: SolanaChain;
+  onHandedOver: () => Promise<void>;
+}) {
   return (
     <li className={styles.coin} data-testid="earnings-coin">
       <Link href={`/coin/${coin.mint}`} className={styles.identity}>
@@ -154,10 +211,10 @@ function CoinRow({ coin, account, chain, onHandedOver }: { coin: EarningsCoin; a
         <span className={`eyebrow ${styles.label}`}>Waiting</span>
         {coin.windowClaimed ? (
           <span className={styles.waitingCell}>
-            <span className="num">{amount(coin.waiting)}</span>
+            <span className="num">{earned(coin.waiting, quote)}</span>
             {BigInt(coin.lpFees) > 0n && (
               <span className="note" data-testid="earnings-lp-fees">
-                with <span className="num">{amount(coin.lpFees)}</span> of LP fees from its Meteora pool
+                with <span className="num">{earned(coin.lpFees, quote)}</span> of LP fees from its Meteora pool
               </span>
             )}
           </span>
@@ -169,7 +226,7 @@ function CoinRow({ coin, account, chain, onHandedOver }: { coin: EarningsCoin; a
       </span>
       <span className={styles.cell}>
         <span className={`eyebrow ${styles.label}`}>Claimed</span>
-        <span className="num muted">{amount(coin.claimed)}</span>
+        <span className="num muted">{earned(coin.claimed, quote)}</span>
       </span>
       {account.features.includes(SIGN_AND_SEND) && <RoleHandover coin={coin} account={account} chain={chain} onHandedOver={onHandedOver} />}
     </li>
@@ -264,14 +321,14 @@ function RoleHandover({ coin, account, chain, onHandedOver }: { coin: EarningsCo
 }
 
 /**
- * The claim: built by Heat's API for exactly the amounts shown, signed and sent by the wallet in one request however
- * many transactions it takes, then read back from the chain.
+ * The claim: built by Heat's API for exactly the amounts shown, each quote's coins in transactions of their own, all
+ * signed and sent by the wallet in one request, then read back from the chain.
  */
 function ClaimButton({
   account,
   chain,
   coins,
-  total,
+  owed,
   busy,
   onClaim,
   onClaimed,
@@ -279,12 +336,13 @@ function ClaimButton({
   account: UiWalletAccount;
   chain: SolanaChain;
   coins: EarningsCoin[];
-  total: string;
+  owed: EarningsQuote[];
   busy: boolean;
   onClaim: (claim: Claim) => void;
   onClaimed: () => Promise<void>;
 }) {
   const signAndSend = useSignAndSendTransactions(account, chain);
+  const total = inWords(owed.map((q) => ({ raw: q.waiting, quote: q.quote })));
 
   async function claimAll() {
     try {
@@ -293,7 +351,14 @@ function ClaimButton({
         account.address,
         coins.map((coin) => ({ mint: coin.mint, partnerFees: coin.partnerFees, lpFees: coin.lpFees })),
       );
-      if (prepared.pays !== total) throw new Error(`the claim would pay ${amount(prepared.pays)}, not the ${amount(total)} shown`);
+      const pays = inWords(
+        prepared.quotes.flatMap((p) => {
+          const quote = owed.find((q) => q.quote.mint === p.mint)?.quote;
+          return quote ? [{ raw: p.pays, quote }] : [];
+        }),
+      );
+      const exact = prepared.quotes.length === owed.length && owed.every((q) => prepared.quotes.find((p) => p.mint === q.quote.mint)?.pays === q.waiting);
+      if (!exact) throw new Error(`the claim would pay ${pays}, not the ${total} shown`);
       onClaim({ phase: "signing" });
       let sent;
       try {
@@ -315,7 +380,7 @@ function ClaimButton({
   const nothing = coins.length === 0;
   return (
     <button type="button" className="btn btn-go" onClick={claimAll} disabled={busy || nothing}>
-      {busy ? "Claiming…" : nothing ? "Nothing to claim yet" : `Claim ${amount(total)}`}
+      {busy ? "Claiming…" : nothing ? "Nothing to claim yet" : `Claim ${total}`}
     </button>
   );
 }
@@ -333,15 +398,19 @@ const STEPS = [
   { phase: "confirming", label: "Confirmed on Solana" },
 ] as const;
 
-function ClaimStatus({ claim }: { claim: Claim }) {
+function ClaimStatus({ claim, quotes }: { claim: Claim; quotes: EarningsQuote[] }) {
   if (claim.phase === "idle") return null;
   if (claim.phase === "done") {
     const { outcome } = claim;
+    const paid = outcome.quotes.flatMap((p) => {
+      const quote = quotes.find((q) => q.quote.mint === p.mint)?.quote;
+      return quote ? [{ raw: p.paid, quote }] : [];
+    });
     return (
       <div className={`verdict verdict-go ${styles.status}`} role="status">
-        <b>Claimed {amount(outcome.paid)}</b>
+        <b>{paid.length ? `Claimed ${inWords(paid)}` : "Claimed"}</b>
         <span className="note">
-          It is in your wallet as SOL.{" "}
+          It is in your wallet{paid.length === 1 && paid[0]!.quote.symbol === "SOL" ? " as SOL" : ""}.{" "}
           {outcome.transactions.map((t, i) => (
             <a key={t.signature} href={t.explorer} target="_blank" rel="noreferrer">
               {outcome.transactions.length > 1 ? `Transaction ${i + 1}` : "See it on the explorer"}

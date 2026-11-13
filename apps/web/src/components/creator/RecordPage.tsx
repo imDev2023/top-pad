@@ -4,15 +4,13 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import type { CreatorEarnings, CreatorRecord, RecordCoin, RecordWallet, WalletChange } from "@top-pad/contract";
 import { ApiProblem, getCreatorRecord, getEarnings } from "@/lib/api";
-import { coinAmount, dayOf, momentOf, quoteText, shortAddress, sol } from "@/lib/format";
+import { coinAmount, dayOf, momentOf, quoteText, shortAddress } from "@/lib/format";
 import { useWallet } from "../WalletProvider";
 import { LooksLikeChip } from "../vampShield/LooksLike";
 import { CreatorMarks, creatorName, graduationText } from "./CreatorSummaryCard";
-import { EarningsPanel } from "./EarningsPanel";
+import { earned, EarningsPanel, QuoteAmounts } from "./EarningsPanel";
 import styles from "./Record.module.css";
 import { CancelChange, HandoverForm } from "./WalletChanges";
-
-const solText = (lamports: string) => `${sol(lamports, 9)} SOL`;
 
 /**
  * A Creator record (spec 7; spec 9, screen 5): only facts anyone can recompute from the chain and Heat's database, with
@@ -126,10 +124,14 @@ export function RecordPage({ initial }: { initial: CreatorRecord }) {
           </div>
           <div data-testid="fact-claimed">
             <dt>Creator Earnings claimed</dt>
-            <dd className="num">{solText(record.earnings.claimed)}</dd>
-            <dd className="note">
-              {solText(record.earnings.curve)} curve, {solText(record.earnings.lp)} LP fees
+            <dd className="num">
+              <QuoteAmounts amounts={paidFigures(record.earnings).map((e) => ({ raw: e.claimed, quote: e.quote }))} />
             </dd>
+            {paidFigures(record.earnings).map((e) => (
+              <dd key={e.quote.mint} className="note">
+                {earned(e.curve, e.quote)} curve, {earned(e.lp, e.quote)} LP fees
+              </dd>
+            ))}
           </div>
         </dl>
       </section>
@@ -142,7 +144,7 @@ export function RecordPage({ initial }: { initial: CreatorRecord }) {
         {own && account ? (
           <EarningsPanel key={account.address} account={account} chain={chain} onChanged={reload} />
         ) : current ? (
-          <PublicEarnings wallet={current} claimed={record.earnings.claimed} />
+          <PublicEarnings wallet={current} claimed={record.earnings} />
         ) : (
           <p className="note">This record has no Creator wallet yet.</p>
         )}
@@ -438,8 +440,14 @@ function CoinRow({ coin }: { coin: RecordCoin }) {
   );
 }
 
-/** What waits for the record's Creator wallet, read from the chain, beside what its claims paid. */
-function PublicEarnings({ wallet, claimed }: { wallet: string; claimed: string }) {
+/** What claims paid in each quote a claim paid in, or SOL's nothing when none has. */
+const paidFigures = (earnings: CreatorRecord["earnings"]) => {
+  const paid = earnings.filter((e) => BigInt(e.claimed) > 0n);
+  return paid.length ? paid : earnings.slice(0, 1);
+};
+
+/** What waits for the record's Creator wallet in each quote, read from the chain, beside what its claims paid. */
+function PublicEarnings({ wallet, claimed }: { wallet: string; claimed: CreatorRecord["earnings"] }) {
   const [earnings, setEarnings] = useState<CreatorEarnings | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   useEffect(() => {
@@ -447,18 +455,27 @@ function PublicEarnings({ wallet, claimed }: { wallet: string; claimed: string }
       .then(setEarnings)
       .catch((e) => setProblem(e instanceof ApiProblem ? e.message : (e as Error).message));
   }, [wallet]);
+  const owed = earnings?.quotes.filter((q) => BigInt(q.waiting) > 0n) ?? [];
   return (
     <div className={`panel ${styles.publicEarnings}`}>
       <dl className={styles.earningsFigures}>
         <div>
           <dt className="eyebrow">Waiting for the Creator wallet</dt>
           <dd className="num" data-testid="record-waiting">
-            {earnings ? solText(earnings.waiting) : problem ? "Not read" : "Reading…"}
+            {earnings ? (
+              <QuoteAmounts amounts={(owed.length ? owed : earnings.quotes.slice(0, 1)).map((q) => ({ raw: q.waiting, quote: q.quote }))} />
+            ) : problem ? (
+              "Not read"
+            ) : (
+              "Reading…"
+            )}
           </dd>
         </div>
         <div>
           <dt className="eyebrow">Claimed so far</dt>
-          <dd className="num">{solText(claimed)}</dd>
+          <dd className="num">
+            <QuoteAmounts amounts={paidFigures(claimed).map((e) => ({ raw: e.claimed, quote: e.quote }))} />
+          </dd>
         </div>
       </dl>
       <p className="note">{problem ?? "Only the wallet holding each coin's creator role can claim; connect the Creator wallet to claim here."}</p>

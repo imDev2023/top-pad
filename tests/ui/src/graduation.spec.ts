@@ -121,11 +121,11 @@ test("a coin bought to its Graduation Target graduates into DAMM v2 by Heat's ke
     await expect(page.getByTestId("earnings-lp-fees")).toBeVisible({ timeout: 30_000 });
     await snap(page, "graduation-6-creator-lp-fees");
     const earnings = await api(`/earnings/${creator.address}`, CreatorEarnings);
-    const shown = earnings.coins.find((c) => c.mint === mint)!;
+    const shown = earnings.quotes.flatMap((q) => q.coins).find((c) => c.mint === mint)!;
     expect(BigInt(shown.lpFees)).toBeGreaterThan(0n);
     const before = await lamports(creator.address);
     await page.getByRole("button", { name: /^Claim / }).click();
-    await expect(page.getByText(/^Claimed [\d.]+ SOL$/)).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByText(/^Claimed [\d.]+\sSOL$/)).toBeVisible({ timeout: 60_000 });
     await snap(page, "graduation-7-creator-claimed");
     // At least what the page showed, less the network fee and the coin account the LP claim opens.
     const rent = await rpc.getMinimumBalanceForRentExemption(165n).send();

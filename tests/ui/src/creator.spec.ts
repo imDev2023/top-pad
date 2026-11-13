@@ -88,7 +88,8 @@ test("the window's tax reaches the treasury at 60 s, and the creator claims exac
   await openCreatorPage(page);
   const listed = await api(`/earnings/${creator.address}`, CreatorEarnings);
   const fees = await partnerFees(pool);
-  expect(listed.coins).toEqual([expect.objectContaining({ mint, partnerFees: fees.toString(), waiting: creatorShare(fees).toString(), windowClaimed: true })]);
+  expect(listed.quotes.map((q) => q.quote.symbol)).toEqual(["SOL"]);
+  expect(listed.quotes[0]!.coins).toEqual([expect.objectContaining({ mint, partnerFees: fees.toString(), waiting: creatorShare(fees).toString(), windowClaimed: true })]);
   await expect(page.getByTestId("earnings-waiting")).toHaveText(shown(creatorShare(fees)));
   await expect(page.getByTestId("earnings-coin")).toContainText("Heat Earnings");
   await snap(page, "earnings-3-waiting");

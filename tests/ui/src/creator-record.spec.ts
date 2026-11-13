@@ -140,7 +140,8 @@ async function recomputeAndMatch(page: Page, key: string) {
     }
     const lp = own.length ? await db.select().from(lpFeeClaims).where(inArray(lpFeeClaims.owner, own)) : [];
     const lpPaid = lp.reduce((sum, l) => sum + l.quoteAmount, 0n);
-    expect(record.earnings).toEqual({ claimed: `${curve + lpPaid}`, curve: `${curve}`, lp: `${lpPaid}` });
+    // This demo's coins are all priced in SOL.
+    expect(record.earnings).toEqual([{ quote: expect.objectContaining({ symbol: "SOL" }), claimed: `${curve + lpPaid}`, curve: `${curve}`, lp: `${lpPaid}` }]);
 
     // Coins another record launched whose role a wallet of this one holds now.
     const toOwn = own.length ? await db.select().from(poolCreatorTransfers).where(inArray(poolCreatorTransfers.toWallet, own)) : [];
@@ -279,7 +280,7 @@ test("a creator hands over a coin's creator role and their Creator wallet; the r
     await openCreatorPage(heirSide.page);
     const inherited = await partnerFees(pool);
     const listed = await api(`/earnings/${heir.address}`, CreatorEarnings);
-    expect(listed.coins).toEqual([expect.objectContaining({ mint, waiting: creatorShare(inherited).toString() })]);
+    expect(listed.quotes[0]!.coins).toEqual([expect.objectContaining({ mint, waiting: creatorShare(inherited).toString() })]);
     const before = await lamports(heir.address);
     await heirSide.page.getByRole("button", { name: `Claim ${shown(creatorShare(inherited))}` }).click();
     await expect(heirSide.page.getByRole("status")).toContainText(`Claimed ${shown(creatorShare(inherited))}`, { timeout: 60_000 });
@@ -289,10 +290,10 @@ test("a creator hands over a coin's creator role and their Creator wallet; the r
     // Every fact on both records, recomputed from the chain and Postgres, matches the API and the page.
     const launcherRecord = await recomputeAndMatch(page, recordId);
     expect(launcherRecord.summary).toMatchObject({ coins: 1, handedOver: 1, wallet: successor.address });
-    expect(BigInt(launcherRecord.earnings.claimed)).toBe(creatorShare(fees));
+    expect(BigInt(launcherRecord.earnings[0]!.claimed)).toBe(creatorShare(fees));
     const heirRecord = await recomputeAndMatch(heirSide.page, heir.address);
     expect(heirRecord.received).toEqual([expect.objectContaining({ mint, holder: heir.address, launcher: expect.objectContaining({ id: recordId, handle }) })]);
-    expect(BigInt(heirRecord.earnings.claimed)).toBe(creatorShare(inherited));
+    expect(BigInt(heirRecord.earnings[0]!.claimed)).toBe(creatorShare(inherited));
     await openRecord(page, recordId);
     await snap(page, "record-14-recomputed");
 

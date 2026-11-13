@@ -68,6 +68,16 @@
   margin: 0;
 }
 
+/* One amount a line, each in its own quote. */
+.amounts {
+  display: grid;
+  gap: 2px;
+}
+
+.amount {
+  white-space: nowrap;
+}
+
 .waiting {
   font-size: 1.9rem;
   font-weight: 500;
@@ -146,6 +156,18 @@
 /* The coins, one row each */
 .coins {
   padding: 6px 0;
+}
+
+/* A quote's coins, when the wallet holds coins in more than one. */
+.quoteHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  margin: 0;
+  padding: 12px 22px 4px;
+  font-size: 1rem;
+  font-weight: 600;
 }
 
 .columns,
@@ -333,4 +355,8 @@
   .roleForm {
     justify-self: stretch;
   }
+}
+
+.quoteHead .note {
+  font-weight: 400;
 }
