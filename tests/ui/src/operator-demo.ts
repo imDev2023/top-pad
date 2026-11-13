@@ -1,6 +1,7 @@
 // The operator app's local demo data (`playwright.operator.config.ts`): a database of its own, `operator_demo` on the
 // local Postgres, made afresh each run, migrated and seeded with one of each kind of queue item, shaped as the API writes
-// them on devnet; and the evidence pack of one case in the operator Worker's local R2. Prints the database's URL, the
+// them on devnet, and a Bar another operator confirmed, with the creator's reply and appeal; and the evidence pack of one
+// case in the operator Worker's local R2. Prints the database's URL, the
 // only thing on stdout, for `wrangler dev`'s Hyperdrive. The shared local database is never touched.
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
@@ -8,11 +9,10 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { sql } from "drizzle-orm";
-import { admissionReviews, bundleCases, createDb, creators, launches, linkageHubs, vampAppeals, vampChecks } from "@top-pad/db";
+import { admissionReviews, barAppeals, barReplies, bars, bundleCases, createDb, creators, launches, linkageHubs, vampAppeals, vampChecks, xMessages } from "@top-pad/db";
 import { runMigrations } from "@top-pad/db/migrate";
 
-const SERVER = process.env.OPERATOR_DEMO_SERVER ?? "postgres://toppad:toppad@127.0.0.1:5452/toppad";
-const NAME = "operator_demo";
+import { FIRST_OPERATOR, NAME, SERVER } from "./operator-demo-shared";
 const operatorApp = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "apps", "operator");
 
 const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000);
@@ -32,6 +32,7 @@ const W = {
   faucet: "FauCetDr1p2wV9mQ4kZ7tH3nB6xR8yL5cJ1sE4aG2dPu",
 };
 const SEALED = "LNTRNSeaLedFa1rWindowAccount11111111111111111";
+const MOON = "MooNx1WmjBp2nN7JyKuJ8rMjQQYmex3f6aEaYZ6PwLJQh";
 const OPENED = "GLoWSeason2Fa1rOpenAccount1111111111111111111";
 const sig = (n: number) => `${n}`.repeat(88).slice(0, 88).replace(/0/g, "z");
 
@@ -100,9 +101,9 @@ async function main() {
   try {
     const made = await db
       .insert(creators)
-      .values(["relaunch_team", "frogmaker", "lantern_dev", "frog_bundler"].map((h, i) => ({ xUserId: `${800 + i}`, xHandle: h, xName: h })))
+      .values(["relaunch_team", "frogmaker", "lantern_dev", "frog_bundler", "moon_bundler"].map((h, i) => ({ xUserId: `${800 + i}`, xHandle: h, xName: h })))
       .returning();
-    const [relaunch, frogmaker, lantern, bundler] = made;
+    const [relaunch, frogmaker, lantern, bundler, mooner] = made;
     const imageRefused = [{ field: "image", rule: "pdq", status: "refused", coin: BONK, reason: "The image is the picture of $Bonk, a protected coin, mirrored." }];
     const textRefused = [
       { field: "ticker", status: "refused", coin: PEPE, reason: "The ticker is PEPE's, a protected coin's." },
@@ -157,6 +158,9 @@ async function main() {
       launch({ creatorId: lantern!.id, account: SEALED, ticker: "SECRET", name: "Sealed Until Open", teaser: "lantern", opensHours: 3, opened: false }),
       launch({ creatorId: lantern!.id, account: OPENED, ticker: "GLOW", name: "Glow", teaser: "season", opensHours: -8, opened: true }),
       { ...launch({ creatorId: bundler!.id, account: "FRoGBundLeFairOpen11111111111111111111111111", ticker: "FROG", name: "Frog Bundle", teaser: "pond", opensHours: -3, opened: true }), mint: "8cWz1WmjBp2nN7JyKuJ8rMjQQYmex3f6aEaYZ6PwLJQh" },
+      // The bundler's next Fair Open, scheduled for tomorrow: confirming the case cancels it.
+      { ...launch({ creatorId: bundler!.id, account: "FRoGNextFairOpen1111111111111111111111111111", ticker: "TADPOLE", name: "Tadpole", teaser: "tadpoles", opensHours: 20, opened: false }), status: "landed" as const, depositsOpenAt: hoursAgo(-20 + 10 / 60) },
+      { ...launch({ creatorId: mooner!.id, account: "MooNBundLeFairOpen11111111111111111111111111", ticker: "MOON", name: "Moon Bundle", teaser: "moon", opensHours: -84, opened: true }), mint: MOON, status: "landed" as const },
     ]);
     await db.insert(admissionReviews).values([
       {
@@ -185,6 +189,50 @@ async function main() {
       { mint: frog, creatorWallet: W.creator, creatorId: bundler!.id, linkedWallets: 2, linkedCoins: 158264351050603n, supply: 1000000000000000n, evidence: frogPack, evidenceKey: `bundle-radar/cases/${frog}.json`, openedAt: hoursAgo(2) },
       { mint: other, creatorWallet: W.bank, creatorId: null, linkedWallets: 1, linkedCoins: 21000000000000n, supply: 1000000000000000n, evidence: { ...evidencePack(other, 1.5), floor: { supply: "1000000000000000", floor: "10000000000000", linkedCoins: "21000000000000", share: "2.10%" } }, evidenceKey: `bundle-radar/cases/${other}.json`, openedAt: hoursAgo(0.5) },
     ]);
+    // A case another operator confirmed 80 hours ago, its Bar public since its 72 hours ended: the X message sent, the
+    // creator's reply and their appeal.
+    const [moonCase] = await db
+      .insert(bundleCases)
+      .values({
+        mint: MOON,
+        creatorWallet: W.creator,
+        creatorId: mooner!.id,
+        status: "confirmed",
+        linkedWallets: 2,
+        linkedCoins: 158264351050603n,
+        supply: 1000000000000000n,
+        evidence: evidencePack(MOON, 84),
+        evidenceKey: `bundle-radar/cases/${MOON}.json`,
+        openedAt: hoursAgo(82),
+        decidedAt: hoursAgo(80),
+        decidedBy: FIRST_OPERATOR,
+        decisionNote: "Two wallets the Creator wallet funded minutes before the open bought 15.8% of supply.",
+      })
+      .returning();
+    const [moonBar] = await db
+      .insert(bars)
+      .values({
+        caseId: moonCase!.id,
+        mint: MOON,
+        creatorId: mooner!.id,
+        creatorWallet: W.creator,
+        xUserId: mooner!.xUserId,
+        confirmedBy: FIRST_OPERATOR,
+        confirmedAt: hoursAgo(80),
+        publishAt: hoursAgo(80 - 72),
+        note: "Two wallets the Creator wallet funded minutes before the open bought 15.8% of supply.",
+      })
+      .returning();
+    await db.insert(xMessages).values({ barId: moonBar!.id, xUserId: mooner!.xUserId!, text: "Heat: an operator confirmed a creator bundle in $MOON.", sentAt: hoursAgo(79.9), xEventId: "1580705921830768640", attempts: 1, createdAt: hoursAgo(80) });
+    await db.insert(barReplies).values({ barId: moonBar!.id, creatorId: mooner!.id, body: "Those two wallets are my brother's; he bought on his own with SOL I lent him for rent.", at: hoursAgo(78) });
+    await db.insert(barAppeals).values({
+      barId: moonBar!.id,
+      creatorId: mooner!.id,
+      grounds: "shared_exchange",
+      statement: "The SOL both wallets got came from my Coinbase account, which my brother and I share; neither bought for me.",
+      evidence: "Coinbase's statement of the two withdrawals, sent to appeals@heat.local.",
+      filedAt: hoursAgo(9),
+    });
     await db.insert(linkageHubs).values({ address: W.faucet, label: "Devnet faucet drip", addedBy: null, createdAt: hoursAgo(70) });
     // The first case's pack in the operator Worker's local R2, as the case job stores it; the second has none.
     const dir = mkdtempSync(join(tmpdir(), "operator-demo-"));
