@@ -1,11 +1,11 @@
 // The operator app's pages, rendered on the server: the queue, each item's page with its decision, a case's evidence
-// pack, the hubs and the audit log. Plain forms and links, so every action is one request the audit log can name; the
+// pack, the Bars with their replies and appeals, the hubs and the audit log. Plain forms and links, so every action is one request the audit log can name; the
 // only script is the theme toggle.
 import type { Child, FC, PropsWithChildren } from "hono/jsx";
 import { raw } from "hono/html";
-import type { ProtectedMatch } from "@top-pad/contract";
+import { APPEAL_WINDOW_MS, type ProtectedMatch } from "@top-pad/contract";
 import type { Operator } from "./env";
-import { AIM_HOURS, ageOf, creatorName, type AdmissionItem, type CaseItem, type LaunchItem, type LaunchKey, type QueueItem, type Refusing } from "./queue";
+import { AIM_HOURS, ageOf, creatorName, type AdmissionItem, type AppealItem, type BarDetail, type BarRow, type CaseItem, type LaunchItem, type LaunchKey, type QueueItem, type Refusing } from "./queue";
 import { STYLES } from "./styles";
 
 const FONTS = "https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Saira+Condensed:wght@600;700&display=swap";
@@ -14,7 +14,7 @@ const FONTS = "https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;5
 export const THEME_COOKIE = "heat_theme";
 export type Theme = "light" | "dark";
 
-export type Shell = { nonce: string; operator: Operator | null; cluster: string; theme: Theme | null; current?: "queue" | "hubs" | "audit" };
+export type Shell = { nonce: string; operator: Operator | null; cluster: string; theme: Theme | null; current?: "queue" | "bars" | "hubs" | "audit" };
 
 // Formatting.
 
@@ -75,50 +75,56 @@ const Flag: FC = () => (
 
 export const ICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#14171a"/><rect x="8" y="5" width="3" height="22" rx="1" fill="#e7ebe8"/><path d="M11 6H25L22 11.5L25 17H11Z" fill="#33c27a"/></svg>`;
 
+// The doctype first: without it browsers render in quirks mode, where a form keeps a 1em bottom margin and tables stop
+// inheriting the page's font size, so every panel that is a form sat 16 px further from the next.
 export const Layout: FC<PropsWithChildren<Shell & { title: string }>> = ({ title, nonce, operator, cluster, theme, current, children }) => (
-  <html lang="en" data-theme={theme ?? undefined}>
-    <head>
-      <meta charset="utf-8" />
-      <meta name="viewport" content="width=device-width, initial-scale=1" />
-      <meta name="robots" content="noindex, nofollow" />
-      <meta name="theme-color" content={theme === "light" ? "#eef1ef" : "#14171a"} />
-      <title>{`${title} · Heat operator`}</title>
-      <link rel="icon" href="/icon.svg" type="image/svg+xml" />
-      <link rel="preconnect" href="https://fonts.googleapis.com" />
-      <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
-      <link rel="stylesheet" href={FONTS} />
-      <style nonce={nonce}>{raw(STYLES)}</style>
-    </head>
-    <body>
-      <header class="top">
-        <div class="top-in">
-          <a class="brand" href="/">
-            <Flag />
-            <b>Heat</b>
-            <span>Operator</span>
-          </a>
-          <span class={`chip ${cluster === "mainnet" ? "chip-stop" : "chip-info"}`}>{cluster}</span>
-          {operator && (
-            <nav class="nav" aria-label="Operator">
-              <a href="/" aria-current={current === "queue" ? "page" : undefined}>Queue</a>
-              <a href="/hubs" aria-current={current === "hubs" ? "page" : undefined}>Hubs</a>
-              <a href="/audit" aria-current={current === "audit" ? "page" : undefined}>Audit log</a>
-            </nav>
-          )}
-          <div class="who">
-            {operator && <span class="email" title={operator.email}>{operator.email}</span>}
-            {operator && <a href="/cdn-cgi/access/logout">Sign out</a>}
-            <ThemeButton />
+  <>
+    {raw("<!doctype html>")}
+    <html lang="en" data-theme={theme ?? undefined}>
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="robots" content="noindex, nofollow" />
+        <meta name="theme-color" content={theme === "light" ? "#eef1ef" : "#14171a"} />
+        <title>{`${title} · Heat operator`}</title>
+        <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
+        <link rel="stylesheet" href={FONTS} />
+        <style nonce={nonce}>{raw(STYLES)}</style>
+      </head>
+      <body>
+        <header class="top">
+          <div class="top-in">
+            <a class="brand" href="/">
+              <Flag />
+              <b>Heat</b>
+              <span>Operator</span>
+            </a>
+            <span class={`chip ${cluster === "mainnet" ? "chip-stop" : "chip-info"}`}>{cluster}</span>
+            {operator && (
+              <nav class="nav" aria-label="Operator">
+                <a href="/" aria-current={current === "queue" ? "page" : undefined}>Queue</a>
+                <a href="/bars" aria-current={current === "bars" ? "page" : undefined}>Bars</a>
+                <a href="/hubs" aria-current={current === "hubs" ? "page" : undefined}>Hubs</a>
+                <a href="/audit" aria-current={current === "audit" ? "page" : undefined}>Audit log</a>
+              </nav>
+            )}
+            <div class="who">
+              {operator && <span class="email" title={operator.email}>{operator.email}</span>}
+              {operator && <a href="/cdn-cgi/access/logout">Sign out</a>}
+              <ThemeButton />
+            </div>
           </div>
-        </div>
-      </header>
-      <main class="page">{children}</main>
-      <footer class="foot">
-        <div class="foot-in">Heat's operator app. Every action here is written to the audit log, with your email, as you take it.</div>
-      </footer>
-      <script nonce={nonce}>{raw(THEME_SCRIPT)}</script>
-    </body>
-  </html>
+        </header>
+        <main class="page">{children}</main>
+        <footer class="foot">
+          <div class="foot-in">Heat's operator app. Every action here is written to the audit log, with your email, as you take it.</div>
+        </footer>
+        <script nonce={nonce}>{raw(THEME_SCRIPT)}</script>
+      </body>
+    </html>
+  </>
 );
 
 /** What a request without Cloudflare Access's sign-in for this app sees: nothing of the queue. */
@@ -159,6 +165,7 @@ const Age: FC<{ since: Date; now: Date; inline?: boolean }> = ({ since, now, inl
 const kindChip = (item: QueueItem): [string, string] => {
   if (item.kind === "launch") return item.appeals.length > 0 ? ["chip-info", "Appeal"] : ["chip-stop", "Refused launch"];
   if (item.kind === "admission") return item.reviews.some((r) => r.kind === "refused") ? ["chip-stop", "Admission refused"] : ["chip-caution", "Admission merged"];
+  if (item.kind === "appeal") return ["chip-info", item.again ? "Bar appeal, new evidence" : "Bar appeal"];
   return ["chip-stop", "Bundling case"];
 };
 
@@ -190,6 +197,14 @@ function itemLine(item: QueueItem): { href: string; title: string; who: string; 
       why: item.reviews[0]!.reason,
     };
   }
+  if (item.kind === "appeal") {
+    return {
+      href: `/bars/${item.barId}`,
+      title: item.coin ? `$${item.coin.ticker} · ${item.coin.name}` : `Coin ${short(item.mint)}`,
+      who: item.handle ? `creator @${item.handle}` : `Creator wallet ${short(item.creatorWallet)}`,
+      why: `${GROUNDS[item.grounds]}: "${item.statement}"`,
+    };
+  }
   return {
     href: `/cases/${item.mint}`,
     title: item.coin ? `$${item.coin.ticker} · ${item.coin.name}` : `Coin ${short(item.mint)}`,
@@ -206,7 +221,7 @@ export const QueuePage: FC<Shell & { items: QueueItem[]; now: Date; flash: Child
       <div class="stack-lg">
         <div class="stack">
           <h1>Queue</h1>
-          <p class="lead">Refused launches and their appeals, refused or merged admissions, and bundling cases: everything waiting on an operator, oldest first. The aim is an answer within {AIM_HOURS} hours.</p>
+          <p class="lead">Refused launches and their appeals, refused or merged admissions, bundling cases and barred creators' appeals: everything waiting on an operator, oldest first. The aim is an answer within {AIM_HOURS} hours.</p>
         </div>
         {flash}
         <div class="tallies">
@@ -221,6 +236,10 @@ export const QueuePage: FC<Shell & { items: QueueItem[]; now: Date; flash: Child
           <div class="panel tally">
             <span class="eyebrow">Bundling cases</span>
             <span class="n" data-testid="tally-case">{count("case")}</span>
+          </div>
+          <div class="panel tally">
+            <span class="eyebrow">Bar appeals</span>
+            <span class="n" data-testid="tally-appeal">{count("appeal")}</span>
           </div>
           <div class={`panel tally${over > 0 ? " over" : ""}`}>
             <span class="eyebrow">Past {AIM_HOURS} h</span>
@@ -508,7 +527,59 @@ export const AdmissionPage: FC<Shell & { item: AdmissionItem; now: Date; error: 
 
 export type CaseView = { item: CaseItem; quoteMint: string | null; now: Date };
 
-export const CasePage: FC<Shell & CaseView & { error: string | null }> = ({ item, now, error, ...shell }) => (
+/** A case's decision once made, and what confirming it would do while it is open. */
+export type CaseDecision =
+  | { status: "open"; fairOpens: { teaser: string | null; opensAt: Date | null }[]; xLinked: boolean }
+  | { status: "confirmed" | "dismissed"; decidedBy: string | null; decidedAt: Date | null; note: string | null; barId: string | null };
+
+const CaseDecide: FC<{ item: CaseItem; decision: CaseDecision }> = ({ item, decision }) => {
+  if (decision.status !== "open") {
+    return (
+      <section class={`verdict ${decision.status === "confirmed" ? "verdict-stop" : "verdict-neutral"}`} data-testid="case-decided">
+        <b>{decision.status === "confirmed" ? "Confirmed: the creator is barred" : "Dismissed: no Bar"}</b>
+        <span class="note">
+          {decision.decidedBy ?? "An operator"}
+          {decision.decidedAt && `, ${when(decision.decidedAt)}`}
+        </span>
+        {decision.note && <p class="quote">{decision.note}</p>}
+        {decision.barId && (
+          <span>
+            <a href={`/bars/${decision.barId}`}>The Bar, its replies and its appeals</a>
+          </span>
+        )}
+      </section>
+    );
+  }
+  const who = item.handle ? `@${item.handle}` : short(item.creatorWallet);
+  return (
+    <form method="post" action={`/cases/${item.mint}`} class="panel pad decide">
+      <h2>Decide</h2>
+      <p class="muted">Only a direct link to the Creator wallet confirms a finding, and only when the linked wallets bought 1% of supply or more (spec 6.5). Read the evidence pack first.</p>
+      <fieldset class="choices">
+        <legend class="visually-hidden">Decision</legend>
+        <Choice name="decision" value="confirmed" title="Confirm the case: bar the creator">
+          From now Heat's launch key co-signs no launch by {who}: not their record, their Creator wallet nor {item.handle ? "their X account" : "any X account they link"}.{" "}
+          {decision.fairOpens.length > 0
+            ? `${decision.fairOpens.length === 1 ? "Their Fair Open" : `Their ${decision.fairOpens.length} Fair Opens`} not yet in ${decision.fairOpens.length === 1 ? "its" : "their"} window ${decision.fairOpens.length === 1 ? "is" : "are"} cancelled (${decision.fairOpens.map((f) => (f.teaser ? `"${f.teaser}"` : "untitled")).join(", ")}). `
+            : "They have no Fair Open waiting for its window. "}
+          {decision.xLinked ? "Heat's X account sends them a direct message. " : "Their record linked no X account, so no direct message is sent. "}
+          The finding is theirs alone for 72 hours, then public; they may appeal once within 30 days, to another operator.
+        </Choice>
+        <Choice name="decision" value="dismissed" title="Dismiss the case">
+          The links do not hold. No Bar, nothing public; the case leaves the queue.
+        </Choice>
+      </fieldset>
+      <NoteField placeholder="Four wallets the Creator wallet funded minutes before the open bought in its creation slot; or: a shared exchange's withdrawals." />
+      <div class="row">
+        <button class="btn btn-go" type="submit">
+          Record the decision
+        </button>
+      </div>
+    </form>
+  );
+};
+
+export const CasePage: FC<Shell & CaseView & { decision: CaseDecision; error: string | null }> = ({ item, now, decision, error, ...shell }) => (
   <Layout {...shell} title={item.coin ? `$${item.coin.ticker} case` : "Bundling case"} current="queue">
     <div class="stack-lg">
       <div class="stack">
@@ -538,21 +609,26 @@ export const CasePage: FC<Shell & CaseView & { error: string | null }> = ({ item
           </dd>
           <dt>Opened</dt>
           <dd>{when(item.since)}</dd>
-          <dt>Waiting</dt>
-          <dd>
-            <Age since={item.since} now={now} inline />
-          </dd>
+          {decision.status === "open" && (
+            <>
+              <dt>Waiting</dt>
+              <dd>
+                <Age since={item.since} now={now} inline />
+              </dd>
+            </>
+          )}
         </dl>
       </div>
       <form method="post" action={`/cases/${item.mint}/evidence`} class="panel pad decide">
         <h2>The evidence pack</h2>
-        <p class="muted">The transactions, Jito bundle ids and transfers behind each link, as Bundle Radar stored them. Opening it is written to the audit log. Confirming the case and hearing its appeal come with the Bars.</p>
+        <p class="muted">The transactions, Jito bundle ids and transfers behind each link, as Bundle Radar stored them. Opening it is written to the audit log.</p>
         <div class="row">
-          <button class="btn btn-go" type="submit">
+          <button class={`btn${decision.status === "open" ? "" : " btn-go"}`} type="submit">
             Open the evidence pack
           </button>
         </div>
       </form>
+      <CaseDecide item={item} decision={decision} />
     </div>
   </Layout>
 );
@@ -721,6 +797,210 @@ export const EvidencePage: FC<Shell & CaseView & { pack: Pack; source: "r2" | "p
   );
 };
 
+// Bars.
+
+/** The grounds spec 6.5 gives a barred creator's appeal, in the words the creator chose them in. */
+export const GROUNDS: Record<AppealItem["grounds"], string> = {
+  shared_exchange: "A shared exchange or custodian, not the creator",
+  launch_service: "A launch service bundling for its customers",
+  other: "Another reason a link is wrong",
+};
+
+const barState = (b: { liftedAt: Date | null; publishAt: Date }, now: Date): [string, string] =>
+  b.liftedAt ? ["chip-go", "Lifted on appeal"] : b.publishAt.getTime() > now.getTime() ? ["chip-caution", "Private window"] : ["chip-stop", "Published"];
+
+export const BarsPage: FC<Shell & { bars: BarRow[]; now: Date; flash: Child }> = ({ bars, now, flash, ...shell }) => (
+  <Layout {...shell} title="Bars" current="bars">
+    <div class="stack-lg">
+      <div class="stack">
+        <h1>Bars</h1>
+        <p class="lead">Every confirmed creator bundle. A Bar applies the moment its case is confirmed, stays private to the creator for 72 hours, then is published; it never expires, and only an upheld appeal lifts it.</p>
+      </div>
+      {flash}
+      {bars.length === 0 ? (
+        <div class="panel empty">No case has been confirmed yet.</div>
+      ) : (
+        <ul class="items">
+          {bars.map((b) => {
+            const [tone, label] = barState(b, now);
+            return (
+              <li>
+                <a class="panel item" href={`/bars/${b.id}`} data-kind="bar">
+                  <div class="item-main">
+                    <div class="row">
+                      <span class={`chip flag ${tone}`}>{label}</span>
+                      {b.openAppeal && <span class="chip chip-info">Appeal waiting</span>}
+                      <span class="note">{b.handle ? `creator @${b.handle}` : `Creator wallet ${short(b.creatorWallet)}`}</span>
+                    </div>
+                    <span class="item-title">{b.coin ? `$${b.coin.ticker} · ${b.coin.name}` : `Coin ${short(b.mint)}`}</span>
+                    <span class="item-why">
+                      Confirmed {when(b.confirmedAt)} by {b.confirmedBy}. {b.replies} {b.replies === 1 ? "reply" : "replies"}, {b.appeals} {b.appeals === 1 ? "appeal" : "appeals"}.
+                    </span>
+                  </div>
+                  <div class="age">
+                    <b>{b.liftedAt ? "lifted" : b.publishAt.getTime() > now.getTime() ? waited((b.publishAt.getTime() - now.getTime()) / 3_600_000) : "public"}</b>
+                    <small>{b.liftedAt ? when(b.liftedAt) : b.publishAt.getTime() > now.getTime() ? "until published" : `since ${b.publishAt.toISOString().slice(0, 10)}`}</small>
+                  </div>
+                </a>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  </Layout>
+);
+
+export const BarPage: FC<Shell & { detail: BarDetail; now: Date; oneOperator: boolean; error: string | null; flash: Child }> = ({ detail, now, oneOperator, error, flash, ...shell }) => {
+  const { bar, coin, handle, replies, appeals, message, cancelled } = detail;
+  const open = appeals.find((a) => a.status === "open") ?? null;
+  const [tone, label] = barState(bar, now);
+  const confirmer = shell.operator?.email === bar.confirmedBy;
+  const title = coin ? `$${coin.ticker} · ${coin.name}` : `Coin ${short(bar.mint)}`;
+  return (
+    <Layout {...shell} title={coin ? `$${coin.ticker} Bar` : "Bar"} current="bars">
+      <div class="stack-lg">
+        <div class="stack">
+          <a class="back" href="/bars">
+            ← Bars
+          </a>
+          <span class="eyebrow">Bar</span>
+          <h1 class="break">{title}</h1>
+        </div>
+        {flash}
+        {error && <Flash tone="stop">{error}</Flash>}
+        <div class="panel pad">
+          <dl class="facts">
+            <dt>Standing</dt>
+            <dd>
+              <span class={`chip flag ${tone}`}>{label}</span>
+            </dd>
+            <dt>Creator</dt>
+            <dd>
+              {handle ? `@${handle}, ` : ""}
+              <a class="mono nowrap" href={explorer(shell.cluster, "address", bar.creatorWallet)} rel="noreferrer" target="_blank">
+                {short(bar.creatorWallet)}
+              </a>
+            </dd>
+            <dt>Confirmed</dt>
+            <dd>
+              {when(bar.confirmedAt)} by {bar.confirmedBy}
+              <p class="quote" style="margin-top: 6px">
+                {bar.note}
+              </p>
+            </dd>
+            <dt>Published</dt>
+            <dd>
+              {bar.liftedAt
+                ? bar.publishAt.getTime() < bar.liftedAt.getTime()
+                  ? `${when(bar.publishAt)}, until it was lifted`
+                  : "Never: lifted within its private window"
+                : bar.publishAt.getTime() > now.getTime()
+                  ? `At ${when(bar.publishAt)}, when the private window ends`
+                  : when(bar.publishAt)}
+            </dd>
+            {bar.liftedAt && (
+              <>
+                <dt>Lifted</dt>
+                <dd>
+                  {when(bar.liftedAt)} by {bar.liftedBy}, on appeal
+                </dd>
+              </>
+            )}
+            <dt>X message</dt>
+            <dd>
+              {!message
+                ? "None: the record linked no X account"
+                : message.sentAt
+                  ? `Sent ${when(message.sentAt)}`
+                  : message.attempts === 0
+                    ? "Owed: the API's five-minute cron sends it"
+                    : `Not sent after ${message.attempts} ${message.attempts === 1 ? "try" : "tries"}${message.lastError ? `, the last answered "${message.lastError}"` : ""}`}
+            </dd>
+            <dt>Fair Opens cancelled</dt>
+            <dd>{cancelled.length === 0 ? "None was waiting for its window" : cancelled.map((f) => `${f.teaser ? `"${f.teaser}"` : short(f.fairOpen ?? "")}${f.opensAt ? `, was to open ${when(f.opensAt)}` : ""}`).join("; ")}</dd>
+            <dt>Case</dt>
+            <dd>
+              <a href={`/cases/${bar.mint}`}>The case and its evidence pack</a>
+            </dd>
+          </dl>
+        </div>
+        <section class="stack">
+          <h3>{replies.length === 0 ? "The creator's replies" : replies.length === 1 ? "The creator's reply" : `The creator's ${replies.length} replies`}</h3>
+          {replies.length === 0 ? (
+            <p class="muted">The creator has not replied to the evidence.</p>
+          ) : (
+            replies.map((r) => (
+              <div class="panel pad stack" data-testid="bar-reply">
+                <span class="note">{when(r.at)}</span>
+                <p class="quote">{r.body}</p>
+              </div>
+            ))
+          )}
+        </section>
+        <section class="stack">
+          <h3>{appeals.length === 0 ? "Appeals" : appeals.length === 1 ? "The appeal" : `The ${appeals.length} appeals`}</h3>
+          {appeals.length === 0 && <p class="muted">None filed. The creator may appeal once until {new Date(bar.confirmedAt.getTime() + APPEAL_WINDOW_MS).toISOString().slice(0, 10)}.</p>}
+          {appeals.map((a, i) => (
+            <div class="panel pad stack" data-testid="bar-appeal">
+              <div class="row">
+                <span class={`chip flag ${a.status === "upheld" ? "chip-go" : a.status === "denied" ? "chip-stop" : "chip-info"}`}>{a.status === "open" ? "Waiting" : a.status === "upheld" ? "Upheld" : "Denied"}</span>
+                <span class="note">
+                  {i > 0 ? "Again, with new evidence · " : ""}
+                  filed {when(a.filedAt)}
+                </span>
+              </div>
+              <b>{GROUNDS[a.grounds]}</b>
+              <p class="quote">{a.statement}</p>
+              {a.evidence && (
+                <div class="stack" style="gap: 4px">
+                  <span class="label">{i > 0 ? "New evidence" : "Evidence"}</span>
+                  <p class="quote">{a.evidence}</p>
+                </div>
+              )}
+              {a.status === "open" ? (
+                <Age since={a.filedAt} now={now} inline />
+              ) : (
+                <span class="note">
+                  Decided {a.decidedAt && when(a.decidedAt)} by {a.decidedBy}
+                  {a.decisionNote && `: "${a.decisionNote}"`}
+                </span>
+              )}
+            </div>
+          ))}
+        </section>
+        {open &&
+          (confirmer && !oneOperator ? (
+            <div class="verdict verdict-caution" data-testid="appeal-not-yours">
+              <b>Another operator hears this appeal</b>
+              <span>You confirmed this case, so you may not decide its appeal (spec 6.5).</span>
+            </div>
+          ) : (
+            <form method="post" action={`/bars/${bar.id}/appeals/${open.id}`} class="panel pad decide">
+              <h2>Hear the appeal</h2>
+              {confirmer && <p class="note">You confirmed this case. On {shell.cluster} one operator fills both roles; the audit log records that you did.</p>}
+              <fieldset class="choices">
+                <legend class="visually-hidden">Decision</legend>
+                <Choice name="decision" value="upheld" title="Uphold it: lift the Bar">
+                  The link was wrong. Heat's launch key co-signs for the creator again, and the finding comes off the record, the coin's page and its Fairness card. The audit log keeps it.
+                </Choice>
+                <Choice name="decision" value="denied" title="Deny it: the Bar stands">
+                  The creator may appeal again only with new evidence.
+                </Choice>
+              </fieldset>
+              <NoteField placeholder="The wallets' SOL came from a shared exchange's withdrawals, not the creator; or: the transfers are direct and recent." />
+              <div class="row">
+                <button class="btn btn-go" type="submit">
+                  Record the decision
+                </button>
+              </div>
+            </form>
+          ))}
+      </div>
+    </Layout>
+  );
+};
+
 // Hubs.
 
 export type HubRow = { address: string; label: string; addedBy: string | null; createdAt: Date };
@@ -811,6 +1091,10 @@ const ACTION_NAMES: Record<string, string> = {
   hub_removed: "Removed a hub",
   evidence_opened: "Opened an evidence pack",
   audit_exported: "Exported the audit log",
+  case_confirmed: "Confirmed a case: Bar",
+  case_dismissed: "Dismissed a case",
+  appeal_upheld: "Upheld an appeal: Bar lifted",
+  appeal_denied: "Denied an appeal",
 };
 
 /** What an action was taken on, in words: the coin and its creator, a wallet, a case, the export. */
@@ -823,6 +1107,10 @@ function subjectLine(row: AuditRow) {
   }
   if (kind === "wallet") return `Wallet ${short(rest[0] ?? "")}`;
   if (kind === "case") return `Case of ${short(rest[0] ?? "")}`;
+  if (kind === "bar") {
+    const f = (row.detail as { finding?: { mint?: string } } | null)?.finding;
+    return `Bar on ${short(f?.mint ?? rest[0] ?? "")}`;
+  }
   if (kind === "job") return "The export";
   return row.subject;
 }

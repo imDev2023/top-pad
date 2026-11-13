@@ -3,6 +3,9 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   admissionReviews,
   auditLog,
+  barAppeals,
+  barReplies,
+  bars,
   bundleCases,
   createDb,
   creators,
@@ -15,6 +18,7 @@ import {
   vampChecks,
   vampClearances,
   walletClearances,
+  xMessages,
   type Db,
 } from "@top-pad/db";
 import { createTestDatabase } from "@top-pad/db/testing";
@@ -61,7 +65,7 @@ const ORIGIN = "https://operator.heat.test";
 const pending: Promise<unknown>[] = [];
 let bucket: MemoryBucket;
 const env = (o: Partial<Bindings> = {}): Bindings =>
-  ({ HYPERDRIVE: { connectionString: url } as Hyperdrive, BLOBS: bucket as unknown as R2Bucket, CLUSTER: "devnet", ACCESS_AUD: AUD, ...o }) as Bindings;
+  ({ HYPERDRIVE: { connectionString: url } as Hyperdrive, BLOBS: bucket as unknown as R2Bucket, CLUSTER: "devnet", ACCESS_AUD: AUD, WEB_APP: "https://heat.test", ...o }) as Bindings;
 
 /** What the runtime hands a request Access signed in: this app's audience tag and the operator's identity. */
 const signedIn = (email: string | undefined = "Operator@Heat.test", aud = AUD) => ({ aud, getIdentity: async () => (email ? { email } : {}) });
@@ -76,8 +80,8 @@ const page = async (path: string, access: Access = signedIn()) => {
   const res = await call(path, {}, access);
   return { status: res.status, html: await res.text(), location: res.headers.get("location") };
 };
-const post = (path: string, fields: Record<string, string>, o: { origin?: string; access?: Access } = {}) =>
-  call(path, { method: "POST", body: new URLSearchParams(fields), headers: { origin: o.origin ?? ORIGIN, "content-type": "application/x-www-form-urlencoded" } }, o.access ?? signedIn());
+const post = (path: string, fields: Record<string, string>, o: { origin?: string; access?: Access; bindings?: Bindings } = {}) =>
+  call(path, { method: "POST", body: new URLSearchParams(fields), headers: { origin: o.origin ?? ORIGIN, "content-type": "application/x-www-form-urlencoded" } }, o.access ?? signedIn(), o.bindings);
 
 const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000);
 const BONK = { mint: "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263", ticker: "Bonk", name: "Bonk", source: "jupiter_verified", url: "https://jup.ag/tokens/DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263", imageUrl: null };
@@ -143,13 +147,18 @@ describe("Cloudflare Access", () => {
     expect(res.headers.get("x-frame-options")).toBe("DENY");
     expect(res.headers.get("content-security-policy")).toMatch(/script-src 'nonce-[^']+'; form-action 'self'; frame-ancestors 'none'/);
   });
+
+  it("renders every page in standards mode, its doctype first", async () => {
+    expect((await (await call("/")).text()).startsWith("<!doctype html><html")).toBe(true);
+    expect((await (await call("/", {}, null)).text()).startsWith("<!doctype html><html")).toBe(true);
+  });
 });
 
 describe("the queue", () => {
   let launchCreator: Awaited<ReturnType<typeof creator>>;
   const launchAccount = "LaunchAccount1111111111111111111111111111111";
   beforeEach(async () => {
-    for (const t of [vampClearances, vampAppeals, launchReviews, vampChecks, admissionReviews, walletClearances, linkageHubs, bundleCases, launches]) await db.delete(t);
+    for (const t of [xMessages, barAppeals, barReplies, bars, vampClearances, vampAppeals, launchReviews, vampChecks, admissionReviews, walletClearances, linkageHubs, bundleCases, launches]) await db.delete(t);
     launchCreator = await creator(`relauncher${creatorSeq}`);
     await db.insert(vampChecks).values([
       { stage: "prepare", creatorId: launchCreator.id, ticker: "B0NK", name: "Frog Relaunch", imageSha256: SHA, outcome: "refused", matches: imageRefused, at: hoursAgo(30) },
@@ -300,7 +309,7 @@ describe("the queue", () => {
     expect(shown.html).toContain("0.42 SOL");
     // Another operator cannot read it through this one's row.
     expect((await page(location, signedIn("someone@else.test"))).status).toBe(303);
-    // The case stays in the queue: confirming it comes with the Bars (#56).
+    // Opening the pack decides nothing: the case stays in the queue.
     expect((await page("/")).html).toContain('data-kind="case"');
   });
 
@@ -308,6 +317,177 @@ describe("the queue", () => {
     const res = await post(`/admissions/${launchAccount}/${wallet(2)}`, { decision: "cleared", note: "forged" }, { origin: "https://top-pad-web-devnet.rc-labs.workers.dev" });
     expect(res.status).toBe(403);
     expect(await db.select().from(walletClearances)).toEqual([]);
+  });
+});
+
+describe("Bars", () => {
+  const MINT = "BarMint111111111111111111111111111111111111";
+  let barred: Awaited<ReturnType<typeof creator>>;
+  const creatorWallet = wallet(5);
+  /** A Fair Open of the creator's whose window opens `inHours` from now. */
+  const scheduled = async (launch: string, teaser: string, inHours: number) =>
+    db.insert(launches).values({
+      creatorId: barred.id,
+      wallet: creatorWallet,
+      mode: "fair_open",
+      name: `${teaser} Coin`,
+      ticker: teaser.toUpperCase().slice(0, 8),
+      mint: `${launch.slice(0, 30)}Mint`,
+      pool: `${launch.slice(0, 30)}Pool`,
+      config: "config",
+      quoteMint: "So11111111111111111111111111111111111111112",
+      metadataUri: "https://turbo-gateway.com/x",
+      imageUri: "https://turbo-gateway.com/y",
+      message: "",
+      lastValidBlockHeight: 0n,
+      status: "landed",
+      fairOpen: launch,
+      teaser,
+      depositsOpenAt: hoursAgo(-inHours),
+      opensAt: hoursAgo(-inHours - 10 / 60),
+    });
+  beforeEach(async () => {
+    for (const t of [xMessages, barAppeals, barReplies, bars, vampClearances, vampAppeals, launchReviews, vampChecks, admissionReviews, walletClearances, linkageHubs, bundleCases, launches]) await db.delete(t);
+    barred = await creator(`bundler${creatorSeq}`);
+    await db.insert(launches).values({
+      creatorId: barred.id,
+      wallet: creatorWallet,
+      mode: "instant",
+      name: "Frog Bundle",
+      ticker: "FROG",
+      mint: MINT,
+      pool: "BarPool111111111111111111111111111111111111",
+      config: "config",
+      quoteMint: "So11111111111111111111111111111111111111112",
+      metadataUri: "https://turbo-gateway.com/x",
+      imageUri: "https://turbo-gateway.com/y",
+      message: "",
+      lastValidBlockHeight: 0n,
+      status: "landed",
+    });
+    await scheduled("LaterFairOpen111111111111111111111111111111", "tomorrow", 20);
+    await scheduled("RunningFairOpen11111111111111111111111111111", "running", -0.05);
+    await db.insert(bundleCases).values({
+      mint: MINT,
+      creatorWallet,
+      creatorId: barred.id,
+      linkedWallets: 4,
+      linkedCoins: 21000000000000n,
+      supply: 1000000000000000n,
+      evidence: {
+        rule: "Wallets directly linked to the Creator wallet bought 1% or more.",
+        floor: { supply: "1000000000000000", floor: "10000000000000", linkedCoins: "21000000000000", share: "2.10%" },
+        wallets: [{ wallet: wallet(6), labels: ["same_slot", "creator_funded"], counted: "5250000000000", deposits: [], buys: [], transfers: [] }],
+      },
+      evidenceKey: `bundle-radar/cases/${MINT}.json`,
+      openedAt: hoursAgo(3),
+    });
+  });
+
+  it("confirms a case: the Bar, its Fair Open not yet in its window cancelled, the X message owed and the audit row, all at once", async () => {
+    const shown = await page(`/cases/${MINT}`);
+    expect(shown.html).toContain("Confirm the case: bar the creator");
+    expect(shown.html).toContain("Their Fair Open not yet in its window is cancelled (&quot;tomorrow&quot;)");
+    expect(shown.html).toContain("Heat&#39;s X account sends them a direct message");
+    // Without a reason nothing is written.
+    expect((await post(`/cases/${MINT}`, { decision: "confirmed", note: "" })).status).toBe(409);
+    expect(await db.$count(bars)).toBe(0);
+
+    const res = await post(`/cases/${MINT}`, { decision: "confirmed", note: "Four wallets the Creator wallet funded bought in the creation slot." });
+    expect(res.status).toBe(303);
+    const location = new URL(res.headers.get("location")!, ORIGIN);
+    const [bar] = await db.select().from(bars);
+    expect(location.pathname).toBe(`/bars/${bar!.id}`);
+    expect(bar).toMatchObject({ mint: MINT, creatorId: barred.id, creatorWallet, xUserId: barred.xUserId, confirmedBy: "operator@heat.test", liftedAt: null });
+    expect(bar!.publishAt.getTime() - bar!.confirmedAt.getTime()).toBe(72 * 3_600_000);
+    expect((await db.select().from(bundleCases))[0]).toMatchObject({ status: "confirmed", decidedBy: "operator@heat.test" });
+    // The Fair Open whose window has not started is cancelled; the one already taking deposits is not.
+    const fairOpens = await db.select({ teaser: launches.teaser, cancelledAt: launches.cancelledAt, cancelBar: launches.cancelBar }).from(launches).where(eq(launches.mode, "fair_open"));
+    expect(fairOpens.find((f) => f.teaser === "tomorrow")).toMatchObject({ cancelBar: bar!.id, cancelledAt: expect.any(Date) });
+    expect(fairOpens.find((f) => f.teaser === "running")).toMatchObject({ cancelBar: null, cancelledAt: null });
+    const [message] = await db.select().from(xMessages);
+    expect(message).toMatchObject({ barId: bar!.id, xUserId: barred.xUserId, sentAt: null });
+    expect(message!.text).toContain("confirmed a creator bundle in $FROG");
+    expect(message!.text).toContain(`https://heat.test/creator/${barred.id}`);
+    const [row] = await db.select().from(auditLog).where(eq(auditLog.id, Number(location.searchParams.get("done"))));
+    expect(row).toMatchObject({ action: "case_confirmed", subject: `case:${MINT}`, operator: "operator@heat.test" });
+    expect(row!.detail).toMatchObject({ bar: bar!.id, message: true, cancelled: [{ teaser: "tomorrow" }], finding: { mint: MINT, creatorWallet, wallets: [{ wallet: wallet(6) }] } });
+    // The case leaves the queue, its page shows the decision, and nobody decides it twice.
+    expect((await page("/")).html).not.toContain('data-kind="case"');
+    expect((await page(`/cases/${MINT}`)).html).toContain("Confirmed: the creator is barred");
+    expect((await post(`/cases/${MINT}`, { decision: "dismissed", note: "again" })).status).toBe(409);
+    const barPage = await page(`/bars/${bar!.id}`);
+    expect(barPage.html).toContain("Private window");
+    expect(barPage.html).toContain("Not sent yet");
+    expect((await page("/bars")).html).toContain("$FROG · Frog Bundle");
+  });
+
+  it("dismisses a case: no Bar, nothing cancelled, nothing sent", async () => {
+    const res = await post(`/cases/${MINT}`, { decision: "dismissed", note: "The links were a shared exchange's withdrawals." });
+    expect(res.status).toBe(303);
+    expect(await db.$count(bars)).toBe(0);
+    expect(await db.$count(xMessages)).toBe(0);
+    expect((await db.select().from(launches).where(eq(launches.teaser, "tomorrow")))[0]!.cancelledAt).toBeNull();
+    const [row] = await db.select().from(auditLog).where(eq(auditLog.id, Number(new URL(res.headers.get("location")!, ORIGIN).searchParams.get("done"))));
+    expect(row).toMatchObject({ action: "case_dismissed", subject: `case:${MINT}` });
+  });
+
+  it("hears an appeal only by another operator; upheld, it lifts the Bar and the audit log keeps the finding", async () => {
+    await post(`/cases/${MINT}`, { decision: "confirmed", note: "Funded wallets in the creation slot." });
+    const [bar] = await db.select().from(bars);
+    await db.insert(barReplies).values({ barId: bar!.id, creatorId: barred.id, body: "Those wallets are my friends' from Binance." });
+    const [appeal] = await db
+      .insert(barAppeals)
+      .values({ barId: bar!.id, creatorId: barred.id, grounds: "shared_exchange", statement: "The SOL came from Binance withdrawals.", evidence: "https://explorer.solana.com/tx/abc" })
+      .returning();
+    const queued = await page("/");
+    expect(queued.html).toContain('data-kind="appeal"');
+    expect(queued.html).toMatch(/data-testid="tally-appeal">1</);
+
+    // The operator who confirmed it may not decide it.
+    const own = await page(`/bars/${bar!.id}`);
+    expect(own.html).toContain("Another operator hears this appeal");
+    expect(own.html).toContain("Those wallets are my friends&#39; from Binance.");
+    const refused = await post(`/bars/${bar!.id}/appeals/${appeal!.id}`, { decision: "upheld", note: "self" });
+    expect(refused.status).toBe(409);
+    expect((await db.select().from(bars))[0]!.liftedAt).toBeNull();
+
+    const second = signedIn("second@heat.test");
+    const res = await post(`/bars/${bar!.id}/appeals/${appeal!.id}`, { decision: "upheld", note: "Binance withdrawals: no link to the creator." }, { access: second });
+    expect(res.status).toBe(303);
+    expect((await db.select().from(bars))[0]).toMatchObject({ liftedBy: "second@heat.test", liftedAppeal: appeal!.id, liftedAt: expect.any(Date) });
+    expect((await db.select().from(barAppeals))[0]).toMatchObject({ status: "upheld", decidedBy: "second@heat.test" });
+    const [row] = await db.select().from(auditLog).where(eq(auditLog.action, "appeal_upheld"));
+    expect(row).toMatchObject({ operator: "second@heat.test", subject: `bar:${bar!.id}` });
+    expect(row!.detail).toMatchObject({ sameOperator: false, confirmedBy: "operator@heat.test", finding: { mint: MINT, creatorWallet, wallets: [{ wallet: wallet(6), labels: ["same_slot", "creator_funded"] }] } });
+    expect((await page("/")).html).not.toContain('data-kind="appeal"');
+    expect((await page(`/bars/${bar!.id}`)).html).toContain("Lifted on appeal");
+    expect((await page("/bars")).html).toContain("1 reply, 1 appeal.");
+  });
+
+  it("lets the confirming operator decide the appeal where one operator fills both roles, and says so in the audit log", async () => {
+    await post(`/cases/${MINT}`, { decision: "confirmed", note: "Funded wallets in the creation slot." });
+    const [bar] = await db.select().from(bars);
+    const [appeal] = await db.insert(barAppeals).values({ barId: bar!.id, creatorId: barred.id, grounds: "other", statement: "Not mine." }).returning();
+    const devnet = env({ APPEALS_BY_CONFIRMER: "allowed" });
+    const res = await post(`/bars/${bar!.id}/appeals/${appeal!.id}`, { decision: "denied", note: "Direct transfers from the Creator wallet." }, { bindings: devnet });
+    expect(res.status).toBe(303);
+    expect((await db.select().from(bars))[0]!.liftedAt).toBeNull();
+    const [row] = await db.select().from(auditLog).where(eq(auditLog.action, "appeal_denied"));
+    expect(row!.detail).toMatchObject({ sameOperator: true });
+    expect((await post(`/bars/${bar!.id}/appeals/${appeal!.id}`, { decision: "upheld", note: "again" }, { bindings: devnet })).status).toBe(409);
+  });
+
+  it("gives heat_operator no way to undo a Bar or rewrite a confirmed case's finding", async () => {
+    await post(`/cases/${MINT}`, { decision: "confirmed", note: "Funded wallets." });
+    const attempt = (statement: ReturnType<typeof sql>) => db.transaction(async (tx) => {
+      await tx.execute(sql`set local role heat_operator`);
+      await tx.execute(statement);
+    });
+    await expect(attempt(sql`delete from bars`)).rejects.toThrow();
+    await expect(attempt(sql`update bars set confirmed_by = 'someone'`)).rejects.toThrow();
+    await expect(attempt(sql`update bundle_cases set evidence = '{}'::jsonb`)).rejects.toThrow();
+    expect(await db.$count(bars)).toBe(1);
   });
 });
 

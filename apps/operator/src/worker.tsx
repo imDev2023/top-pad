@@ -1,20 +1,21 @@
 // The operator app (spec 6.6, 10.2): its own Worker behind Cloudflare Access, never a route of the public site or the
-// API. One queue of refused launches with their appeals, refused or merged admissions and bundling cases; each action
+// API. One queue of refused launches with their appeals, refused or merged admissions, bundling cases and barred creators'
+// appeals; confirming a case bars its creator (spec 6.5); each action
 // written to the audit log in the transaction that takes it; the log exported to R2 a day at a time.
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, notInArray, or } from "drizzle-orm";
 import { Hono, type Context } from "hono";
 import { getCookie } from "hono/cookie";
 import type { Child } from "hono/jsx";
 import { csrf } from "hono/csrf";
-import { auditLog, createDb, jobRuns, linkageHubs } from "@top-pad/db";
+import { auditLog, bars, createDb, creators, jobRuns, launches, linkageHubs } from "@top-pad/db";
 import { runJob } from "@top-pad/jobs";
 import { operatorOf } from "./access";
-import { addHub, decideAdmission, decideLaunch, openedRecently, openEvidence, audit, Refused, removeHub } from "./actions";
+import { addHub, decideAdmission, decideAppeal, decideCase, decideLaunch, openedRecently, openEvidence, audit, Refused, removeHub } from "./actions";
 import { asOperator } from "./db";
 import type { AppEnv, Bindings } from "./env";
 import { exportAudit } from "./exportAudit";
-import { admissionItem, caseByMint, launchItem, queue, type CaseItem, type LaunchKey } from "./queue";
-import { AdmissionPage, AuditPage, CasePage, Denied, EvidencePage, Flash, HubsPage, ICON, LaunchPage, Missing, QueuePage, THEME_COOKIE, type Shell } from "./views";
+import { admissionItem, barDetail, barRows, caseByMint, launchItem, queue, type CaseItem, type LaunchKey } from "./queue";
+import { AdmissionPage, AuditPage, BarPage, BarsPage, CasePage, Denied, EvidencePage, Flash, HubsPage, ICON, LaunchPage, Missing, QueuePage, THEME_COOKIE, type CaseDecision, type Shell } from "./views";
 
 export const app = new Hono<AppEnv>();
 
@@ -157,15 +158,54 @@ async function caseOf(c: Context<AppEnv>) {
     coin: row.ticker && row.name ? { ticker: row.ticker, name: row.name } : null,
     evidenceKey: row.c.evidenceKey,
   };
-  return { item, evidence: row.c.evidence, quoteMint: row.quoteMint };
+  return { item, evidence: row.c.evidence, quoteMint: row.quoteMint, row: row.c };
+}
+
+/** What a case's page offers or records: while open, what confirming it would cancel and send; once decided, the decision. */
+async function decisionOf(c: Context<AppEnv>, found: NonNullable<Awaited<ReturnType<typeof caseOf>>>): Promise<CaseDecision> {
+  const { row } = found;
+  return asOperator(c.var.db, async (tx) => {
+    if (row.status !== "open") {
+      const [bar] = await tx.select({ id: bars.id }).from(bars).where(eq(bars.caseId, row.id));
+      return { status: row.status, decidedBy: row.decidedBy, decidedAt: row.decidedAt, note: row.decisionNote, barId: bar?.id ?? null };
+    }
+    const [record] = row.creatorId ? await tx.select({ xUserId: creators.xUserId }).from(creators).where(eq(creators.id, row.creatorId)) : [];
+    const fairOpens = await tx
+      .select({ teaser: launches.teaser, opensAt: launches.opensAt })
+      .from(launches)
+      .where(
+        and(
+          eq(launches.mode, "fair_open"),
+          isNull(launches.cancelledAt),
+          notInArray(launches.status, ["failed", "expired", "prepared"]),
+          gt(launches.depositsOpenAt, new Date()),
+          row.creatorId ? or(eq(launches.creatorId, row.creatorId), eq(launches.wallet, row.creatorWallet)) : eq(launches.wallet, row.creatorWallet),
+        ),
+      );
+    return { status: "open", fairOpens, xLinked: !!record?.xUserId };
+  });
 }
 
 const missingCase = (c: Context<AppEnv>) => c.html(<Missing {...shell(c, "queue")} what="Bundle Radar opened no case for this coin." />, 404);
 
-app.get("/cases/:mint", async (c) => {
+async function casePage(c: Context<AppEnv>, error: string | null = null, status: 200 | 400 | 409 = 200) {
   const found = await caseOf(c);
   if (!found) return missingCase(c);
-  return c.html(<CasePage {...shell(c, "queue")} item={found.item} quoteMint={found.quoteMint} now={new Date()} error={null} />);
+  return c.html(<CasePage {...shell(c, "queue")} item={found.item} quoteMint={found.quoteMint} now={new Date()} decision={await decisionOf(c, found)} error={error} />, status);
+}
+
+app.get("/cases/:mint", (c) => casePage(c));
+app.post("/cases/:mint", async (c) => {
+  const body = await form(c);
+  const decision = text(body.decision);
+  if (decision !== "confirmed" && decision !== "dismissed") return casePage(c, "Choose to confirm the case or dismiss it.", 400);
+  try {
+    const done = await decideCase(c.var.db, c.var.operator, c.req.param("mint"), decision, body.note, c.env.WEB_APP);
+    return c.redirect(done.bar ? `/bars/${done.bar}?done=${done.auditId}` : `/?done=${done.auditId}`, 303);
+  } catch (e) {
+    if (e instanceof Refused) return casePage(c, e.message, 409);
+    throw e;
+  }
 });
 app.post("/cases/:mint/evidence", async (c) => {
   const found = await caseOf(c);
@@ -190,6 +230,33 @@ app.get("/cases/:mint/evidence", async (c) => {
   return c.html(
     <EvidencePage {...shell(c, "queue")} item={found.item} quoteMint={found.quoteMint} now={new Date()} pack={pack} source={stored ? "r2" : "postgres"} matches={stored !== null && canonical(stored) === canonical(found.evidence)} />,
   );
+});
+
+app.get("/bars", async (c) => {
+  const rows = await asOperator(c.var.db, barRows);
+  return c.html(<BarsPage {...shell(c, "bars")} bars={rows} now={new Date()} flash={await flashOf(c)} />);
+});
+
+const oneOperator = (c: Context<AppEnv>) => c.env.APPEALS_BY_CONFIRMER === "allowed";
+
+async function barPage(c: Context<AppEnv>, error: string | null = null, status: 200 | 400 | 409 = 200) {
+  const detail = await asOperator(c.var.db, (tx) => barDetail(tx, c.req.param("id")!));
+  if (!detail) return c.html(<Missing {...shell(c, "bars")} heading="No such Bar" what="No case confirmed made a Bar with this id." />, 404);
+  return c.html(<BarPage {...shell(c, "bars")} detail={detail} now={new Date()} oneOperator={oneOperator(c)} error={error} flash={await flashOf(c)} />, status);
+}
+
+app.get("/bars/:id", (c) => barPage(c));
+app.post("/bars/:id/appeals/:appeal", async (c) => {
+  const body = await form(c);
+  const decision = text(body.decision);
+  if (decision !== "upheld" && decision !== "denied") return barPage(c, "Choose to uphold the appeal or deny it.", 400);
+  try {
+    const done = await decideAppeal(c.var.db, c.var.operator, c.req.param("appeal"), decision, body.note, oneOperator(c));
+    return c.redirect(`/bars/${c.req.param("id")}?done=${done.auditId}`, 303);
+  } catch (e) {
+    if (e instanceof Refused) return barPage(c, e.message, 409);
+    throw e;
+  }
 });
 
 async function hubsPage(c: Context<AppEnv>, flash: Child = null, status: 200 | 400 | 409 = 200) {

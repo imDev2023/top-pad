@@ -1,9 +1,28 @@
 // What an operator can do from the queue (spec 6.2, 6.3, 6.6): clear a refused launch or keep it refused, clear a wallet
 // for future Fair Opens, name its funding root a hub or keep its refusal or merge, and open a case's evidence pack. Each
-// runs as `heat_operator` and writes its audit row in the same transaction. Confirming cases and hearing their appeals
-// come with the Bars (#56).
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
-import { admissionReviews, auditLog, launchReviews, linkageHubs, vampAppeals, vampClearances, walletClearances, type Db, type DbOrTransaction, type OperatorAction } from "@top-pad/db";
+// runs as `heat_operator` and writes its audit row in the same transaction. Confirming a case bars its creator, and a
+// barred creator's appeal is heard by another operator (spec 6.5, #56).
+import { and, eq, gt, inArray, isNull, notInArray, or, sql } from "drizzle-orm";
+import { APPEAL_WINDOW_MS, publishAtOf } from "@top-pad/contract";
+import {
+  admissionReviews,
+  auditLog,
+  barAppeals,
+  bars,
+  bundleCases,
+  creators,
+  creatorWallets,
+  launches,
+  launchReviews,
+  linkageHubs,
+  vampAppeals,
+  vampClearances,
+  walletClearances,
+  xMessages,
+  type Db,
+  type DbOrTransaction,
+  type OperatorAction,
+} from "@top-pad/db";
 import { asOperator } from "./db";
 import type { Operator } from "./env";
 import { admissionItem, launchItem, type LaunchKey } from "./queue";
@@ -155,5 +174,151 @@ export async function openedRecently(db: Db, operator: Operator, mint: string, a
         ),
       );
     return row !== undefined;
+  });
+}
+
+/** The record a case's coin belongs to: the case's own, or the record whose Creator wallet launched it then. */
+async function recordOfCase(tx: DbOrTransaction, c: typeof bundleCases.$inferSelect) {
+  if (c.creatorId) return c.creatorId;
+  const [row] = await tx
+    .select({ id: creatorWallets.creatorId })
+    .from(creatorWallets)
+    .where(and(eq(creatorWallets.wallet, c.creatorWallet), sql`${creatorWallets.startedAt} <= ${c.openedAt.toISOString()}`))
+    .orderBy(sql`${creatorWallets.startedAt} desc`)
+    .limit(1);
+  return row?.id ?? null;
+}
+
+/** The X direct message a Bar owes its creator (spec 6.5): what happened, where the evidence is, and when it goes public. */
+export function barNotice(o: { ticker: string | null; webApp: string; recordId: string | null; wallet: string; publishAt: Date; appealBy: Date }) {
+  const coin = o.ticker ? `$${o.ticker}` : "one of your coins";
+  const day = (d: Date) => d.toISOString().slice(0, 10);
+  return [
+    `Heat: an operator confirmed a creator bundle in ${coin}, so Heat's launch key no longer co-signs your launches.`,
+    `The evidence and a reply box are on your Creator record, private to you until ${day(o.publishAt)}, when the finding is published: ${o.webApp}/creator/${o.recordId ?? o.wallet}`,
+    `You may appeal there until ${day(o.appealBy)}; another operator decides it within 48 hours.`,
+  ].join("\n\n");
+}
+
+/** What a case's finding was, for the audit log, which keeps it whatever happens to the Bar. */
+function findingOf(c: typeof bundleCases.$inferSelect) {
+  const pack = (c.evidence ?? {}) as { floor?: unknown; wallets?: { wallet: string; labels: string[] }[] };
+  return {
+    mint: c.mint,
+    creatorWallet: c.creatorWallet,
+    linkedWallets: c.linkedWallets,
+    floor: pack.floor ?? null,
+    wallets: (pack.wallets ?? []).map((w) => ({ wallet: w.wallet, labels: w.labels })),
+    evidenceKey: c.evidenceKey,
+  };
+}
+
+/**
+ * Confirms a bundling case or dismisses it (spec 6.5). Confirming bars the Creator at once: the Bar on the record, its
+ * Creator wallet then and its linked X account then, which the launch service checks before our launch key co-signs;
+ * every Fair Open of the record or wallet not yet in its window is cancelled, so it takes no deposits and fails at its
+ * open; and an X direct message is owed when the record linked X, which the API's cron sends. The finding stays private
+ * for 72 hours. Dismissing closes the case with no Bar.
+ */
+export async function decideCase(db: Db, operator: Operator, mint: string, decision: "confirmed" | "dismissed", noteInput: unknown, webApp: string) {
+  const note = noteOf(noteInput);
+  return asOperator(db, async (tx) => {
+    const [c] = await tx.select().from(bundleCases).where(eq(bundleCases.mint, mint)).for("update");
+    if (!c) throw new Refused("Bundle Radar opened no case for this coin.");
+    if (c.status !== "open") throw new Refused(`This case was ${c.status} already, by ${c.decidedBy ?? "another operator"}: another decision was made first.`);
+    await tx.update(bundleCases).set({ status: decision, decidedAt: sql`now()`, decidedBy: operator.email, decisionNote: note }).where(eq(bundleCases.id, c.id));
+    const finding = findingOf(c);
+    if (decision === "dismissed") {
+      const auditId = await audit(tx, operator, "case_dismissed", `case:${mint}`, { case: c.id, finding, note });
+      return { auditId, bar: null, cancelled: [] as string[], message: false };
+    }
+
+    const recordId = await recordOfCase(tx, c);
+    const [record] = recordId ? await tx.select({ xUserId: creators.xUserId, handle: creators.xHandle }).from(creators).where(eq(creators.id, recordId)) : [];
+    const confirmedAt = new Date();
+    const publishAt = publishAtOf(confirmedAt);
+    const [bar] = await tx
+      .insert(bars)
+      .values({ caseId: c.id, mint, creatorId: recordId, creatorWallet: c.creatorWallet, xUserId: record?.xUserId ?? null, confirmedBy: operator.email, confirmedAt, publishAt, note })
+      .returning();
+    // Every Fair Open of the record or its wallet whose window has not started: it takes no deposits from now and our
+    // keeper sends none of its rungs. One already in its window keeps going, its depositors' money in it (spec 6.5).
+    const cancelled = await tx
+      .update(launches)
+      .set({ cancelledAt: sql`now()`, cancelBar: bar!.id })
+      .where(
+        and(
+          eq(launches.mode, "fair_open"),
+          isNull(launches.cancelledAt),
+          // A draft never submitted is no Fair Open yet, and the Bar refuses its submit.
+          notInArray(launches.status, ["prepared", "failed", "expired"]),
+          gt(launches.depositsOpenAt, sql`now()`),
+          recordId ? or(eq(launches.creatorId, recordId), eq(launches.wallet, c.creatorWallet)) : eq(launches.wallet, c.creatorWallet),
+        ),
+      )
+      .returning({ id: launches.id, fairOpen: launches.fairOpen, teaser: launches.teaser, opensAt: launches.opensAt });
+    const [coin] = await tx.select({ ticker: launches.ticker }).from(launches).where(eq(launches.mint, mint));
+    let message = false;
+    if (record?.xUserId) {
+      const appealBy = new Date(confirmedAt.getTime() + APPEAL_WINDOW_MS);
+      await tx.insert(xMessages).values({ barId: bar!.id, xUserId: record.xUserId, text: barNotice({ ticker: coin?.ticker ?? null, webApp, recordId, wallet: c.creatorWallet, publishAt, appealBy }) });
+      message = true;
+    }
+    const auditId = await audit(tx, operator, "case_confirmed", `case:${mint}`, {
+      case: c.id,
+      bar: bar!.id,
+      record: recordId,
+      handle: record?.handle ?? null,
+      xUserId: record?.xUserId ?? null,
+      publishAt: publishAt.toISOString(),
+      cancelled: cancelled.map((l) => ({ launch: l.fairOpen, teaser: l.teaser, opensAt: l.opensAt?.toISOString() ?? null })),
+      message,
+      finding,
+      note,
+    });
+    return { auditId, bar: bar!.id, cancelled: cancelled.map((l) => l.fairOpen ?? l.id), message };
+  });
+}
+
+/**
+ * Decides a barred creator's appeal (spec 6.5), by an operator other than the one who confirmed the Bar, unless this
+ * deployment lets one operator fill both roles (devnet, where the owner is the only operator). Upheld lifts the Bar,
+ * which takes the finding off every public page and lets the launch key co-sign again; the audit row keeps the finding.
+ * Denied leaves it standing, and the creator may appeal again only with new evidence.
+ */
+export async function decideAppeal(db: Db, operator: Operator, appealId: string, decision: "upheld" | "denied", noteInput: unknown, oneOperator = false) {
+  const note = noteOf(noteInput);
+  return asOperator(db, async (tx) => {
+    const [appeal] = await tx.select().from(barAppeals).where(eq(barAppeals.id, appealId)).for("update");
+    if (!appeal) throw new Refused("There is no such appeal.");
+    if (appeal.status !== "open") throw new Refused(`This appeal was ${appeal.status} already: another decision was made first.`);
+    const [bar] = await tx.select().from(bars).where(eq(bars.id, appeal.barId)).for("update");
+    if (!bar) throw new Refused("The appeal's Bar is gone.");
+    const sameOperator = bar.confirmedBy === operator.email;
+    if (sameOperator && !oneOperator) throw new Refused(`You confirmed this case, so another operator hears its appeal (spec 6.5): ${bar.confirmedBy} may not decide it.`);
+    await tx.update(barAppeals).set({ status: decision, decidedAt: sql`now()`, decidedBy: operator.email, decisionNote: note }).where(eq(barAppeals.id, appeal.id));
+    if (decision === "upheld") {
+      await tx
+        .update(bars)
+        .set({ liftedAt: sql`now()`, liftedBy: operator.email, liftedAppeal: appeal.id })
+        .where(and(eq(bars.id, bar.id), isNull(bars.liftedAt)));
+    }
+    const [c] = await tx.select().from(bundleCases).where(eq(bundleCases.id, bar.caseId));
+    // The finding stays in the audit log whatever the appeal decided: the public record forgets an upheld one, this never does.
+    const auditId = await audit(tx, operator, decision === "upheld" ? "appeal_upheld" : "appeal_denied", `bar:${bar.id}`, {
+      appeal: appeal.id,
+      bar: bar.id,
+      case: bar.caseId,
+      record: bar.creatorId,
+      confirmedBy: bar.confirmedBy,
+      confirmedAt: bar.confirmedAt.toISOString(),
+      sameOperator,
+      grounds: appeal.grounds,
+      statement: appeal.statement,
+      evidence: appeal.evidence,
+      finding: c ? findingOf(c) : { mint: bar.mint, creatorWallet: bar.creatorWallet },
+      note,
+    });
+    return { auditId, lifted: decision === "upheld" };
   });
 }

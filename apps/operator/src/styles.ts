@@ -137,7 +137,7 @@ textarea.input { min-height: 84px; resize: vertical; }
 .flash { padding: 12px 14px; }
 
 /* The queue's tallies. */
-.tallies { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.tallies { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
 .tally { padding: 12px 14px; display: grid; gap: 2px; }
 .tally .n { font-family: var(--font-mono); font-size: 1.6rem; font-weight: 500; line-height: 1.1; }
 .tally.over .n { color: var(--stop); }
@@ -197,6 +197,7 @@ textarea.input { min-height: 84px; resize: vertical; }
 
 @media (max-width: 720px) {
   .tallies { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tallies > :last-child { grid-column: 1 / -1; }
   .who .email { display: none; }
 }
 @media (max-width: 560px) {

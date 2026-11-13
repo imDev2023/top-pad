@@ -15,7 +15,9 @@
   "access": { "dev": { "aud": "heat-operator-local", "identity": { "email": "operator@heat.local" } } },
   "vars": {
     "CLUSTER": "devnet",
-    "ACCESS_AUD": "heat-operator-local"
+    "ACCESS_AUD": "heat-operator-local",
+    // The web app a barred creator's X direct message links their record on.
+    "WEB_APP": "http://localhost:3110"
   },
   "hyperdrive": [
     {
@@ -37,7 +39,11 @@
         // The audience tag of the Access application on this Worker, which the owner applied in the dashboard on
         // 2026-11-09 (Workers & Pages, Access, all traffic, the policy "Cloudflare account - Allow": the account's one
         // member, the owner; sessions of 24 h). Every request Access did not sign in for it is refused (#54).
-        "ACCESS_AUD": "2dd4e0a909a1dd504a2459ee16d79d5ead50cd11e1e51c1df94ead70b1e266de"
+        "ACCESS_AUD": "2dd4e0a909a1dd504a2459ee16d79d5ead50cd11e1e51c1df94ead70b1e266de",
+        "WEB_APP": "https://top-pad-web-devnet.rc-labs.workers.dev",
+        // On devnet the owner is the only operator and fills both roles, confirming a case and hearing its appeal (spec
+        // 6.5); every such decision says so in the audit log. Mainnet takes a second operator.
+        "APPEALS_BY_CONFIRMER": "allowed"
       },
       // The API's Hyperdrive in front of the devnet database on the owner's Mac (#102): the app's every statement still
       // runs as heat_operator, through SET LOCAL ROLE in its transactions (src/db.ts).

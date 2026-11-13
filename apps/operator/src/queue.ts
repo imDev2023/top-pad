@@ -1,9 +1,10 @@
 // The operator queue (spec 6.6): one list of everything waiting on a person, refused launches with their appeals,
-// refused or merged admissions, and bundling cases, each with its age against the 48-hour aim. Read as `heat_operator`.
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+// refused or merged admissions, bundling cases and barred creators' appeals, each with its age against the 48-hour aim.
+// Read as `heat_operator`.
+import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { ProtectedMatch } from "@top-pad/contract";
-import { admissionReviews, bundleCases, creators, creatorWallets, launches, launchReviews, vampAppeals, type DbOrTransaction } from "@top-pad/db";
+import { admissionReviews, barAppeals, barReplies, bars, bundleCases, creators, creatorWallets, launches, launchReviews, vampAppeals, xMessages, type DbOrTransaction } from "@top-pad/db";
 
 /** How soon the queue aims to answer each item (spec 6.6). */
 export const AIM_HOURS = 48;
@@ -71,7 +72,24 @@ export type CaseItem = {
   evidenceKey: string;
 };
 
-export type QueueItem = LaunchItem | AdmissionItem | CaseItem;
+/** A barred creator's appeal (spec 6.5), waiting on an operator other than the one who confirmed the Bar. */
+export type AppealItem = {
+  kind: "appeal";
+  id: string;
+  barId: string;
+  mint: string;
+  since: Date;
+  handle: string | null;
+  creatorWallet: string;
+  coin: { ticker: string; name: string } | null;
+  grounds: "shared_exchange" | "launch_service" | "other";
+  statement: string;
+  confirmedBy: string;
+  /** Whether it follows a denied appeal, so it must bring new evidence. */
+  again: boolean;
+};
+
+export type QueueItem = LaunchItem | AdmissionItem | CaseItem | AppealItem;
 
 const Match = z.object({ field: z.enum(["ticker", "name", "image"]), status: z.string(), coin: ProtectedMatch, reason: z.string().nullable() });
 const FieldVerdictShape = z.object({ status: z.string(), reason: z.string().nullable(), match: ProtectedMatch.nullable() });
@@ -239,7 +257,7 @@ export async function admissionItems(tx: DbOrTransaction): Promise<AdmissionItem
   return [...items.values()];
 }
 
-/** Bundling cases still open: confirming them comes with the Bars (#56), so every case stays until then. */
+/** Bundling cases still open: each waits for an operator to confirm it, which bars its creator, or dismiss it (spec 6.5). */
 export async function caseItems(tx: DbOrTransaction): Promise<CaseItem[]> {
   const rows = await tx
     .select({ c: bundleCases, handle: creators.xHandle, ticker: launches.ticker, name: launches.name })
@@ -262,11 +280,128 @@ export async function caseItems(tx: DbOrTransaction): Promise<CaseItem[]> {
   }));
 }
 
+/** Barred creators' appeals still open, each since it was filed (spec 6.5: decided within 48 hours). */
+export async function appealItems(tx: DbOrTransaction): Promise<AppealItem[]> {
+  const rows = await tx
+    .select({ appeal: barAppeals, bar: bars, handle: creators.xHandle, ticker: launches.ticker, name: launches.name })
+    .from(barAppeals)
+    .innerJoin(bars, eq(bars.id, barAppeals.barId))
+    .leftJoin(creators, eq(creators.id, bars.creatorId))
+    .leftJoin(launches, eq(launches.mint, bars.mint))
+    .where(eq(barAppeals.status, "open"))
+    .orderBy(barAppeals.filedAt);
+  const earlier = rows.length
+    ? await tx
+        .select({ barId: barAppeals.barId, n: sql<number>`count(*)::int` })
+        .from(barAppeals)
+        .where(and(inArray(barAppeals.barId, rows.map((r) => r.bar.id)), eq(barAppeals.status, "denied")))
+        .groupBy(barAppeals.barId)
+    : [];
+  return rows.map(({ appeal, bar, handle, ticker, name }) => ({
+    kind: "appeal",
+    id: appeal.id,
+    barId: bar.id,
+    mint: bar.mint,
+    since: appeal.filedAt,
+    handle,
+    creatorWallet: bar.creatorWallet,
+    coin: ticker && name ? { ticker, name } : null,
+    grounds: appeal.grounds,
+    statement: appeal.statement,
+    confirmedBy: bar.confirmedBy,
+    again: earlier.some((e) => e.barId === bar.id && e.n > 0),
+  }));
+}
+
 /** The whole queue, oldest first: what is closest to the 48-hour aim, or past it, comes first. */
 export async function queue(tx: DbOrTransaction): Promise<QueueItem[]> {
-  const [l, a, c] = [await launchItems(tx), await admissionItems(tx), await caseItems(tx)];
-  return [...l, ...a, ...c].sort((x, y) => x.since.getTime() - y.since.getTime());
+  const [l, a, c, p] = [await launchItems(tx), await admissionItems(tx), await caseItems(tx), await appealItems(tx)];
+  return [...l, ...a, ...c, ...p].sort((x, y) => x.since.getTime() - y.since.getTime());
 }
+
+/** A Bar as the operator's Bars page lists it. */
+export type BarRow = {
+  id: string;
+  mint: string;
+  coin: { ticker: string; name: string } | null;
+  handle: string | null;
+  creatorWallet: string;
+  confirmedBy: string;
+  confirmedAt: Date;
+  publishAt: Date;
+  liftedAt: Date | null;
+  replies: number;
+  appeals: number;
+  openAppeal: boolean;
+};
+
+/** Every Bar, newest first, with how many replies and appeals each drew. */
+export async function barRows(tx: DbOrTransaction): Promise<BarRow[]> {
+  const rows = await tx
+    .select({
+      bar: bars,
+      handle: creators.xHandle,
+      ticker: launches.ticker,
+      name: launches.name,
+      // Written out: drizzle leaves a lone table's columns unqualified, which a subquery on another table would misread.
+      replies: sql<number>`(select count(*)::int from bar_replies r where r.bar_id = "bars"."id")`,
+      appeals: sql<number>`(select count(*)::int from bar_appeals a where a.bar_id = "bars"."id")`,
+      openAppeal: sql<boolean>`exists (select 1 from bar_appeals a where a.bar_id = "bars"."id" and a.status = 'open')`,
+    })
+    .from(bars)
+    .leftJoin(creators, eq(creators.id, bars.creatorId))
+    .leftJoin(launches, eq(launches.mint, bars.mint))
+    .orderBy(desc(bars.confirmedAt))
+    .limit(200);
+  return rows.map((r) => ({
+    id: r.bar.id,
+    mint: r.bar.mint,
+    coin: r.ticker && r.name ? { ticker: r.ticker, name: r.name } : null,
+    handle: r.handle,
+    creatorWallet: r.bar.creatorWallet,
+    confirmedBy: r.bar.confirmedBy,
+    confirmedAt: r.bar.confirmedAt,
+    publishAt: r.bar.publishAt,
+    liftedAt: r.bar.liftedAt,
+    replies: r.replies,
+    appeals: r.appeals,
+    openAppeal: r.openAppeal,
+  }));
+}
+
+/** One Bar with everything about it: its case, the creator's replies and appeals, its X message and its cancelled Fair Opens. */
+export async function barDetail(tx: DbOrTransaction, id: string) {
+  if (!/^[0-9a-f-]{36}$/.test(id)) return null;
+  const [row] = await tx
+    .select({ bar: bars, c: bundleCases, handle: creators.xHandle, ticker: launches.ticker, name: launches.name })
+    .from(bars)
+    .innerJoin(bundleCases, eq(bundleCases.id, bars.caseId))
+    .leftJoin(creators, eq(creators.id, bars.creatorId))
+    .leftJoin(launches, eq(launches.mint, bars.mint))
+    .where(eq(bars.id, id));
+  if (!row) return null;
+  const [replies, appeals, messages, cancelled] = [
+    await tx.select().from(barReplies).where(eq(barReplies.barId, id)).orderBy(asc(barReplies.at)),
+    await tx.select().from(barAppeals).where(eq(barAppeals.barId, id)).orderBy(asc(barAppeals.filedAt)),
+    await tx.select().from(xMessages).where(eq(xMessages.barId, id)),
+    await tx
+      .select({ fairOpen: launches.fairOpen, teaser: launches.teaser, opensAt: launches.opensAt, cancelledAt: launches.cancelledAt })
+      .from(launches)
+      .where(eq(launches.cancelBar, id)),
+  ];
+  return {
+    bar: row.bar,
+    case: row.c,
+    handle: row.handle,
+    coin: row.ticker && row.name ? { ticker: row.ticker, name: row.name } : null,
+    replies,
+    appeals,
+    message: messages[0] ?? null,
+    cancelled,
+  };
+}
+
+export type BarDetail = NonNullable<Awaited<ReturnType<typeof barDetail>>>;
 
 /** How long an item has waited, against the aim. */
 export function ageOf(since: Date, now = new Date()) {

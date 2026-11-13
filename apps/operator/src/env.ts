@@ -12,6 +12,13 @@ export type Bindings = {
    * this application is refused, so a missing tag refuses everything.
    */
   ACCESS_AUD?: string;
+  /** The public web app, which a barred creator's X direct message links their record on. */
+  WEB_APP: string;
+  /**
+   * `allowed` lets the operator who confirmed a case decide its appeal too, as on devnet, where the owner fills both roles
+   * (spec 6.5); anywhere else a different operator must.
+   */
+  APPEALS_BY_CONFIRMER?: string;
 };
 
 /** Who is acting: the operator Access signed in, by their email. */
