@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CreatorSummary } from "./creatorSummary";
 import { WindowClaim } from "./earnings";
 import { CreatorLock, TaxShare } from "./fairOpen";
 import { Address, RawAmount } from "./launch";
@@ -90,6 +91,8 @@ export const Coin = z.object({
   heat: z.boolean(),
   launchMode: z.enum(["instant", "fair_open"]).nullable(),
   creator: z.object({ wallet: Address, handle: z.string().nullable() }),
+  /** Its launcher's record summary (spec 7, 9): null for a pool made around Heat's flow, which no record launched. */
+  record: CreatorSummary.nullable(),
   /** When trading opened: the sniper tax counts from here. */
   activatedAt: z.iso.datetime(),
   /** The coin's fixed supply in raw units, and its decimals (spec 3.1). */

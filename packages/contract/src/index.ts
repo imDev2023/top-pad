@@ -1,6 +1,8 @@
 // The API's contract: every request and answer shape, shared by the API (which validates what it sends) and its clients.
 export * from "./auth";
 export * from "./coin";
+export * from "./creator";
+export * from "./creatorSummary";
 export * from "./earnings";
 export * from "./fairOpen";
 export * from "./health";

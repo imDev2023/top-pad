@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { QuoteInfo } from "./quote";
 import { Signature } from "./earnings";
+import { CreatorSummary } from "./creatorSummary";
 import { Address, RawAmount } from "./launch";
 
 /** A Depositor tier (spec 2.1 step 9): how strongly a person has shown they are one person. */
@@ -111,6 +112,8 @@ export type TaxShare = z.infer<typeof TaxShare>;
 export const FairOpen = z.object({
   launch: Address,
   creator: z.object({ wallet: Address, handle: z.string().nullable(), name: z.string().nullable(), avatarUrl: z.string().url().nullable() }),
+  /** The creator's record summary (spec 7, 9); null for a launch scheduled outside Heat's site, which has no record. */
+  record: CreatorSummary.nullable(),
   teaser: z.string().nullable(),
   /** The SHA-256 the coin's name, ticker and metadata URI are sealed behind, hex. */
   identityHash: z.string().regex(/^[0-9a-f]{64}$/),

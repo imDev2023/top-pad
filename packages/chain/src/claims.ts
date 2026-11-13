@@ -15,7 +15,7 @@ import {
 } from "@solana/kit";
 import { getSetComputeUnitLimitInstruction, getSetComputeUnitPriceInstruction } from "@solana-program/compute-budget";
 import { findAssociatedTokenPda, getCloseAccountInstruction, getCreateAssociatedTokenIdempotentInstructionAsync } from "@solana-program/token";
-import type { PoolState } from "@top-pad/clients/dbc";
+import { getTransferPoolCreatorInstruction, type PoolState } from "@top-pad/clients/dbc";
 import {
   findCoinRecordPda,
   findWindowClaimPda,
@@ -24,7 +24,7 @@ import {
   getClaimWindowFeesInstructionAsync,
   TAX_WINDOW_SECONDS,
 } from "@top-pad/clients/fee";
-import { eventAuthorityAddress, TOKEN_PROGRAM_ADDRESS } from "./dbc";
+import { DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS, eventAuthorityAddress, TOKEN_PROGRAM_ADDRESS } from "./dbc";
 import { creatorLpFeeClaimInstructions, type GraduatedPosition } from "./graduation";
 import { FEE_CLAIMER_ADDRESS, FEE_PROGRAM_ADDRESS, WSOL_MINT } from "./index";
 
@@ -211,4 +211,20 @@ export async function creatorClaimMessages(c: CreatorClaim, lifetime: { blockhas
   }
   if (batch.length) batches.push(batch);
   return Promise.all(batches.map(build));
+}
+
+/** A pool's DBC creator role, handed by the wallet holding it to another (spec 7): Creator Earnings follow the role. */
+export type CreatorRoleHandover = { holder: TransactionSigner; pool: Address; config: Address; to: Address; computeUnitPrice: bigint };
+
+/** A creator role hand-over's transaction message, the holder paying: DBC's `transfer_pool_creator`. */
+export async function creatorRoleMessage(h: CreatorRoleHandover, lifetime: { blockhash: Blockhash; lastValidBlockHeight: bigint }) {
+  const transfer = getTransferPoolCreatorInstruction({
+    virtualPool: h.pool,
+    config: h.config,
+    creator: h.holder,
+    newCreator: h.to,
+    eventAuthority: await eventAuthorityAddress(DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS),
+    program: DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS,
+  });
+  return message(h.holder, [...priced(h.computeUnitPrice), transfer], lifetime);
 }
