@@ -364,3 +364,20 @@ export async function getCreatorRecord(c: Context<AppEnv>) {
   c.header("cache-control", "no-store");
   return c.json(record);
 }
+
+/**
+ * `GET /creators/current/:wallet`: the summary of the record whose Creator wallet `wallet` is now, or null when it is none,
+ * which the creator's page asks for every wallet it connects.
+ */
+export async function getCurrentRecord(c: Context<AppEnv>) {
+  const { db } = c.var;
+  const wallet = c.req.param("wallet")!;
+  if (!Address.safeParse(wallet).success) return c.json({ error: "That is not a Solana wallet address." }, 400);
+  const [row] = await db
+    .select({ id: creatorWallets.creatorId })
+    .from(creatorWallets)
+    .where(and(eq(creatorWallets.wallet, wallet), isNull(creatorWallets.endedAt)));
+  if (row) await completeRotations(db, new Date(), row.id);
+  c.header("cache-control", "no-store");
+  return c.json(row ? await summaryOf(db, row.id) : null);
+}

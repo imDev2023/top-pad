@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { CreatorSummary, Me } from "@top-pad/contract";
-import { ApiProblem, getCreatorRecord, getMe } from "@/lib/api";
+import { getCurrentRecord, getMe } from "@/lib/api";
 import { WalletButton } from "../WalletButton";
 import { useWallet } from "../WalletProvider";
 import styles from "./Creator.module.css";
@@ -25,13 +25,7 @@ export function CreatorPage() {
   const load = useCallback(async () => {
     setMe(await getMe().catch(() => null));
     if (!address) return setRecord(undefined);
-    try {
-      const found = await getCreatorRecord(address);
-      // A wallet that was a record's Creator wallet once and is no longer has no record of its own here.
-      setRecord(found.summary.wallet === address ? found.summary : null);
-    } catch (e) {
-      setRecord(e instanceof ApiProblem && e.status === 404 ? null : undefined);
-    }
+    setRecord(await getCurrentRecord(address).catch(() => undefined));
   }, [address]);
   useEffect(() => {
     void load();

@@ -1,7 +1,7 @@
 import { generateKeyPairSigner, getBase58Encoder, getPublicKeyFromAddress, signBytes, verifySignature, type KeyPairSigner, type SignatureBytes } from "@solana/kit";
 import { and, eq, isNull } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { CreatorRecord, HandoverOffers, Me, WalletChange, WalletChangeMessage, WalletChangeRefusal } from "@top-pad/contract";
+import { CreatorRecord, CreatorSummary, HandoverOffers, Me, WalletChange, WalletChangeMessage, WalletChangeRefusal } from "@top-pad/contract";
 import { createDb, creatorWallets, sessions, walletChanges, type Db } from "@top-pad/db";
 import { createTestDatabase } from "@top-pad/db/testing";
 import { completeRotations, ROTATION_COOLDOWN_MS } from "./creatorWallets";
@@ -123,6 +123,9 @@ describe("handing over a Creator wallet", () => {
     await signIn(a);
     expect(await recordIdOf(a.address)).not.toBe(record);
     expect(HandoverOffers.parse(await (await request(`/creators/offers/${b.address}`)).json()).offers).toEqual([]);
+    // The creator's page asks which record a wallet is the Creator wallet of now: null, not 404, for none.
+    expect(CreatorSummary.nullable().parse(await (await request(`/creators/current/${b.address}`)).json())?.id).toBe(record);
+    expect(await (await request(`/creators/current/${(await generateKeyPairSigner()).address}`)).json()).toBeNull();
   });
 
   it("refuses a wallet that is another record's, a wrong signer, a replay, and a message of another purpose", async () => {

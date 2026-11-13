@@ -8,6 +8,7 @@ import {
   CreatorEarnings,
   CreatorRecord,
   CreatorRoleOutcome,
+  CreatorSummary,
   FairOpen,
   FairOpenOutcome,
   HandoverOffers,
@@ -277,6 +278,9 @@ export const fairOpenLiveUrl = (launch: string) => `${API_URL.replace(/^http/, "
 
 /** A Creator record (spec 7, screen 5), by its id or by any wallet that is or was its Creator wallet. */
 export const getCreatorRecord = (key: string) => call(CreatorRecord, `/creators/${encodeURIComponent(key)}`);
+
+/** The summary of the record whose Creator wallet `wallet` is now, or null. */
+export const getCurrentRecord = (wallet: string) => call(CreatorSummary.nullable(), `/creators/current/${encodeURIComponent(wallet)}`);
 
 /** A Creator record as the server renders its page: "missing" when there is none, "unavailable" when the API did not answer. */
 export async function loadCreatorRecord(key: string): Promise<CreatorRecord | "missing" | "unavailable"> {

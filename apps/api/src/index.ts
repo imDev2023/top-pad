@@ -15,7 +15,7 @@ import { verifyMessageRoute, verifyRoute } from "./verify";
 import { getCoinRadar, reviewBundles } from "./bundleRadar";
 import { getCoin, getCoinCandles, getCoinTrades } from "./coins";
 import { getEarnings, prepareClaim, reportClaim } from "./earnings";
-import { getCreatorRecord } from "./creatorRecord";
+import { getCreatorRecord, getCurrentRecord } from "./creatorRecord";
 import { prepareCreatorRole, reportCreatorRole } from "./creatorRole";
 import {
   acceptHandover,
@@ -164,6 +164,7 @@ app.post("/creators/rotation", requestRotation);
 app.post("/creators/changes/:id/accept", acceptHandover);
 app.post("/creators/changes/:id/cancel/message", cancelMessageRoute);
 app.post("/creators/changes/:id/cancel", cancelChange);
+app.get("/creators/current/:wallet", getCurrentRecord);
 app.get("/creators/:key", getCreatorRecord);
 app.post("/fair-opens/transactions", reportFairOpenTransaction);
 app.get("/fair-opens/:launch", getFairOpen);

@@ -10,7 +10,7 @@ import { expect, test, type Browser, type Page } from "@playwright/test";
 import { address, generateKeyPairSigner, getBase58Encoder, getPublicKeyFromAddress, verifySignature, type Address, type KeyPairSigner, type SignatureBytes } from "@solana/kit";
 import { CLUSTERS, creatorShare } from "@top-pad/chain";
 import { fetchVirtualPool } from "@top-pad/clients/dbc";
-import { fetchCoinRecord, findCoinRecordPda } from "@top-pad/clients/fee";
+import { fetchCoinRecord, findCoinRecordPda, LaunchMode } from "@top-pad/clients/fee";
 import { Coin, CreatorEarnings, CreatorRecord } from "@top-pad/contract";
 import { coins, createDb, creatorWallets, fairOpens, feeClaims, graduations, launches, lpFeeClaims, poolCreatorTransfers, trades } from "@top-pad/db";
 import { coinBalance, fundedWallets, landed, rpc, swap, sweep } from "@top-pad/tests-devnet/devnet";
@@ -86,7 +86,7 @@ async function recomputeAndMatch(page: Page, key: string) {
     for (const coin of launched) {
       const shownCoin = record.coins.find((c) => c.mint === coin.mint)!;
       const onChain = await fetchCoinRecord(rpc, (await findCoinRecordPda({ mint: address(coin.mint) }))[0]);
-      expect(onChain.data.launchMode === 0 ? "instant" : "fair_open").toBe(shownCoin.launchMode);
+      expect(onChain.data.launchMode === LaunchMode.Instant ? "instant" : "fair_open").toBe(shownCoin.launchMode);
       // The creator role, read from DBC's pool, and every hand-over of it re-read from its transaction.
       const pool = await fetchVirtualPool(rpc, address(coin.pool));
       expect(shownCoin.role.holder).toBe(pool.data.poolState.creator);
