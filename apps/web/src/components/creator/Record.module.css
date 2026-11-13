@@ -491,6 +491,7 @@
 
   /* A handle is the record's identity: on a phone it wraps rather than hides behind an ellipsis. */
   .title h1 {
+    font-size: 1.5rem;
     white-space: normal;
     overflow-wrap: anywhere;
   }
