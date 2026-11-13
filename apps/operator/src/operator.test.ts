@@ -11,6 +11,7 @@ import {
   creators,
   creatorWallets,
   jobRuns,
+  knownBots,
   launches,
   launchReviews,
   linkageHubs,
@@ -501,6 +502,43 @@ describe("hubs", () => {
     expect(await db.select().from(linkageHubs)).toEqual([]);
     const actions = (await db.select().from(auditLog).where(eq(auditLog.subject, `wallet:${wallet(7)}`)).orderBy(auditLog.id)).map((r) => r.action);
     expect(actions).toEqual(["hub_added", "hub_removed"]);
+  });
+});
+
+describe("the known-bot list", () => {
+  it("lists each wallet with why, and takes one off for good, in the audit log", async () => {
+    await db.delete(knownBots);
+    const bot = wallet(5);
+    await db.insert(knownBots).values({
+      wallet: bot,
+      earlyLaunches: 3,
+      roundTrips: 1,
+      evidence: { early: [{ mint: wallet(6), signature: "5igS1gnature", seconds: 1 }], roundTrips: ["4roundTr1p"] },
+    });
+    const listed = await page("/bots");
+    expect(listed.html).toContain(bot);
+    expect(listed.html).toContain("Bought in the first 2 seconds of 3 launches");
+    expect(listed.html).toContain("1 buy and sell inside one transaction");
+    expect((await post(`/bots/${bot}/remove`, { note: "" })).status).toBe(409);
+    const removed = await post(`/bots/${bot}/remove`, { note: "a market maker we know" });
+    expect(removed.status).toBe(303);
+    expect((await page(removed.headers.get("location")!)).html).toContain("Done, and written to the audit log");
+    const [row] = await db.select().from(knownBots).where(eq(knownBots.wallet, bot));
+    expect(row).toMatchObject({ removedBy: "operator@heat.test", removedNote: "a market maker we know", earlyLaunches: 3 });
+    expect(row!.removedAt).not.toBeNull();
+    expect((await post(`/bots/${bot}/remove`, { note: "again" })).status).toBe(409);
+    expect((await page("/bots")).html).toContain("Taken off");
+    const audits = await db.select().from(auditLog).where(and(eq(auditLog.action, "bot_removed"), eq(auditLog.subject, `wallet:${bot}`)));
+    expect(audits).toHaveLength(1);
+    expect(audits[0]!.detail).toMatchObject({ note: "a market maker we know", earlyLaunches: 3, roundTrips: 1 });
+    // The role can take a wallet off, never put one on or rewrite why it was listed.
+    const asOperator = (statement: string) =>
+      db.transaction(async (tx) => {
+        await tx.execute(sql`set local role heat_operator`);
+        return tx.execute(sql.raw(statement));
+      });
+    await expect(asOperator(`insert into known_bots (wallet, early_launches, round_trips, evidence) values ('x', 3, 0, '{}')`)).rejects.toThrow();
+    await expect(asOperator(`update known_bots set early_launches = 0`)).rejects.toThrow();
   });
 });
 

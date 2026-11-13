@@ -53,6 +53,7 @@ p { margin: 0; }
 .mono, .num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 .muted { color: var(--muted); }
 .note { font-size: 0.82rem; color: var(--muted); }
+.bot-evidence { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 2px; }
 .eyebrow { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; color: var(--muted); }
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
 .pad { padding: 16px 18px; }

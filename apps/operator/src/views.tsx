@@ -14,7 +14,7 @@ const FONTS = "https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;5
 export const THEME_COOKIE = "heat_theme";
 export type Theme = "light" | "dark";
 
-export type Shell = { nonce: string; operator: Operator | null; cluster: string; theme: Theme | null; current?: "queue" | "bars" | "hubs" | "audit" };
+export type Shell = { nonce: string; operator: Operator | null; cluster: string; theme: Theme | null; current?: "queue" | "bars" | "bots" | "hubs" | "audit" };
 
 // Formatting.
 
@@ -106,6 +106,7 @@ export const Layout: FC<PropsWithChildren<Shell & { title: string }>> = ({ title
               <nav class="nav" aria-label="Operator">
                 <a href="/" aria-current={current === "queue" ? "page" : undefined}>Queue</a>
                 <a href="/bars" aria-current={current === "bars" ? "page" : undefined}>Bars</a>
+                <a href="/bots" aria-current={current === "bots" ? "page" : undefined}>Known bots</a>
                 <a href="/hubs" aria-current={current === "hubs" ? "page" : undefined}>Hubs</a>
                 <a href="/audit" aria-current={current === "audit" ? "page" : undefined}>Audit log</a>
               </nav>
@@ -1077,6 +1078,156 @@ export const HubsPage: FC<Shell & { hubs: HubRow[]; flash: Child }> = ({ hubs, f
   </Layout>
 );
 
+// The known-bot list.
+
+export type BotRow = {
+  wallet: string;
+  earlyLaunches: number;
+  roundTrips: number;
+  evidence: unknown;
+  listedAt: Date;
+  removedAt: Date | null;
+  removedBy: string | null;
+  removedNote: string | null;
+};
+
+type BotEvidence = { early?: { mint: string; signature: string; seconds: number | string }[]; roundTrips?: string[] };
+
+/** Why a wallet is on the list, in words: the launches it bought in the first 2 seconds of, and its round trips. */
+const botReasons = (b: BotRow) =>
+  [
+    b.earlyLaunches > 0 && `Bought in the first 2 seconds of ${b.earlyLaunches === 1 ? "1 launch" : `${b.earlyLaunches} launches`}`,
+    b.roundTrips > 0 && `${b.roundTrips === 1 ? "1 buy and sell" : `${b.roundTrips} buys and sells`} inside one transaction`,
+  ].filter(Boolean) as string[];
+
+const BotEvidenceList: FC<{ cluster: string; evidence: unknown }> = ({ cluster, evidence }) => {
+  const e = (evidence ?? {}) as BotEvidence;
+  const early = e.early ?? [];
+  const trips = e.roundTrips ?? [];
+  if (!early.length && !trips.length) return null;
+  return (
+    <ul class="note bot-evidence">
+      {early.map((x) => (
+        <li>
+          <a class="mono" href={explorer(cluster, "tx", x.signature)} rel="noreferrer" target="_blank">
+            {short(x.signature)}
+          </a>{" "}
+          bought {short(x.mint)} {Number(x.seconds).toFixed(0)} s after it opened
+        </li>
+      ))}
+      {trips.map((signature) => (
+        <li>
+          <a class="mono" href={explorer(cluster, "tx", signature)} rel="noreferrer" target="_blank">
+            {short(signature)}
+          </a>{" "}
+          bought and sold in one transaction
+        </li>
+      ))}
+    </ul>
+  );
+};
+
+export const BotsPage: FC<Shell & { bots: BotRow[]; flash: Child }> = ({ bots, flash, ...shell }) => {
+  const listed = bots.filter((b) => !b.removedAt);
+  const removed = bots.filter((b) => b.removedAt);
+  return (
+    <Layout {...shell} title="Known bots" current="bots">
+      <div class="stack-lg">
+        <div class="stack">
+          <h1>Known bots</h1>
+          <p class="lead">
+            Wallets Trending never counts (spec 8): those that bought in the first 2 seconds of 3 or more Heat launches, and those that bought and sold inside one
+            transaction. The five-minute job adds them; take off a wallet that is a person, and it stays off.
+          </p>
+        </div>
+        {flash}
+        <section class="stack">
+          <h3>{listed.length === 1 ? "1 wallet listed" : `${listed.length} wallets listed`}</h3>
+          {listed.length === 0 ? (
+            <div class="panel empty">No wallet is on the known-bot list.</div>
+          ) : (
+            <div class="panel pad">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>Wallet</th>
+                    <th>Why</th>
+                    <th>Take it off</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {listed.map((b) => (
+                    <tr data-wallet={b.wallet}>
+                      <td data-label="Wallet">
+                        <a class="mono break" href={explorer(shell.cluster, "address", b.wallet)} rel="noreferrer" target="_blank">
+                          {b.wallet}
+                        </a>
+                        <div class="note">Listed {when(b.listedAt)}</div>
+                      </td>
+                      <td data-label="Why">
+                        {botReasons(b).map((r) => (
+                          <div>{r}</div>
+                        ))}
+                        <BotEvidenceList cluster={shell.cluster} evidence={b.evidence} />
+                      </td>
+                      <td data-label="Take it off">
+                        <form method="post" action={`/bots/${b.wallet}/remove`} class="row">
+                          <input class="input" name="note" required maxlength={1000} placeholder="Why" aria-label={`Why ${b.wallet} is no bot`} style="flex: 1 1 140px; min-height: 32px; padding: 4px 10px" />
+                          <button class="btn btn-sm btn-stop" type="submit">
+                            Remove
+                          </button>
+                        </form>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+        {removed.length > 0 && (
+          <section class="stack">
+            <h3>Taken off</h3>
+            <div class="panel pad">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>Wallet</th>
+                    <th>Why it was listed</th>
+                    <th>Taken off</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {removed.map((b) => (
+                    <tr data-wallet={b.wallet}>
+                      <td data-label="Wallet">
+                        <a class="mono break" href={explorer(shell.cluster, "address", b.wallet)} rel="noreferrer" target="_blank">
+                          {b.wallet}
+                        </a>
+                      </td>
+                      <td data-label="Why it was listed">
+                        {botReasons(b).map((r) => (
+                          <div>{r}</div>
+                        ))}
+                      </td>
+                      <td data-label="Taken off">
+                        {when(b.removedAt!)}
+                        <div class="note">
+                          {b.removedBy}: {b.removedNote}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
+      </div>
+    </Layout>
+  );
+};
+
 // The audit log.
 
 export type AuditRow = { id: number; at: Date; operator: string; action: string; subject: string; detail: unknown };
@@ -1095,6 +1246,7 @@ const ACTION_NAMES: Record<string, string> = {
   case_dismissed: "Dismissed a case",
   appeal_upheld: "Upheld an appeal: Bar lifted",
   appeal_denied: "Denied an appeal",
+  bot_removed: "Took a wallet off the known-bot list",
 };
 
 /** What an action was taken on, in words: the coin and its creator, a wallet, a case, the export. */

@@ -12,6 +12,7 @@ import {
   bundleCases,
   creators,
   creatorWallets,
+  knownBots,
   launches,
   launchReviews,
   linkageHubs,
@@ -150,6 +151,25 @@ export async function removeHub(db: Db, operator: Operator, address: string, not
     const [removed] = await tx.delete(linkageHubs).where(eq(linkageHubs.address, address)).returning();
     if (!removed) throw new Refused("That address is not a hub.");
     return { auditId: await audit(tx, operator, "hub_removed", `wallet:${address}`, { label: removed.label, addedBy: removed.addedBy, note }) };
+  });
+}
+
+/**
+ * Takes a wallet off the known-bot list (spec 8): Trending counts it again, and the known-bot job never lists it again;
+ * its row keeps why it was listed.
+ */
+export async function removeBot(db: Db, operator: Operator, wallet: string, noteInput: unknown) {
+  const note = noteOf(noteInput);
+  return asOperator(db, async (tx) => {
+    const [removed] = await tx
+      .update(knownBots)
+      .set({ removedAt: sql`now()`, removedBy: operator.email, removedNote: note })
+      .where(and(eq(knownBots.wallet, wallet), isNull(knownBots.removedAt)))
+      .returning();
+    if (!removed) throw new Refused("That wallet is not on the known-bot list.");
+    return {
+      auditId: await audit(tx, operator, "bot_removed", `wallet:${wallet}`, { earlyLaunches: removed.earlyLaunches, roundTrips: removed.roundTrips, evidence: removed.evidence, note }),
+    };
   });
 }
 

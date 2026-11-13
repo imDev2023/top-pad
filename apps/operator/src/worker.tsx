@@ -7,15 +7,15 @@ import { Hono, type Context } from "hono";
 import { getCookie } from "hono/cookie";
 import type { Child } from "hono/jsx";
 import { csrf } from "hono/csrf";
-import { auditLog, bars, createDb, creators, jobRuns, launches, linkageHubs } from "@top-pad/db";
+import { auditLog, bars, createDb, creators, jobRuns, knownBots, launches, linkageHubs } from "@top-pad/db";
 import { runJob } from "@top-pad/jobs";
 import { operatorOf } from "./access";
-import { addHub, decideAdmission, decideAppeal, decideCase, decideLaunch, openedRecently, openEvidence, audit, Refused, removeHub } from "./actions";
+import { addHub, decideAdmission, decideAppeal, decideCase, decideLaunch, openedRecently, openEvidence, audit, Refused, removeBot, removeHub } from "./actions";
 import { asOperator } from "./db";
 import type { AppEnv, Bindings } from "./env";
 import { exportAudit } from "./exportAudit";
 import { admissionItem, barDetail, barRows, caseByMint, launchItem, queue, type CaseItem, type LaunchKey } from "./queue";
-import { AdmissionPage, AuditPage, BarPage, BarsPage, CasePage, Denied, EvidencePage, Flash, HubsPage, ICON, LaunchPage, Missing, QueuePage, THEME_COOKIE, type CaseDecision, type Shell } from "./views";
+import { AdmissionPage, AuditPage, BarPage, BarsPage, BotsPage, CasePage, Denied, EvidencePage, Flash, HubsPage, ICON, LaunchPage, Missing, QueuePage, THEME_COOKIE, type CaseDecision, type Shell } from "./views";
 
 export const app = new Hono<AppEnv>();
 
@@ -282,6 +282,23 @@ app.post("/hubs/:address/remove", async (c) => {
     return c.redirect(`/hubs?done=${auditId}`, 303);
   } catch (e) {
     if (e instanceof Refused) return hubsPage(c, <Flash tone="stop">{e.message}</Flash>, 409);
+    throw e;
+  }
+});
+
+async function botsPage(c: Context<AppEnv>, flash: Child = null, status: 200 | 409 = 200) {
+  const bots = await asOperator(c.var.db, (tx) => tx.select().from(knownBots).orderBy(desc(knownBots.listedAt), knownBots.wallet));
+  return c.html(<BotsPage {...shell(c, "bots")} bots={bots} flash={flash ?? (await flashOf(c))} />, status);
+}
+
+app.get("/bots", (c) => botsPage(c));
+app.post("/bots/:wallet/remove", async (c) => {
+  const body = await form(c);
+  try {
+    const { auditId } = await removeBot(c.var.db, c.var.operator, c.req.param("wallet"), body.note);
+    return c.redirect(`/bots?done=${auditId}`, 303);
+  } catch (e) {
+    if (e instanceof Refused) return botsPage(c, <Flash tone="stop">{e.message}</Flash>, 409);
     throw e;
   }
 });
