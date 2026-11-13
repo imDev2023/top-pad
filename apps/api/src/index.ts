@@ -8,10 +8,11 @@ import { cors } from "hono/cors";
 import { HTTPException } from "hono/http-exception";
 import { Health, type LaunchRefusal, type Platform } from "@top-pad/contract";
 import { createDb, launches, probe, sessions, xAuthorizations, type Db } from "@top-pad/db";
-import { pruneCandles } from "@top-pad/indexer";
+import { pruneCandles, refreshKnownBots } from "@top-pad/indexer";
 import { notifyPending, runJob } from "@top-pad/jobs";
 import { finishXLink, logout, me, startXLink, walletSignIn, walletSignInMessage } from "./auth";
 import { verifyMessageRoute, verifyRoute } from "./verify";
+import { getBoard, getCoinRecords, getCoinRecordSnapshot, keeperKeyOf, search, snapshotCoinRecords } from "./board";
 import { getCoinRadar, reviewBundles } from "./bundleRadar";
 import { getCoin, getCoinCandles, getCoinTrades } from "./coins";
 import { getEarnings, prepareClaim, reportClaim } from "./earnings";
@@ -125,7 +126,7 @@ app.post("*", async (c, next) => {
   const refusal: LaunchRefusal = { error: `The image is too large: a coin's image can be at most ${Math.round(maxImageBytes / 1024)} KB.`, code: "image" };
   return bodyLimit({ maxSize: maxImageBytes + 16 * 1024, onError: (c) => c.json(refusal, 413) })(c, next);
 });
-for (const path of ["/auth/*", "/me", "/verify", "/verify/*", "/launches", "/launches/*", "/vamp-shield/*", "/coins/*", "/earnings/*", "/fair-opens/*", "/creators/*", "/bars/*", "/enforcement"]) app.use(path, withDb);
+for (const path of ["/auth/*", "/me", "/verify", "/verify/*", "/launches", "/launches/*", "/vamp-shield/*", "/coins/*", "/earnings/*", "/fair-opens/*", "/creators/*", "/bars/*", "/enforcement", "/board", "/search", "/coin-records", "/coin-records/*"]) app.use(path, withDb);
 app.get("/auth/x/start", startXLink);
 app.get("/auth/x/callback", finishXLink);
 app.post("/auth/wallet/message", walletSignInMessage);
@@ -144,6 +145,10 @@ app.post("/launches/:id/submit", submitLaunch);
 app.get("/launches/:id", getLaunch);
 app.post("/launches/:id/renew", renewFairOpen);
 app.get("/quotes", getQuotes);
+app.get("/board", getBoard);
+app.get("/search", search);
+app.get("/coin-records", getCoinRecords);
+app.get("/coin-records/snapshots/:day", getCoinRecordSnapshot);
 app.get("/coins/:mint", getCoin);
 app.get("/coins/:mint/trades", getCoinTrades);
 app.get("/coins/:mint/candles", getCoinCandles);
@@ -206,8 +211,7 @@ async function housekeeping(db: Db, env: Bindings) {
     .where(and(eq(launches.mode, "instant"), eq(launches.status, "prepared"), lt(launches.createdAt, sql`now() - interval '15 minutes'`)))
     .returning({ id: launches.id });
   const cfg = config(env);
-  const keeperKey = env.KEEPER_KEY ? (typeof env.KEEPER_KEY === "string" ? { get: async () => env.KEEPER_KEY as string } : env.KEEPER_KEY) : null;
-  const fairOpens = await reclaimUnscheduled(db, cfg, keeperKey);
+  const fairOpens = await reclaimUnscheduled(db, cfg, keeperKeyOf(env));
   return { authorizations: authorizations.length, sessions: expiredSessions.length, expiredLaunches: stale.length, fairOpens, candles: await pruneCandles(db) };
 }
 
@@ -244,7 +248,8 @@ async function everyMinute(controller: ScheduledController, env: Bindings, ctx: 
 
 /**
  * The Cron Triggers. Every five minutes: the indexer kept running, the keeper's float, any window claim, Fair Open or
- * Graduation the keeper's Workflows missed, Bundle Radar's case job, the quotes' band, Heat's LP fees once an hour, Creator
+ * Graduation the keeper's Workflows missed, Bundle Radar's case job, the known-bot list, the day's signed snapshot of
+ * the CoinRecord list, the quotes' band, Heat's LP fees once an hour, Creator
  * wallet rotations due, housekeeping, then every
  * open alert to the operator. Every minute: the protected set (everyMinute).
  */
@@ -265,6 +270,10 @@ async function scheduled(_controller: ScheduledController, env: Bindings, ctx: E
     await runJob(db, "graduations", () => sweepGraduations(db, env), { exclusive: true }).catch(() => undefined);
     // Bundle Radar's case job: each coin an hour after its open, then hourly through its 7 days (spec 6.5, 10.2).
     await runJob(db, "bundle-radar", () => reviewBundles(db, env), { exclusive: true }).catch(() => undefined);
+    // Heat's known-bot list, which Trending never counts (spec 8).
+    await runJob(db, "known-bots", () => refreshKnownBots(db), { exclusive: true }).catch(() => undefined);
+    // The signed daily snapshot of the CoinRecord list, once each UTC day has ended (spec 8).
+    await runJob(db, "coin-records", () => snapshotCoinRecords(db, cfg, keeperKeyOf(env), env.BLOBS), { exclusive: true }).catch(() => undefined);
     // Each quote's config pair kept within the band of its latest price (ADR 0007).
     await runJob(db, "quote-band", () => bandQuotes(db, env), { exclusive: true }).catch(() => undefined);
     // Heat's LP fees, once an hour: the first run of each hour.
@@ -301,10 +310,13 @@ function liveRoom(request: Request, env: Bindings): Promise<Response> | null {
   if (request.method !== "GET" || request.headers.get("upgrade")?.toLowerCase() !== "websocket") return refuse(426, "A live room speaks WebSocket.");
   const origin = request.headers.get("origin");
   if (origin && !config(env).webOrigins.includes(origin)) return refuse(403, "Only Heat's own pages may join a live room.");
+  if (!match[1] && !match[2]) {
+    if (!env.BOARD) return refuse(503, "The board's live room is not bound to this deployment.");
+    return env.BOARD.get(env.BOARD.idFromName("board")).fetch(request);
+  }
   const rooms = env.LIVE_ROOMS;
   if (!rooms) return refuse(503, "Live rooms are not bound to this deployment.");
-  const room = match[1] ? `coin:${match[1]}` : match[2] ? `fair-open:${match[2]}` : "board";
-  return rooms.get(rooms.idFromName(room)).fetch(request);
+  return rooms.get(rooms.idFromName(match[1] ? `coin:${match[1]}` : `fair-open:${match[2]}`)).fetch(request);
 }
 
 export default {

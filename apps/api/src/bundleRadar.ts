@@ -10,7 +10,7 @@ import { and, asc, desc, eq, gt, isNull, lte, ne } from "drizzle-orm";
 import type { Context } from "hono";
 import { Address, BundleRadar, type RadarWallet as RadarWalletView } from "@top-pad/contract";
 import { bundleCases, bundleReviews, coins, creators, pools, type Db } from "@top-pad/db";
-import { blockPositions, FIRST_HOUR_MS, FUNDING_WINDOW_MS, jitoApi, radarOf, refreshRadar, rpcFundingSource, type Radar, type RadarSources } from "@top-pad/indexer";
+import { blockPositions, FIRST_HOUR_MS, FUNDING_WINDOW_MS, jitoApi, radarOf, refreshRadar, rpcFundingSource, saveRadarSummary, type Radar, type RadarSources } from "@top-pad/indexer";
 import { config, explorerUrl, type BlobStore, type Bindings, type Config } from "./env";
 import type { AppEnv } from "./http";
 
@@ -125,6 +125,8 @@ export async function reviewCoin(db: Db, cfg: Config, blobs: BlobStore, sources:
   if (!refreshed) return null;
   if (!refreshed.complete) return { outcome: "pending" as const, read: refreshed.read };
   const radar = (await radarOf(db, mint))!;
+  // Transfers found since the last review can tie more wallets to the creator: the board's summary follows (#57).
+  await saveRadarSummary(db, radar);
   const outcome: ReviewOutcome = radar.linkedWallets === 0 ? "no_links" : radar.linkedCoins >= radar.floor ? "case" : "below_floor";
   let opened: string | null = null;
   if (outcome === "case") {

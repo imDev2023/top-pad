@@ -1,6 +1,8 @@
 import { address, type Address } from "@solana/kit";
 import { CLUSTERS, type HeatCluster } from "@top-pad/chain";
 import { Cluster } from "@top-pad/contract";
+import type { KvCache } from "./board";
+import type { Board } from "./boardRoom";
 import type { Indexer } from "./indexer";
 import type { LiveRoom } from "./rooms";
 import type { Vision } from "./visionContainer";
@@ -68,8 +70,12 @@ export type Bindings = {
   MAX_IMAGE_BYTES?: string;
   /** The indexer, one Durable Object (spec 10.2). */
   INDEXER?: DurableObjectNamespace<Indexer>;
-  /** The live rooms, a Durable Object per coin and one for the board (spec 10.2). */
+  /** The live rooms, a Durable Object per coin and per Fair Open (spec 10.2). */
   LIVE_ROOMS?: DurableObjectNamespace<LiveRoom>;
+  /** The board's live room, which also works out Trending every 15 s (spec 8, 10.2). */
+  BOARD?: DurableObjectNamespace<Board>;
+  /** Public caches of public reads, up to 60 s stale (spec 10.4); without it every read goes to Postgres. */
+  CACHE?: KvCache;
   /** The vision service, one Container behind a Durable Object (spec 10.2): Vamp Shield's image signatures. */
   VISION?: DurableObjectNamespace<Vision>;
   /**

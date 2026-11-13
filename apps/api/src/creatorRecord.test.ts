@@ -246,6 +246,7 @@ describe("a Creator record", () => {
       coins: 3,
       graduations: 1,
       graduationRate: 1 / 3,
+      lastGraduatedAt: at(10).toISOString(),
       handedOver: 1,
       quiet: 1,
       marks: { verifiedCreator: true, verifiedHuman: false },

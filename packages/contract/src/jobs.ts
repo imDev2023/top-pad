@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /** The scheduled jobs the runner records; each ticket that builds a job adds its name here. */
-export const JobName = z.enum(["indexer-reconcile", "keeper-balance", "window-claims", "fair-opens", "graduations", "bundle-radar", "lp-fees", "housekeeping", "protected-trending", "protected-lists", "protected-images", "quote-band", "audit-export", "creator-rotations", "bar-notices"]);
+export const JobName = z.enum(["indexer-reconcile", "keeper-balance", "window-claims", "fair-opens", "graduations", "bundle-radar", "lp-fees", "housekeeping", "protected-trending", "protected-lists", "protected-images", "quote-band", "audit-export", "creator-rotations", "bar-notices", "known-bots", "coin-records"]);
 export type JobName = z.infer<typeof JobName>;
 
 export const JobRun = z.object({

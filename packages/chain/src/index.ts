@@ -200,6 +200,7 @@ export const CLUSTERS: Record<Cluster, HeatCluster | null> = {
 export * from "./afterOpen";
 export * from "./band";
 export * from "./claims";
+export * from "./coinRecords";
 export * from "./coin";
 export * from "./dbc";
 export * from "./fairOpen";

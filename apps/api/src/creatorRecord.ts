@@ -187,6 +187,7 @@ function summarize(
     coins: launched.length,
     graduations: graduated,
     graduationRate: launched.length ? graduated / launched.length : null,
+    lastGraduatedAt: launched.reduce<Date | null>((latest, c) => (c.graduation && (!latest || c.graduation.graduatedAt > latest) ? c.graduation.graduatedAt : latest), null)?.toISOString() ?? null,
     handedOver: launched.filter((c) => c.role && !own.has(c.role.toWallet)).length,
     quiet: launched.filter((c) => isQuiet(c, now)).length,
     // A good record (spec 7): a graduated coin, no Bar (a private one too) and no open bundling case.

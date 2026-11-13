@@ -8,8 +8,8 @@ import type { Bindings } from "./env";
 const BATCH_MS = 100;
 
 export class LiveRoom extends DurableObject<Bindings> {
-  private pending: LiveEvent[] = [];
-  private flushing: ReturnType<typeof setTimeout> | null = null;
+  protected pending: LiveEvent[] = [];
+  protected flushing: ReturnType<typeof setTimeout> | null = null;
 
   /** A browser joining: the Worker hands the room its WebSocket upgrade. */
   async fetch(request: Request): Promise<Response> {
@@ -25,7 +25,7 @@ export class LiveRoom extends DurableObject<Bindings> {
     this.flushing ??= setTimeout(() => this.flush(), BATCH_MS);
   }
 
-  private flush() {
+  protected flush() {
     this.flushing = null;
     if (!this.pending.length) return;
     const message = JSON.stringify({ events: this.pending } satisfies LiveBatch);

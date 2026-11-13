@@ -34,6 +34,8 @@ export const CreatorSummary = z.object({
   graduations: z.number().int().nonnegative(),
   /** Graduations over coins; null for a record with no coin. */
   graduationRate: z.number().min(0).max(1).nullable(),
+  /** The record's latest Graduation, which orders the calendar's featured slots after the rate (spec 8); null for none. */
+  lastGraduatedAt: z.iso.datetime().nullable(),
   /** Coins whose creator role is now held outside the record. */
   handedOver: z.number().int().nonnegative(),
   /** Coins that never graduated and went quiet: no trade for 7 days. */

@@ -25,6 +25,7 @@ import {
   refreshRadar,
   rpcFundingSource,
   rpcSource,
+  summarizeRadar,
   type Indexed,
   type RadarSources,
   type RawTransaction,
@@ -196,6 +197,9 @@ export class Indexer extends DurableObject<Bindings> {
         for (const [mint, boughtAt] of batch) {
           try {
             const refreshed = await refreshRadar(db, sources, mint, { boughtAt, maxReads: LIVE_RADAR_READS, recentMs: LIVE_RADAR_RECENT_MS });
+            // The board's flags and Trending read the coin's radar summary (#57), which any buy may change: it reads
+            // only Postgres, so it runs for every buy, past the first hour too.
+            await summarizeRadar(db, mint);
             if (refreshed) await this.send(new Map([[`coin:${mint}`, [{ type: "radar", mint }]]]));
           } catch (e) {
             this.failed(`bringing Bundle Radar up to date on ${mint}`, e);
@@ -209,15 +213,13 @@ export class Indexer extends DurableObject<Bindings> {
 
   /** Sends each room its events. */
   private async send(events: Map<string, LiveEvent[]>) {
-    const rooms = this.env.LIVE_ROOMS;
-    if (!rooms) return;
+    const { LIVE_ROOMS: rooms, BOARD: board } = this.env;
     await Promise.all(
-      [...events].map(([room, batch]) =>
-        rooms
-          .get(rooms.idFromName(room))
-          .publish(batch)
-          .catch((e) => console.error(`publishing to ${room} failed`, e)),
-      ),
+      [...events].map(([room, batch]) => {
+        // The board is a room of its own class, which also keeps Trending.
+        const stub = room === "board" ? board?.get(board.idFromName("board")) : rooms?.get(rooms.idFromName(room));
+        return stub?.publish(batch).catch((e) => console.error(`publishing to ${room} failed`, e));
+      }),
     );
   }
 
@@ -433,6 +435,10 @@ export class Indexer extends DurableObject<Bindings> {
     for (const o of fairOpenOpens) fairOpen(o.launch, "opened");
     for (const e of seatEvents) fairOpen(e.launch, e.kind);
     for (const end of fairOpenEnds) fairOpen(end.launch, end.kind);
+    // The board reads its calendar again as a Fair Open joins it or leaves it, and Live now's pots as they fill.
+    for (const launch of new Set([...fairOpens, ...fairOpenOpens, ...seatEvents.filter((e) => e.kind === "deposit" || e.kind === "withdraw"), ...fairOpenEnds].map((f) => f.launch))) {
+      add("board", { type: "calendar", launch });
+    }
     for (const x of taxShares) fairOpen(x.launch, "tax_share_collected");
     await this.send(events);
   }

@@ -11,16 +11,19 @@
   // then any open alert to the operator. Every minute: Vamp Shield's protected set (spec 6.2), and at minute 2 of each
   // hour its hourly lists and the images not yet signed.
   "triggers": { "crons": ["*/5 * * * *", "* * * * *"] },
-  // The indexer, the live rooms and the vision service's Container (spec 10.2), SQLite-backed; environments inherit this.
+  // The indexer, the live rooms, the board's room, which also keeps Trending, and the vision service's Container (spec
+  // 10.2), SQLite-backed; environments inherit this.
   "exports": {
     "Indexer": { "type": "durable-object", "storage": "sqlite" },
     "LiveRoom": { "type": "durable-object", "storage": "sqlite" },
+    "Board": { "type": "durable-object", "storage": "sqlite" },
     "Vision": { "type": "durable-object", "storage": "sqlite" }
   },
   "durable_objects": {
     "bindings": [
       { "name": "INDEXER", "class_name": "Indexer" },
       { "name": "LIVE_ROOMS", "class_name": "LiveRoom" },
+      { "name": "BOARD", "class_name": "Board" },
       { "name": "VISION", "class_name": "Vision" }
     ]
   },
@@ -55,6 +58,8 @@
   ],
   // Signed Arweave data items wait here until uploaded, then stay as the cache (spec 10.4); simulated locally.
   "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "top-pad-blobs-local" }],
+  // Public caches of public reads, up to 60 s stale (spec 10.4); simulated locally.
+  "kv_namespaces": [{ "binding": "CACHE", "id": "00000000000000000000000000000000" }],
   // The devnet build (spec 10.4), deployed with the web Worker by `pnpm deploy:devnet` at the repo root. Bindings and
   // vars are not inherited by an environment, so everything is named again. Its secrets, set with `wrangler secret put
   // --env devnet`: RPC_URL (the Helius devnet URL, which carries the key), and optionally ALERT_WEBHOOK_URL.
@@ -84,10 +89,12 @@
       // invalidates a cached read on a write, and our reads must see the last write.
       "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "94fd2dace938401bab209dc57bd20bb8" }],
       "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "top-pad-blobs-devnet" }],
+      "kv_namespaces": [{ "binding": "CACHE", "id": "77ff7ca1b3014fbc8deee45976da9928" }],
       "durable_objects": {
         "bindings": [
           { "name": "INDEXER", "class_name": "Indexer" },
           { "name": "LIVE_ROOMS", "class_name": "LiveRoom" },
+          { "name": "BOARD", "class_name": "Board" },
           { "name": "VISION", "class_name": "Vision" }
         ]
       },
