@@ -10,7 +10,7 @@ import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
 import { ImageVerdict, LaunchRefusal, VampShieldVerdict } from "@top-pad/contract";
 import { createDb, protectedCoins, protectedImages } from "@top-pad/db";
 import { fundedWallets } from "@top-pad/tests-devnet/devnet";
-import { expectVampClear, newHandle, newTicker, pageErrors, runName, snap, uniqueCoinImage } from "./steps";
+import { expectVampClear, signInOnLaunch, newTicker, pageErrors, runName, snap, uniqueCoinImage } from "./steps";
 import { TARGET } from "./target";
 import { connectTestWallet, installTestWallet } from "./wallet";
 
@@ -110,9 +110,7 @@ test("Vamp Shield refuses copies of a Protected coin and labels a near one", asy
   const [creator] = await fundedWallets(40_000_000n);
   const wallet = await installTestWallet(page, creator);
   await page.goto("/launch");
-  await page.getByRole("link", { name: "Link X" }).click();
-  await page.getByLabel("Handle").fill(newHandle());
-  await page.getByRole("button", { name: "Authorize app" }).click();
+  await signInOnLaunch(page);
   await page.getByRole("radio", { name: /Instant launch/ }).check();
   await page.getByRole("button", { name: "Continue" }).click();
   await expect(page.getByRole("heading", { name: "Your coin" })).toBeVisible();
@@ -187,7 +185,6 @@ test("Vamp Shield refuses copies of a Protected coin and labels a near one", asy
   await snap(page, "vamp-6-near-labelled");
 
   await page.getByRole("button", { name: "Continue" }).click();
-  await connectTestWallet(page, page.getByRole("main").getByRole("button", { name: "Connect wallet" }));
   await page.getByRole("button", { name: "Launch", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Launched" })).toBeVisible({ timeout: 150_000 });
   expect(wallet.requests).toHaveLength(1);

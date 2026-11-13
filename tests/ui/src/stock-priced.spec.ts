@@ -8,13 +8,13 @@
 // Heat's bank must hold 1.5 USDC (`pnpm --filter @top-pad/chain devnet-usdc devnet <SOL> --send`). About 15 minutes,
 // most of it the Fair Open's window: pass `stock-priced.spec.ts` to run it alone.
 import { expect, test, type Page } from "@playwright/test";
-import type { Address } from "@solana/kit";
+import { generateKeyPairSigner, type Address } from "@solana/kit";
 import { DEVNET_USDC, TOKEN_PROGRAM_ADDRESS } from "@top-pad/chain";
 import { fetchLaunch, LaunchStatus } from "@top-pad/clients/fair-open";
 import { Coin, FairOpen, QuoteList } from "@top-pad/contract";
 import { chainTime, coinBalance, fundedWallets, rpc } from "@top-pad/tests-devnet/devnet";
 import { fundQuote, quoteHeld, sweepDepositors } from "@top-pad/tests-devnet/fair-open";
-import { expectVampClear, newHandle, newTicker, pageErrors, runName, snap, uniqueCoinImage } from "./steps";
+import { expectVampClear, signInOnLaunch, newTicker, pageErrors, runName, snap, uniqueCoinImage } from "./steps";
 import { TARGET } from "./target";
 import { connectTestWallet, installTestWallet } from "./wallet";
 
@@ -35,9 +35,7 @@ async function untilChainTime(at: bigint) {
 /** Links X as a new creator and stops at the launch mode and quote step. */
 async function startLaunch(page: Page) {
   await page.goto("/launch");
-  await page.getByRole("link", { name: "Link X" }).click();
-  await page.getByLabel("Handle").fill(newHandle());
-  await page.getByRole("button", { name: "Authorize app" }).click();
+  await signInOnLaunch(page);
   await expect(page.getByRole("heading", { name: "How should your coin start trading?" })).toBeVisible();
   await expect(page.getByTestId("quote-picker")).toBeVisible();
 }
@@ -64,6 +62,8 @@ test("the picker lists each quote with its labels from its mint, and offers only
   const standIn = quotes.find((q) => q.symbol === "NVDAx")!;
   console.log(`the stand-in xStock shows its amounts through ${standIn.multiplier}; its labels: ${standIn.labels.map((l) => l.title).join(", ")}`);
 
+  // Signing in costs nothing, so a wallet with no SOL does to read the picker.
+  await installTestWallet(page, await generateKeyPairSigner());
   await startLaunch(page);
   const picker = page.getByTestId("quote-picker");
   await expect(picker.getByRole("radio", { name: /^SOL/ })).toBeChecked();
@@ -100,7 +100,6 @@ test("an Instant launch in USDC from the picker, bought and sold from its page i
     await page.getByTestId("quote-picker").getByRole("radio", { name: /^USDC/ }).check();
     const ticker = newTicker();
     await enterCoin(page, "Heat Dollar", ticker);
-    await connectTestWallet(page, page.getByRole("main").getByRole("button", { name: "Connect wallet" }));
     await page.getByRole("button", { name: "Launch", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Launched" })).toBeVisible({ timeout: 150_000 });
     const mint = (await page.locator("dd").first().textContent())!.trim();
@@ -175,7 +174,6 @@ test("a Fair Open in USDC from the picker, deposited in USDC from its page and o
     await page.getByLabel("Teaser for the calendar (optional)").fill(newTicker());
     await snap(page, "stock-6-schedule-usdc");
     await page.getByRole("button", { name: "Continue" }).click();
-    await connectTestWallet(page, page.getByRole("main").getByRole("button", { name: "Connect wallet" }));
     await page.getByText(/What you sign: the schedule and 64 versions of the open/).click();
     await expect(page.getByText(/the pot buys [\d.]+\sUSDC/).first()).toBeVisible();
     await page.getByRole("button", { name: "Sign your open in advance" }).click();

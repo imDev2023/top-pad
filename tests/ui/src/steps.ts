@@ -98,23 +98,48 @@ export async function snap(page: Page, step: string) {
 }
 
 /**
- * Links X as a new creator, launches an Instant launch signed by `creator`, and leaves the page on the Done step; with
- * `linked`, the browser has linked X already and the creator launches again. The coin's name gets the ticker's ending,
- * and its picture is drawn for the run (uniqueCoinImage).
+ * Signs in on the launch flow's first step with the test wallet installed in the page (ADR 0008): connects it, signs
+ * Heat's sign-in message, and waits for the launch mode, where the flow goes once signed in.
+ */
+export async function signInOnLaunch(page: Page) {
+  await expect(page.getByRole("heading", { name: "Connect your wallet" })).toBeVisible();
+  await connectTestWallet(page, page.getByRole("main").getByRole("button", { name: "Connect wallet" }));
+  await page.getByRole("button", { name: "Sign in with this wallet" }).click();
+  await expect(page.getByRole("heading", { name: "How should your coin start trading?" })).toBeVisible();
+}
+
+/**
+ * Links X on the launch flow's first step, the browser signed in with its wallet already, as a new creator on the stand-in
+ * for X, and returns the handle; the flow comes back to the launch mode.
+ */
+export async function linkXOnLaunch(page: Page): Promise<string> {
+  const handle = newHandle();
+  await page.getByRole("button", { name: "Connect wallet" }).first().click();
+  await page.getByRole("link", { name: "Link X" }).click();
+  await page.getByLabel("Handle").fill(handle);
+  await page.getByRole("button", { name: "Authorize app" }).click();
+  await expect(page.getByText("Your X account is linked.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "How should your coin start trading?" })).toBeVisible();
+  return handle;
+}
+
+/**
+ * Signs in with `creator`'s wallet as a creator new to Heat, launches an Instant launch signed by it, and leaves the page
+ * on the Done step; with `linked`, the browser is signed in already and the creator launches again; with `linkX`, the
+ * creator links X before launching, and the handle comes back. The coin's name gets the ticker's ending, and its
+ * picture is drawn for the run (uniqueCoinImage).
  */
 export async function launchCoin(
   page: Page,
   creator: KeyPairSigner,
   coin: { name: string; ticker: string },
-  { linked = false }: { linked?: boolean } = {},
-): Promise<{ mint: string; wallet: TestWallet }> {
+  { linked = false, linkX = false }: { linked?: boolean; linkX?: boolean } = {},
+): Promise<{ mint: string; wallet: TestWallet; handle: string | null }> {
   const wallet = await installTestWallet(page, creator);
   await page.goto("/launch");
-  if (!linked) {
-    await page.getByRole("link", { name: "Link X" }).click();
-    await page.getByLabel("Handle").fill(newHandle());
-    await page.getByRole("button", { name: "Authorize app" }).click();
-  }
+  if (!linked) await signInOnLaunch(page);
+  const handle = linkX ? await linkXOnLaunch(page) : null;
+  // A creator signed in finds the wallet it connected before connected again on its own.
   await expect(page.getByRole("heading", { name: "How should your coin start trading?" })).toBeVisible();
   await page.getByRole("radio", { name: /Instant launch/ }).check();
   await page.getByRole("button", { name: "Continue" }).click();
@@ -123,11 +148,9 @@ export async function launchCoin(
   await page.locator('input[type="file"]').setInputFiles(await uniqueCoinImage(page, coin.ticker));
   await expectVampClear(page);
   await page.getByRole("button", { name: "Continue" }).click();
-  // A creator launching again finds the wallet it connected before connected again on its own.
-  if (!linked) await connectTestWallet(page, page.getByRole("main").getByRole("button", { name: "Connect wallet" }));
   await page.getByRole("button", { name: "Launch", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Launched" })).toBeVisible({ timeout: 150_000 });
-  return { mint: (await page.locator("dd").first().textContent())!.trim(), wallet };
+  return { mint: (await page.locator("dd").first().textContent())!.trim(), wallet, handle };
 }
 
 /**

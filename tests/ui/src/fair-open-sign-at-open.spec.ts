@@ -9,9 +9,9 @@ import { fetchLaunch, LaunchStatus } from "@top-pad/clients/fair-open";
 import { FairOpen } from "@top-pad/contract";
 import { chainTime, coinBalance, fundedWallets, rpc, sweep } from "@top-pad/tests-devnet/devnet";
 import { admitted, deposit, newPerson, sellAll } from "@top-pad/tests-devnet/fair-open";
-import { expectVampClear, newHandle, newTicker, pageErrors, runName, snap, uniqueCoinImage } from "./steps";
+import { expectVampClear, signInOnLaunch, newTicker, pageErrors, runName, snap, uniqueCoinImage } from "./steps";
 import { TARGET } from "./target";
-import { connectTestWallet, installTestWallet } from "./wallet";
+import { installTestWallet } from "./wallet";
 
 
 const SOL = 1_000_000_000n;
@@ -35,9 +35,7 @@ test("a creator whose wallet cannot sign a batch schedules a Fair Open and signs
     const wallet = await installTestWallet(page, creator, { maxBatch: 1 });
     const ticker = newTicker();
     await page.goto("/launch");
-    await page.getByRole("link", { name: "Link X" }).click();
-    await page.getByLabel("Handle").fill(newHandle());
-    await page.getByRole("button", { name: "Authorize app" }).click();
+    await signInOnLaunch(page);
     await page.getByRole("button", { name: "Continue" }).click();
     await page.getByLabel("Ticker").fill(ticker);
     await page.getByLabel("Name").fill(runName("E2E Late Signer", ticker));
@@ -46,7 +44,6 @@ test("a creator whose wallet cannot sign a batch schedules a Fair Open and signs
     await page.getByRole("button", { name: "Continue" }).click();
     await page.getByRole("button", { name: "Continue" }).click();
 
-    await connectTestWallet(page, page.getByRole("main").getByRole("button", { name: "Connect wallet" }));
     await page.getByRole("button", { name: "Sign your open in advance" }).click();
     await expect(page.getByText("Your wallet could not sign 65 transactions at once")).toBeVisible({ timeout: 60_000 });
     await snap(page, "fair-open-sign-at-open-1-batch-refused");

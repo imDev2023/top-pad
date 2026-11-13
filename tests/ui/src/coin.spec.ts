@@ -1,4 +1,5 @@
-// A coin's page, live (spec 9, screen 3; #42's devnet demo): a creator launches from the site and opens the coin's page,
+// A coin's page, live (spec 9, screen 3; #42's devnet demo): a creator signs in with a wallet, links X, which is optional
+// (ADR 0008), launches from the site and opens the coin's page, which names the X account as the coin's metadata does;
 // and two traders buy and sell it by script through its first minute and past it. Every trade must land on the page
 // within seconds of confirming, its fee following the sniper tax's schedule (spec 3.2) from 99% down to 1.25%, while
 // the tax band counts down; the indexer's candles must match the trades. And a pool made straight on Heat's config,
@@ -31,15 +32,19 @@ test("a coin's trades land on its page live through its first minute, each payin
   await fetch(`${TARGET.api}/indexer`);
   const [creator, alice, bob] = await fundedWallets(30_000_000n, 100_000_000n, 120_000_000n);
 
-  const { mint } = await launchCoin(page, creator, { name: "Heat Tape", ticker: newTicker() });
+  const { mint, handle } = await launchCoin(page, creator, { name: "Heat Tape", ticker: newTicker() }, { linkX: true });
   await page.getByRole("link", { name: "Watch it trade" }).click();
   // The coin may still be being indexed: the page looks for it, then shows it.
   await expect(page.getByRole("heading", { level: 1 })).toContainText("Heat Tape", { timeout: 30_000 });
   await expect(page.getByText("Live", { exact: true })).toBeVisible();
+  // The X account linked to the creator's record: on the page, and in the coin's metadata where terminals read it.
+  await expect(page.getByRole("link", { name: `@${handle}` })).toHaveAttribute("href", `https://x.com/${handle}`);
 
   // The API's clock against this machine's, to trade at chosen moments after the open.
   const asked = Date.now();
   const coin = await api(`/coins/${mint}`, Coin);
+  expect(coin.creator).toEqual({ wallet: creator.address, handle });
+  expect(await (await fetch(coin.metadataUri)).json()).toMatchObject({ twitter: `https://x.com/${handle}`, extensions: { twitter: `https://x.com/${handle}` } });
   const offset = Date.parse(coin.servedAt) - (asked + Date.now()) / 2;
   const opened = Date.parse(coin.activatedAt);
   const at = (seconds: number) => sleep(Math.max(0, opened + seconds * 1000 - (Date.now() + offset)));

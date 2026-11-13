@@ -18,7 +18,7 @@ import { fetchLaunch, LaunchStatus } from "@top-pad/clients/fair-open";
 import { FairOpen } from "@top-pad/contract";
 import { chainTime, coinBalance, fundedWallets, rpc, sweep } from "@top-pad/tests-devnet/devnet";
 import { admitted, deposit, newPerson, sellAll } from "@top-pad/tests-devnet/fair-open";
-import { expectVampClear, newHandle, newTicker, pageErrors, runName, snap, uniqueCoinImage } from "./steps";
+import { expectVampClear, signInOnLaunch, newTicker, pageErrors, runName, snap, uniqueCoinImage } from "./steps";
 import { TARGET } from "./target";
 import { connectTestWallet, installTestWallet } from "./wallet";
 
@@ -57,9 +57,7 @@ test("a creator schedules a Fair Open from the site and signs once; the keeper o
     const ticker = newTicker();
     const teaser = newTicker();
     await page.goto("/launch");
-    await page.getByRole("link", { name: "Link X" }).click();
-    await page.getByLabel("Handle").fill(newHandle());
-    await page.getByRole("button", { name: "Authorize app" }).click();
+    await signInOnLaunch(page);
     await expect(page.getByRole("radio", { name: /Fair Open/ })).toBeChecked();
     await snap(page, "fair-open-scheduled-1-mode");
     await page.getByRole("button", { name: "Continue" }).click();
@@ -92,7 +90,6 @@ test("a creator schedules a Fair Open from the site and signs once; the keeper o
 
     // One approval: the schedule and every rung.
     await expect(page.getByRole("heading", { name: "Sign your open in advance" })).toBeVisible();
-    await connectTestWallet(page, page.getByRole("main").getByRole("button", { name: "Connect wallet" }));
     await page.getByText(/What you sign: the schedule and 64 versions of the open/).click();
     await expect(page.getByText("Open 64")).toBeVisible();
     await snap(page, "fair-open-scheduled-4-sign");

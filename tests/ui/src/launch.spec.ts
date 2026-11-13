@@ -1,37 +1,41 @@
-// A creator launches an Instant launch from the site: link X, choose Instant launch, enter the coin, connect a wallet,
-// sign once. The coin then exists on devnet as a Heat coin, its metadata on Arweave naming the creator's X, and no other
-// wallet can launch for the same record. Each step is photographed on a phone and a desktop, in both themes, for the
-// pixel check (spec 14: every screen ships both).
+// A creator launches an Instant launch from the site with a wallet alone (ADR 0008): connect it and sign in with one
+// message, choose Instant launch, enter the coin, sign once. Linking X is offered once and never required. The coin then
+// exists on devnet as a Heat coin, its metadata on Arweave naming no X account, and no other wallet can launch for the
+// same record. Each step is photographed on a phone and a desktop, in both themes, for the pixel check (spec 14: every
+// screen ships both).
 import { expect, test } from "@playwright/test";
 import { address, generateKeyPairSigner } from "@solana/kit";
 import { CLUSTERS } from "@top-pad/chain";
 import { fetchVirtualPool } from "@top-pad/clients/dbc";
 import { fetchCoinRecord, findCoinRecordPda, LaunchMode } from "@top-pad/clients/fee";
 import { fundedWallets, rpc } from "@top-pad/tests-devnet/devnet";
-import { expectVampClear, newHandle, newTicker, pageErrors, runName, short, snap, uniqueCoinImage } from "./steps";
+import { expectVampClear, newTicker, pageErrors, runName, short, snap, uniqueCoinImage } from "./steps";
 import { TARGET } from "./target";
 import { connectTestWallet, installTestWallet } from "./wallet";
 
-test("a creator launches an Instant launch from the site", async ({ browser, page }) => {
+test("a creator launches an Instant launch from the site, signed in with a wallet alone", async ({ browser, page }) => {
   const errors = pageErrors(page);
-  const handle = newHandle();
   const [creator] = await fundedWallets(30_000_000n);
   const wallet = await installTestWallet(page, creator);
   const ticker = newTicker();
 
   await page.goto("/launch");
-  await expect(page.getByRole("heading", { name: "Link your X account" })).toBeVisible();
-  await snap(page, "1-link-x");
+  await expect(page.getByRole("heading", { name: "Connect your wallet" })).toBeVisible();
+  // No Link X step: the steps start with the wallet.
+  await expect(page.getByRole("list", { name: "Steps" })).toHaveText(/^Connect walletLaunch modeCoinScheduleSignDone$/);
+  await snap(page, "1-connect-wallet");
 
-  await page.getByRole("link", { name: "Link X" }).click();
-  // The stand-in for X's authorize page (tests/x-stand-in): link as this run's own new creator.
-  await expect(page.getByRole("heading", { name: "Heat wants to read your X account" })).toBeVisible();
-  await page.getByLabel("Handle").fill(handle);
-  await snap(page, "1b-x-stand-in");
-  await page.getByRole("button", { name: "Authorize app" }).click();
-  await expect(page.getByText("Your X account is linked.")).toBeVisible();
+  await connectTestWallet(page, page.getByRole("main").getByRole("button", { name: "Connect wallet" }));
+  await expect(page.getByRole("button", { name: "Sign in with this wallet" })).toBeVisible();
+  await snap(page, "1b-sign-in");
+  await page.getByRole("button", { name: "Sign in with this wallet" }).click();
+  // One message, no transaction: the Sign In With Solana message naming the site and the wallet.
+  expect(wallet.messages).toHaveLength(1);
+  expect(wallet.messages[0]).toContain(`${new URL(TARGET.web).host} wants you to sign in with your Solana account:\n${creator.address}`);
+  expect(wallet.requests).toHaveLength(0);
   await expect(page.getByRole("heading", { name: "How should your coin start trading?" })).toBeVisible();
-  await expect(page.getByText(`@${handle}`)).toBeVisible();
+  // The card names the Creator wallet, there being no X account.
+  await expect(page.getByRole("complementary").getByText(short(creator.address))).toBeVisible();
   // Fair Open is preselected; this spec launches an Instant launch (fair-open-scheduled.spec.ts schedules a Fair Open).
   await expect(page.getByRole("radio", { name: /Fair Open/ })).toBeChecked();
   await expect(page.getByRole("button", { name: "Continue" })).toBeEnabled();
@@ -61,9 +65,7 @@ test("a creator launches an Instant launch from the site", async ({ browser, pag
 
   await page.getByRole("button", { name: "Continue" }).click();
   await expect(page.getByRole("heading", { name: "Sign the launch" })).toBeVisible();
-  await snap(page, "5-sign-connect");
-  await connectTestWallet(page, page.getByRole("main").getByRole("button", { name: "Connect wallet" }));
-  await expect(page.getByText(/which becomes your Creator wallet/)).toBeVisible();
+  await expect(page.getByText(/your Creator wallet\.$/)).toBeVisible();
   await snap(page, "6-sign-ready");
 
   await page.getByRole("button", { name: "Launch", exact: true }).click();
@@ -79,20 +81,25 @@ test("a creator launches an Instant launch from the site", async ({ browser, pag
   const pool = await fetchVirtualPool(rpc, record.data.pool);
   expect(pool.data.poolState).toMatchObject({ config: CLUSTERS.devnet!.configs!.instant, creator: creator.address, baseMint: mint });
 
-  // On Arweave: the metadata, with the creator's X, and an image that is the one uploaded.
+  // On Arweave: the metadata, naming no X account since the creator linked none, and an image that is the one uploaded.
   const metadataUri = await page.getByRole("link", { name: "Its metadata on Arweave" }).getAttribute("href");
-  const metadata = (await (await fetch(metadataUri!)).json()) as { name: string; symbol: string; image: string; twitter: string };
-  expect(metadata).toMatchObject({ name, symbol: ticker, twitter: `https://x.com/${handle}` });
+  const metadata = (await (await fetch(metadataUri!)).json()) as Record<string, unknown> & { image: string };
+  expect(metadata).toMatchObject({ name, symbol: ticker });
+  expect(metadata).not.toHaveProperty("twitter");
   const image = new Uint8Array(await (await fetch(metadata.image)).arrayBuffer());
   expect(image).toEqual(new Uint8Array(picture.buffer));
 
-  // The record now has its Creator wallet: the one that signed its first launch.
+  // The first step, signed in: the Creator wallet and its launch, and X offered as optional.
   await page.getByRole("button", { name: "Launch another" }).click();
-  await page.getByRole("button", { name: "Link X" }).click();
-  await expect(page.getByText(`Creator wallet: ${short(creator.address)}`)).toBeVisible();
+  await page.getByRole("button", { name: "Connect wallet" }).first().click();
+  await expect(page.getByTestId("signed-in")).toContainText(`Signed in as ${short(creator.address)}`);
+  await expect(page.getByTestId("signed-in")).toContainText("1 launch so far.");
+  await expect(page.getByRole("link", { name: "Link X" })).toBeVisible();
+  await expect(page.getByText(/^Optional\./)).toBeVisible();
+  await snap(page, "8-signed-in");
 
-  // Another wallet on the same record cannot launch: the page says why and offers no launch, and the API refuses it
-  // even when the page is bypassed.
+  // Another wallet in the same browser is told it is not the one signed in, and the API refuses its launch for this
+  // record even when the page is bypassed.
   const otherWallet = await generateKeyPairSigner();
   const other = await browser.newContext({
     storageState: await page.context().storageState(),
@@ -104,19 +111,12 @@ test("a creator launches an Instant launch from the site", async ({ browser, pag
   await installTestWallet(otherPage, otherWallet);
   const otherTicker = newTicker();
   await otherPage.goto("/launch");
-  await otherPage.getByRole("radio", { name: /Instant launch/ }).check();
-  await otherPage.getByRole("button", { name: "Continue" }).click();
-  await otherPage.getByLabel("Ticker").fill(otherTicker);
-  const otherPicture = await uniqueCoinImage(otherPage, otherTicker);
-  await otherPage.getByLabel("Name").fill(runName("E2E Lumen", otherTicker));
-  await otherPage.locator('input[type="file"]').setInputFiles(otherPicture);
-  await expectVampClear(otherPage);
-  await otherPage.getByRole("button", { name: "Continue" }).click();
+  await expect(otherPage.getByText(`This browser is signed in as ${short(creator.address)}. Connect that wallet to go on.`)).toBeVisible();
   await connectTestWallet(otherPage, otherPage.getByRole("main").getByRole("button", { name: "Connect wallet" }));
-  await expect(otherPage.getByText("This is not your Creator wallet")).toBeVisible();
-  await expect(otherPage.getByText(`Your launches are signed by ${short(creator.address)}`)).toBeVisible();
-  await expect(otherPage.getByRole("button", { name: "Launch", exact: true })).toHaveCount(0);
-  await snap(otherPage, "8-not-the-creator-wallet");
+  await expect(otherPage.getByText(`This browser is signed in as ${short(creator.address)}. Connect that wallet, or sign in with this one.`)).toBeVisible();
+  await expect(otherPage.getByRole("button", { name: "Continue" })).toBeDisabled();
+  await snap(otherPage, "9-another-wallet");
+  const otherPicture = await uniqueCoinImage(otherPage, otherTicker);
 
   const refused = await otherPage.request.post(`${TARGET.api}/launches`, {
     headers: { origin: TARGET.web },
