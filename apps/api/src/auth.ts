@@ -118,6 +118,8 @@ export async function finishXLink(c: Context<AppEnv>) {
         if ((e.cause?.code ?? e.code) === "23505") return [];
         throw e;
       });
+    // The browser has just authorized its record's X account: a rotation through X may follow (spec 7).
+    if (linked.length > 0) await db.update(sessions).set({ xAt: sql`now()` }).where(eq(sessions.tokenHash, signedIn.tokenHash));
     return back(authorization.returnTo, linked.length > 0 ? "linked" : "taken");
   }
 
@@ -129,12 +131,12 @@ export async function finishXLink(c: Context<AppEnv>) {
       set: { xHandle: user.username, xName: user.name, xAvatarUrl: user.profile_image_url ?? null, updatedAt: sql`now()` },
     })
     .returning({ id: creators.id });
-  await startSession(c, creator!.id, null);
+  await startSession(c, creator!.id, null, new Date());
   return back(authorization.returnTo, "linked");
 }
 
 /** Signs the browser in as a record, replacing any session it had. */
-async function startSession(c: Context<AppEnv>, creatorId: string, wallet: string | null) {
+async function startSession(c: Context<AppEnv>, creatorId: string, wallet: string | null, xAt: Date | null = null) {
   const { cfg, db } = c.var;
   const previous = getCookie(c, SESSION_COOKIE);
   if (previous) await db.delete(sessions).where(eq(sessions.tokenHash, await sha256Hex(previous)));
@@ -143,6 +145,7 @@ async function startSession(c: Context<AppEnv>, creatorId: string, wallet: strin
     tokenHash: await sha256Hex(token),
     creatorId,
     wallet,
+    xAt,
     expiresAt: new Date(Date.now() + SESSION_SECONDS * 1000),
   });
   setCookie(c, SESSION_COOKIE, token, cookieOptions(cfg, "/", SESSION_SECONDS));
@@ -171,17 +174,63 @@ export function signInMessage(o: { webApp: string; wallet: string; cluster: stri
 
 const signInRefusal = (c: Context<AppEnv>, status: 400 | 401, body: WalletSignInRefusal) => c.json(body, status);
 
+/** A purpose Heat gives a wallet a message to sign for: each message is taken only for its own. */
+export type MessagePurpose = (typeof walletSignIns.$inferSelect)["purpose"];
+
+/** A fresh nonce for a message: 32 hex characters, as `takeSignedMessage` finds it. */
+export const messageNonce = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
+
+/** Keeps a message Heat gives a wallet to sign, taken once for `purpose` before `expiresAt`. */
+export async function giveMessage(db: Db, o: { nonce: string; wallet: string; purpose: MessagePurpose; message: string; expiresAt: Date }) {
+  await db.delete(walletSignIns).where(lt(walletSignIns.expiresAt, sql`now()`));
+  await db.insert(walletSignIns).values(o);
+}
+
+/** Whether `signature`, base64, is `wallet`'s ed25519 signature over `message`. */
+export async function signedBy(wallet: string, message: string, signature: string): Promise<Uint8Array | null> {
+  let bytes: Uint8Array;
+  try {
+    bytes = getBase64Encoder().encode(signature) as Uint8Array;
+  } catch {
+    return null;
+  }
+  const ok =
+    bytes.length === 64 &&
+    (await verifySignature(await getPublicKeyFromAddress(wallet as Address), bytes as SignatureBytes, new TextEncoder().encode(message)).catch(() => false));
+  return ok ? bytes : null;
+}
+
+export type Taken = { ok: true; signature: string } | { ok: false; code: "expired" | "invalid"; error: string };
+
+/**
+ * Takes a message Heat gave `wallet` for `purpose`, signed: once, before it expires. A replayed or expired message, or one
+ * given for another purpose, is `expired`; one edited, given to another wallet, or a signature not the wallet's is
+ * `invalid`, and none of those uses the message up. The signature comes back base58, as a record keeps it.
+ */
+export async function takeSignedMessage(db: Db, purpose: MessagePurpose, wallet: string, message: string, signature: string): Promise<Taken> {
+  const expired = { ok: false, code: "expired", error: "This message was used already or has expired. Ask for a new one." } as const;
+  const nonce = /\nNonce: ([0-9a-f]{32})\n/.exec(message)?.[1];
+  const [given] = nonce ? await db.select().from(walletSignIns).where(eq(walletSignIns.nonce, nonce)) : [];
+  if (!given || given.purpose !== purpose) return expired;
+  if (given.wallet !== wallet || given.message !== message) return { ok: false, code: "invalid", error: "That is not the message Heat gave this wallet. Ask for a new one." };
+  const bytes = await signedBy(wallet, message, signature);
+  if (!bytes) return { ok: false, code: "invalid", error: "The signature is not this wallet's over that message." };
+  // Taken once: of two requests racing with one message, only the first deletes it.
+  const [taken] = await db.delete(walletSignIns).where(eq(walletSignIns.nonce, given.nonce)).returning();
+  if (!taken || taken.expiresAt.getTime() < Date.now()) return expired;
+  return { ok: true, signature: getBase58Decoder().decode(bytes) };
+}
+
 /** `POST /auth/wallet/message`: the message a wallet signs to sign in, taken once within ten minutes. */
 export async function walletSignInMessage(c: Context<AppEnv>) {
   const { cfg, db } = c.var;
   const body = WalletSignInRequest.safeParse(await c.req.json().catch(() => null));
   if (!body.success) return signInRefusal(c, 400, { error: "Say which wallet signs in.", code: "invalid" });
-  const nonce = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
+  const nonce = messageNonce();
   const issuedAt = new Date();
   const expiresAt = new Date(issuedAt.getTime() + SIGN_IN_SECONDS * 1000);
   const message = signInMessage({ webApp: webApp(cfg), wallet: body.data.wallet, cluster: cfg.cluster, nonce, issuedAt, expiresAt });
-  await db.delete(walletSignIns).where(lt(walletSignIns.expiresAt, sql`now()`));
-  await db.insert(walletSignIns).values({ nonce, wallet: body.data.wallet, message, expiresAt });
+  await giveMessage(db, { nonce, wallet: body.data.wallet, purpose: "sign_in", message, expiresAt });
   return c.json({ message, expiresAt: expiresAt.toISOString() } satisfies WalletSignInMessage);
 }
 
@@ -195,21 +244,15 @@ export async function walletSignIn(c: Context<AppEnv>) {
   const body = WalletSignInSigned.safeParse(await c.req.json().catch(() => null));
   if (!body.success) return signInRefusal(c, 400, { error: "Send the wallet, the message it signed and the signature.", code: "invalid" });
   const { wallet, message, signature } = body.data;
-  const nonce = /\nNonce: ([0-9a-f]{32})\n/.exec(message)?.[1];
-  const [given] = nonce ? await db.select().from(walletSignIns).where(eq(walletSignIns.nonce, nonce)) : [];
-  if (!given) return signInRefusal(c, 401, { error: "This sign-in was used already or has expired. Sign in again.", code: "expired" });
-  if (given.wallet !== wallet || given.message !== message) return signInRefusal(c, 400, { error: "That is not the message Heat gave this wallet. Sign in again.", code: "invalid" });
-  const bytes = getBase64Encoder().encode(signature);
-  const signed =
-    bytes.length === 64 &&
-    (await verifySignature(await getPublicKeyFromAddress(wallet as Address), bytes as SignatureBytes, new TextEncoder().encode(message)).catch(() => false));
-  if (!signed) return signInRefusal(c, 400, { error: "The signature is not this wallet's over that message.", code: "invalid" });
-  // Taken once: of two sign-ins racing with one message, only the first deletes it.
-  const [taken] = await db.delete(walletSignIns).where(eq(walletSignIns.nonce, given.nonce)).returning();
-  if (!taken || taken.expiresAt.getTime() < Date.now()) return signInRefusal(c, 401, { error: "This sign-in was used already or has expired. Sign in again.", code: "expired" });
+  const taken = await takeSignedMessage(db, "sign_in", wallet, message, signature);
+  if (!taken.ok) {
+    return taken.code === "expired"
+      ? signInRefusal(c, 401, { error: "This sign-in was used already or has expired. Sign in again.", code: "expired" })
+      : signInRefusal(c, 400, { error: taken.error.replace("Ask for a new one.", "Sign in again."), code: "invalid" });
+  }
 
   const browser = await sessionCreator(c);
-  const creatorId = await recordForWallet(db, wallet, { proof: getBase58Decoder().decode(bytes), proofMessage: message }, browser?.id ?? null);
+  const creatorId = await recordForWallet(db, wallet, { proof: taken.signature, proofMessage: message }, browser?.id ?? null);
   await startSession(c, creatorId, wallet);
   return c.json(await meOf(db, creatorId, wallet));
 }
@@ -281,6 +324,8 @@ export async function sessionCreator(c: Context<AppEnv>) {
       xName: creators.xName,
       xAvatarUrl: creators.xAvatarUrl,
       wallet: sessions.wallet,
+      xAt: sessions.xAt,
+      tokenHash: sessions.tokenHash,
     })
     .from(sessions)
     .innerJoin(creators, eq(creators.id, sessions.creatorId))

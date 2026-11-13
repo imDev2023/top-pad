@@ -10,6 +10,7 @@ import { graduatedPoolFeeNumerator } from "@top-pad/meteora";
 import { holderCount } from "@top-pad/indexer";
 import { quoteInfoOf, quoteOf } from "./quotes";
 import { creatorLockOf, taxShareOf } from "./afterOpen";
+import { recordAt, summaryOf } from "./creatorRecord";
 import { explorerUrl, type Config } from "./env";
 import type { AppEnv } from "./http";
 import { storedLabels } from "./vampShield";
@@ -138,6 +139,7 @@ export async function getCoin(c: Context<AppEnv>) {
     heat: coin !== null,
     launchMode: coin?.launchMode ?? null,
     creator: { wallet: coin?.creatorWallet ?? pool.creator, handle: row.handle ?? null },
+    record: coin ? await summaryOf(db, coin.creatorId ?? (await recordAt(db, coin.creatorWallet, coin.createdAt))) : null,
     activatedAt: pool.activatedAt.toISOString(),
     supply: COIN_SUPPLY.toString(),
     decimals: COIN_DECIMALS,

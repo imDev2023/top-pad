@@ -27,7 +27,7 @@ import {
   type Transaction,
   verifySignature,
 } from "@solana/kit";
-import { and, eq, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import type { Context } from "hono";
 import {
   allocate,
@@ -65,7 +65,7 @@ import {
   type FairOpenSeat,
   type PreparedFairOpenTransaction,
 } from "@top-pad/contract";
-import { coins, creators, creatorWallets, fairOpenRungs, fairOpens, launches, pools, type Db } from "@top-pad/db";
+import { coins, creators, fairOpenRungs, fairOpens, launches, pools, type Db } from "@top-pad/db";
 import { FundingUnreadable, rpcFundingSource } from "@top-pad/indexer";
 import { admit, AdmissionRefused, linkageOf, loadAdmissionKey, personOf, refusalOf, tierName, UNREADABLE } from "./admission";
 import { closedSeatOf, creatorLockOf, deliveredSeats, taxShareOf } from "./afterOpen";
@@ -76,6 +76,7 @@ import { launchRow } from "./fairOpenKeeper";
 import { loadKeeper } from "./keeper";
 import { keeperSignatureOn, wireOf } from "./rungs";
 import { confirmed, sendWire, TransactionFailed } from "./send";
+import { recordAt, summaryOf } from "./creatorRecord";
 import type { AppEnv } from "./http";
 import { indexNow } from "./indexing";
 
@@ -132,14 +133,17 @@ function phaseOf(launch: Launch | null, row: LaunchRow | undefined, at: bigint):
   return { phase: p.phase, failure: p.phase === "failing" || p.phase === "failed" ? p.failure : null };
 }
 
-/** The Creator wallet's record, if Heat has one: its X handle, name and picture. */
-async function creatorOf(c: Context<AppEnv>, wallet: string) {
-  const [row] = await c.var.db
-    .select({ handle: creators.xHandle, name: creators.xName, avatarUrl: creators.xAvatarUrl })
-    .from(creatorWallets)
-    .innerJoin(creators, eq(creators.id, creatorWallets.creatorId))
-    .where(and(eq(creatorWallets.wallet, wallet), sql`${creatorWallets.endedAt} is null`));
-  return { wallet, handle: row?.handle ?? null, name: row?.name ?? null, avatarUrl: row?.avatarUrl ?? null };
+/**
+ * The creator as the page names them: the Creator wallet that scheduled it, with its record's X handle, name and picture
+ * when it has one, and the record's summary (spec 7, 9). The record is the launch's own, or for a Fair Open scheduled
+ * outside the launch service the one whose Creator wallet that wallet was when it was scheduled.
+ */
+async function creatorOf(c: Context<AppEnv>, wallet: string, creatorId: string | null, scheduledAt: Date) {
+  const id = creatorId ?? (await recordAt(c.var.db, wallet, scheduledAt));
+  const [row] = id
+    ? await c.var.db.select({ handle: creators.xHandle, name: creators.xName, avatarUrl: creators.xAvatarUrl }).from(creators).where(eq(creators.id, id))
+    : [];
+  return { creator: { wallet, handle: row?.handle ?? null, name: row?.name ?? null, avatarUrl: row?.avatarUrl ?? null }, record: await summaryOf(c.var.db, id) };
 }
 
 const badLaunch = (c: Context<AppEnv>) => refuse(c, 400, { error: "That is not a Fair Open's address.", code: "invalid" });
@@ -234,7 +238,7 @@ export async function getFairOpen(c: Context<AppEnv>) {
 
   const body: FairOpen = {
     launch: address,
-    creator: await creatorOf(c, terms.creator),
+    ...(await creatorOf(c, terms.creator, scheduled?.creatorId ?? null, row?.createdAt ?? scheduled?.createdAt ?? new Date())),
     teaser: scheduled?.teaser ?? row?.teaser ?? null,
     identityHash: hex(terms.identityHash),
     depositsOpenAt: iso(terms.depositsOpenAt),

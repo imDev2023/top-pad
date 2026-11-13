@@ -15,6 +15,19 @@ import { verifyMessageRoute, verifyRoute } from "./verify";
 import { getCoinRadar, reviewBundles } from "./bundleRadar";
 import { getCoin, getCoinCandles, getCoinTrades } from "./coins";
 import { getEarnings, prepareClaim, reportClaim } from "./earnings";
+import { getCreatorRecord } from "./creatorRecord";
+import { prepareCreatorRole, reportCreatorRole } from "./creatorRole";
+import {
+  acceptHandover,
+  cancelChange,
+  cancelMessageRoute,
+  completeRotations,
+  handoverMessageRoute,
+  handoverOffers,
+  offerHandover,
+  requestRotation,
+  rotationMessageRoute,
+} from "./creatorWallets";
 import { reclaimUnscheduled, sweepFairOpens } from "./fairOpenKeeper";
 import { claimHeatLpFees, sweepGraduations } from "./graduation";
 import { MAX_AHEAD_SECONDS, renewFairOpen } from "./fairOpenLaunches";
@@ -111,7 +124,7 @@ app.post("*", async (c, next) => {
   const refusal: LaunchRefusal = { error: `The image is too large: a coin's image can be at most ${Math.round(maxImageBytes / 1024)} KB.`, code: "image" };
   return bodyLimit({ maxSize: maxImageBytes + 16 * 1024, onError: (c) => c.json(refusal, 413) })(c, next);
 });
-for (const path of ["/auth/*", "/me", "/verify", "/verify/*", "/launches", "/launches/*", "/vamp-shield/*", "/coins/*", "/earnings/*", "/fair-opens/*"]) app.use(path, withDb);
+for (const path of ["/auth/*", "/me", "/verify", "/verify/*", "/launches", "/launches/*", "/vamp-shield/*", "/coins/*", "/earnings/*", "/fair-opens/*", "/creators/*"]) app.use(path, withDb);
 app.get("/auth/x/start", startXLink);
 app.get("/auth/x/callback", finishXLink);
 app.post("/auth/wallet/message", walletSignInMessage);
@@ -138,9 +151,20 @@ app.get("/coins/:mint/holdings/:wallet", getHoldings);
 app.post("/coins/:mint/quote", quote);
 app.post("/coins/:mint/swap", prepareSwap);
 app.post("/coins/:mint/trades", reportTrade);
+app.post("/coins/:mint/creator-role", prepareCreatorRole);
+app.post("/coins/:mint/creator-role/sent", reportCreatorRole);
 app.get("/earnings/:wallet", getEarnings);
 app.post("/earnings/claims", reportClaim);
 app.post("/earnings/:wallet/claim", prepareClaim);
+app.post("/creators/handover/message", handoverMessageRoute);
+app.post("/creators/handover", offerHandover);
+app.get("/creators/offers/:wallet", handoverOffers);
+app.post("/creators/rotation/message", rotationMessageRoute);
+app.post("/creators/rotation", requestRotation);
+app.post("/creators/changes/:id/accept", acceptHandover);
+app.post("/creators/changes/:id/cancel/message", cancelMessageRoute);
+app.post("/creators/changes/:id/cancel", cancelChange);
+app.get("/creators/:key", getCreatorRecord);
 app.post("/fair-opens/transactions", reportFairOpenTransaction);
 app.get("/fair-opens/:launch", getFairOpen);
 app.post("/fair-opens/:launch/deposit", prepareDeposit);
@@ -214,7 +238,8 @@ async function everyMinute(controller: ScheduledController, env: Bindings, ctx: 
 
 /**
  * The Cron Triggers. Every five minutes: the indexer kept running, the keeper's float, any window claim, Fair Open or
- * Graduation the keeper's Workflows missed, Bundle Radar's case job, the quotes' band, Heat's LP fees once an hour, housekeeping, then every
+ * Graduation the keeper's Workflows missed, Bundle Radar's case job, the quotes' band, Heat's LP fees once an hour, Creator
+ * wallet rotations due, housekeeping, then every
  * open alert to the operator. Every minute: the protected set (everyMinute).
  */
 async function scheduled(_controller: ScheduledController, env: Bindings, ctx: ExecutionContext) {
@@ -240,6 +265,8 @@ async function scheduled(_controller: ScheduledController, env: Bindings, ctx: E
     if (new Date(_controller.scheduledTime).getUTCMinutes() < 5) {
       await runJob(db, "lp-fees", () => claimHeatLpFees(db, env), { exclusive: true }).catch(() => undefined);
     }
+    // Creator wallet rotations through X whose 7-day cooldown has ended take effect (spec 7).
+    await runJob(db, "creator-rotations", () => completeRotations(db), { exclusive: true }).catch(() => undefined);
     await runJob(db, "housekeeping", () => housekeeping(db, env), { exclusive: true }).catch(() => undefined);
     await notifyPending(db, cfg.alertWebhookUrl);
   } finally {
