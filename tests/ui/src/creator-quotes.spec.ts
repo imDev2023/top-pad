@@ -2,15 +2,16 @@
 // USDC from the site, a trader buys both once each coin's window claim has run, and the creator's page shows each coin
 // in its own quote, with what waits in each quote; one click and one wallet request claim both, a transaction a quote,
 // paying exactly what the page showed in each, and the Creator record then counts what each quote's claim paid.
-// Real devnet SOL and USDC: about 0.1 SOL a run, and about 1.2 USDC lent to the trader, all but the fees returned;
-// Heat's bank must hold 1.2 USDC (`pnpm --filter @top-pad/chain devnet-usdc devnet <SOL> --send`). About 5 minutes:
-// pass `creator-quotes.spec.ts` to run it alone.
+// Real devnet SOL and USDC: about 0.1 SOL a run, and 0.6 USDC lent to the trader, whose coins are sold back at the end,
+// so a run keeps only the fees and the curves' slippage, about 0.02 USDC; Heat's bank must hold 0.6 USDC
+// (`pnpm --filter @top-pad/chain devnet-usdc devnet <SOL> --send`). About 5 minutes: pass `creator-quotes.spec.ts` to
+// run it alone.
 import { expect, test, type Page } from "@playwright/test";
 import { address, type Address } from "@solana/kit";
 import { creatorShare, DEVNET_USDC, quoteAccount, TOKEN_PROGRAM_ADDRESS } from "@top-pad/chain";
 import { fetchVirtualPool } from "@top-pad/clients/dbc";
 import { Coin, CreatorEarnings, CreatorRecord } from "@top-pad/contract";
-import { fundedWallets, rpc, swap } from "@top-pad/tests-devnet/devnet";
+import { coinBalance, fundedWallets, rpc, swap } from "@top-pad/tests-devnet/devnet";
 import { fundQuote, sweepDepositors } from "@top-pad/tests-devnet/fair-open";
 import { expectVampLaunchable, launchCoin, newTicker, pageErrors, runName, snap, uniqueCoinImage } from "./steps";
 import { TARGET } from "./target";
@@ -59,7 +60,9 @@ test("a creator's SOL coin and USDC coin each show in their own quote, and one w
   const errors = pageErrors(page);
   await fetch(`${TARGET.api}/indexer`);
   const [creator, trader] = await fundedWallets(80_000_000n, 80_000_000n);
-  await fundQuote([trader], [1_200_000n], USDC, 6);
+  await fundQuote([trader], [600_000n], USDC, 6);
+  // What the trader bought, sold back at the end so the bank gets its quote back: each coin with its config and quote.
+  const bought: { mint: Address; config?: Address; quoteMint?: Address }[] = [];
   try {
     // A coin in SOL, then, in the same signed-in browser, a coin in USDC from the quote picker.
     const { mint: solMint, wallet } = await launchCoin(page, creator, { name: "Heat Both", ticker: newTicker() }, { looksLike: true });
@@ -83,8 +86,9 @@ test("a creator's SOL coin and USDC coin each show in their own quote, and one w
     // Each coin's first minute goes to the treasury; the creator's half of every fee starts once its window claim has run.
     await windowClaimed(solMint);
     await windowClaimed(usdcMint);
+    bought.push({ mint: address(solMint) }, { mint: address(usdcMint), config: address(usdcCoin.config), quoteMint: DEVNET_USDC });
     await swap(trader, address(solMint), "buy", 60_000_000n);
-    await swap(trader, address(usdcMint), "buy", 1_000_000n, address(usdcCoin.config), DEVNET_USDC);
+    await swap(trader, address(usdcMint), "buy", 500_000n, address(usdcCoin.config), DEVNET_USDC);
 
     // The creator's page: each coin in its own quote, and what waits in each.
     await openCreatorPage(page);
@@ -133,8 +137,14 @@ test("a creator's SOL coin and USDC coin each show in their own quote, and one w
     await page.goto(`/creator/${record.summary.id}`);
     await expect(page.getByTestId("fact-claimed")).toContainText(inSol(solShare));
     await expect(page.getByTestId("fact-claimed")).toContainText(inUsdc(usdcShare));
+    // The record's own earnings panel, for its Creator wallet, once read from the chain.
+    await expect(page.getByTestId("earnings-claimed")).toHaveText(`${inSol(solShare)}${inUsdc(usdcShare)}`, { timeout: 30_000 });
     await snap(page, "quotes-3-record");
   } finally {
+    for (const coin of bought) {
+      const held = await coinBalance(trader.address, coin.mint).catch(() => 0n);
+      if (held > 0n) await swap(trader, coin.mint, "sell", held, coin.config, coin.quoteMint).catch((e) => console.error(`selling ${coin.mint} back failed`, e));
+    }
     await sweepDepositors([trader, creator], USDC).catch((e) => console.error("sweeping the USDC failed", e));
   }
   expect(errors).toEqual([]);
