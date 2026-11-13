@@ -14,7 +14,7 @@ import { fetchLaunch, LaunchStatus } from "@top-pad/clients/fair-open";
 import { Coin, FairOpen, QuoteList } from "@top-pad/contract";
 import { chainTime, coinBalance, fundedWallets, rpc } from "@top-pad/tests-devnet/devnet";
 import { fundQuote, quoteHeld, sweepDepositors } from "@top-pad/tests-devnet/fair-open";
-import { expectVampClear, signInOnLaunch, newTicker, pageErrors, runName, snap, uniqueCoinImage } from "./steps";
+import { expectVampClear, linkXOnLaunch, signInOnLaunch, newTicker, pageErrors, runName, snap, uniqueCoinImage } from "./steps";
 import { TARGET } from "./target";
 import { connectTestWallet, installTestWallet } from "./wallet";
 
@@ -162,6 +162,9 @@ test("a Fair Open in USDC from the picker, deposited in USDC from its page and o
   try {
     const wallet = await installTestWallet(page, creator);
     await startLaunch(page);
+    // Linked so the creator deposits Scored: a pot of Unverified seats alone can never open, their fills being capped at
+    // a quarter of what the pot spends, and since ADR 0008 a creator who links no X is Unverified.
+    await linkXOnLaunch(page);
     await expect(page.getByRole("radio", { name: /Fair Open/ })).toBeChecked();
     await page.getByTestId("quote-picker").getByRole("radio", { name: /^USDC/ }).check();
     const ticker = newTicker();

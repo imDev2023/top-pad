@@ -31,6 +31,8 @@ A reader would expect a launchpad built around accountable creators to keep the 
   Now a barred creator can come back under a new wallet with an empty record.
   What a fresh record lacks still costs them: no graduations, so no verified-creator mark and no featured calendar slots, and any coin they launched before stays on the old record with its finding.
   Bundle Radar's funding links still tie a new wallet to an old one when its SOL came from it, which is how most fresh wallets are funded, and a Bar keeps barring a linked X account and any World ID nullifier.
+- **A creator who links no X deposits as Unverified**, so their own Fair Open needs Scored or Verified depositors to open: Unverified fills are capped at a quarter of what the pot spends, and a pot of Unverified seats alone, the creator's included, buys nothing and fails (found on devnet on 2026-11-13, a USDC Fair Open whose only depositor was its creator).
+  The rule is unchanged; what changed is that a creator is no longer Scored by default.
 - **The X handle no longer vouches for every coin.**
   Traders see an X link only on coins whose creator chose to link one; the coin card names the Creator wallet otherwise.
 - **Two ways in, one record each.**

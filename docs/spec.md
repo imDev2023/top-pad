@@ -142,7 +142,7 @@ A sealed entry: a "?" tile, the time, the creator and their record summary, the 
 - A depositor can withdraw everything until the window closes.
 - Each depositor puts up about 0.0027 SOL of refundable rent beyond the deposit: 0.00123 SOL for the seat and 0.00149 SOL for the coin account the push creates (returned if they already have one).
   As built ([#45](https://github.com/imDev2023/top-pad/issues/45)): the seat is 178 bytes, keeping room for what the open and the pushes will record, so the rent is about 0.003 SOL, 0.00155 for the seat and 0.00149 for the coin account, at devnet's rent on 2026-10-30.
-- The creator may deposit like anyone else, under their own tier and cap (Scored if their record linked X, else Unverified unless another tier source applies); their share of the coins is locked (step 13).
+- The creator may deposit like anyone else, under their own tier and cap (Scored if their record linked X, else Unverified unless another tier source applies, so a pot whose only depositor is a creator with no X buys nothing and fails); their share of the coins is locked (step 13).
 
 **10. The open.**
 At the scheduled time our keeper broadcasts the largest rung at or below what the pot should spend; the nonce advancing makes every other rung invalid.
