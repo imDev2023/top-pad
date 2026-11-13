@@ -277,7 +277,8 @@ export async function prepareClaim(c: Context<AppEnv>) {
 
 /**
  * `POST /earnings/claims`: a claim's transactions, sent by the wallet, settled against the chain; what landed is read
- * from the fee program's own events and handed to the indexer, so the creator's page and the coin's show it at once.
+ * from the fee program's own events and indexed before the answer (at most `indexNow`'s 30 s), so the creator's page
+ * and the coin's show it on their next read.
  */
 export async function reportClaim(c: Context<AppEnv>) {
   const { cfg, db } = c.var;
@@ -291,7 +292,8 @@ export async function reportClaim(c: Context<AppEnv>) {
   const until = Date.now() + SETTLE_WAIT_MS;
   const outcome = await settleSignatures(rpc, signatures, SETTLE_WAIT_MS);
   const landed = signatures.filter((s) => outcome.get(s)?.status === "landed");
-  c.executionCtx.waitUntil(indexNow(c.env, landed));
+  // Indexed before the answer, as a creator role's hand-over is, so the page's next read of what claims paid has it.
+  const indexed = indexNow(c.env, landed);
 
   const configs = await configsOf(cfg, db, heat);
   const known = configs.set();
@@ -319,6 +321,7 @@ export async function reportClaim(c: Context<AppEnv>) {
     for (const claim of decoded.lpFeeClaims) add(claim.mint, graduated.get(claim.pool)!.config, claim.quoteAmount);
   }
   const quoteMints = [...new Set([...paid.values()].map((p) => p.quoteMint))];
+  await indexed;
   const body: ClaimOutcome = {
     transactions: signatures.map((signature) => ({
       signature,
