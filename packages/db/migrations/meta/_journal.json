@@ -134,6 +134,13 @@
       "when": 1794556347041,
       "tag": "0018_creator_record",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1794592144632,
+      "tag": "0019_bars",
+      "breakpoints": true
     }
   ]
 }

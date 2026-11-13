@@ -73,6 +73,7 @@ export const LaunchRefusal = ApiError.extend({
     "quote",
     "teaser",
     "schedule",
+    "barred",
   ]),
   /** The text's verdict, when Vamp Shield refused the ticker or the name. */
   verdict: VampShieldVerdict.optional(),

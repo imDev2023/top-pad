@@ -472,6 +472,12 @@ export const launches = pgTable(
     openSlot: bigint("open_slot", { mode: "number" }),
     openLandedAt: timestamp("open_landed_at", { withTimezone: true }),
     deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+    /**
+     * A Fair Open cancelled by a Bar before its window (spec 6.5, #56): it takes no deposits and our keeper sends none of
+     * its rungs, so it fails through the failure path at its open, every rent back to the creator.
+     */
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    cancelBar: uuid("cancel_bar"),
   },
   (t) => [
     index("launches_creator_created_idx").on(t.creatorId, t.createdAt),
@@ -1123,8 +1129,11 @@ export const bundleCases = pgTable(
     mint: text("mint").notNull().unique(),
     creatorWallet: text("creator_wallet").notNull(),
     creatorId: uuid("creator_id").references(() => creators.id),
-    /** Open until an operator acts on it in the operator app (#54, #56). */
-    status: text("status", { enum: ["open"] })
+    /**
+     * Open until an operator decides it in the operator app (spec 6.5, #56): `confirmed` bars the Creator (`bars`), and
+     * `dismissed` closes it with no Bar.
+     */
+    status: text("status", { enum: ["open", "confirmed", "dismissed"] })
       .notNull()
       .default("open"),
     linkedWallets: integer("linked_wallets").notNull(),
@@ -1136,6 +1145,10 @@ export const bundleCases = pgTable(
     /** Where the same pack is kept in R2 (spec 10.4). */
     evidenceKey: text("evidence_key").notNull(),
     openedAt: timestamp("opened_at", { withTimezone: true }).notNull().defaultNow(),
+    /** The operator's decision: when, who (by the email Access signed them in with) and why. */
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    decidedBy: text("decided_by"),
+    decisionNote: text("decision_note"),
   },
   (t) => [index("bundle_cases_creator_wallet_idx").on(t.creatorWallet), index("bundle_cases_status_idx").on(t.status, t.openedAt)],
 );
@@ -1167,6 +1180,117 @@ export const quoteConfigPairs = pgTable(
   (t) => [index("quote_config_pairs_quote_idx").on(t.quoteMint, t.madeAt)],
 );
 
+/**
+ * A Bar (spec 6.5, #56): an operator confirmed a bundling case, so Heat's launch key co-signs no launch for the Creator
+ * record, its Creator wallet then or its linked X account then. It applies at once and never expires; the finding stays
+ * private to the creator until `publish_at`, 72 hours after the confirmation, then shows on the record, the coin's page
+ * and its Fairness card. Only an upheld appeal lifts it, which takes the finding off every public page; the audit log
+ * keeps it.
+ */
+export const bars = pgTable(
+  "bars",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    caseId: uuid("case_id")
+      .notNull()
+      .unique()
+      .references(() => bundleCases.id),
+    /** The coin the confirmed bundle was in. */
+    mint: text("mint").notNull(),
+    /** The record barred, when the coin has one; the Creator wallet and X account it held at the confirmation. */
+    creatorId: uuid("creator_id").references(() => creators.id),
+    creatorWallet: text("creator_wallet").notNull(),
+    xUserId: text("x_user_id"),
+    confirmedBy: text("confirmed_by").notNull(),
+    confirmedAt: timestamp("confirmed_at", { withTimezone: true }).notNull().defaultNow(),
+    /** When the private window ends and the finding goes public. */
+    publishAt: timestamp("publish_at", { withTimezone: true }).notNull(),
+    note: text("note").notNull(),
+    /** An upheld appeal lifts the Bar: when, by whom, and which appeal. */
+    liftedAt: timestamp("lifted_at", { withTimezone: true }),
+    liftedBy: text("lifted_by"),
+    liftedAppeal: uuid("lifted_appeal"),
+  },
+  (t) => [
+    index("bars_creator_idx").on(t.creatorId),
+    index("bars_creator_wallet_idx").on(t.creatorWallet),
+    index("bars_x_user_idx").on(t.xUserId),
+    index("bars_mint_idx").on(t.mint),
+  ],
+);
+
+/**
+ * A barred creator's appeals (spec 6.5): one within 30 days of the Bar, heard within 48 hours by an operator other than
+ * the one who confirmed it; another only with new evidence, once the last was denied.
+ */
+export const barAppeals = pgTable(
+  "bar_appeals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    barId: uuid("bar_id")
+      .notNull()
+      .references(() => bars.id),
+    creatorId: uuid("creator_id")
+      .notNull()
+      .references(() => creators.id),
+    /** Which link the creator says is wrong, and why, in their words; `evidence` is what backs it, new for a second appeal. */
+    grounds: text("grounds", { enum: ["shared_exchange", "launch_service", "other"] }).notNull(),
+    statement: text("statement").notNull(),
+    evidence: text("evidence"),
+    status: text("status", { enum: ["open", "upheld", "denied"] })
+      .notNull()
+      .default("open"),
+    filedAt: timestamp("filed_at", { withTimezone: true }).notNull().defaultNow(),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    decidedBy: text("decided_by"),
+    decisionNote: text("decision_note"),
+  },
+  (t) => [
+    index("bar_appeals_bar_idx").on(t.barId, t.filedAt),
+    // One appeal waits at a time.
+    uniqueIndex("bar_appeals_one_open").on(t.barId).where(sql`${t.status} = 'open'`),
+  ],
+);
+
+/** What a barred creator says back about the evidence (spec 6.5), from their record's private view, for the operator. */
+export const barReplies = pgTable(
+  "bar_replies",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    barId: uuid("bar_id")
+      .notNull()
+      .references(() => bars.id),
+    creatorId: uuid("creator_id")
+      .notNull()
+      .references(() => creators.id),
+    body: text("body").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("bar_replies_bar_idx").on(t.barId, t.at)],
+);
+
+/**
+ * Direct messages Heat's X account owes creators (spec 6.5): written with the Bar in the operator's transaction and sent
+ * by the API's five-minute cron (`bar-notices`), which records X's answer.
+ */
+export const xMessages = pgTable(
+  "x_messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    barId: uuid("bar_id").references(() => bars.id),
+    /** The recipient, by X's numeric user id. */
+    xUserId: text("x_user_id").notNull(),
+    text: text("text").notNull(),
+    createdAt: createdAt(),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    /** X's id for the message once sent. */
+    xEventId: text("x_event_id"),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+  },
+  (t) => [index("x_messages_unsent_idx").on(t.createdAt).where(sql`${t.sentAt} is null`)],
+);
+
 /** What an operator can do in the operator app, each written to the audit log as it is done. */
 export const OPERATOR_ACTIONS = [
   "launch_cleared",
@@ -1177,6 +1301,10 @@ export const OPERATOR_ACTIONS = [
   "hub_removed",
   "evidence_opened",
   "audit_exported",
+  "case_confirmed",
+  "case_dismissed",
+  "appeal_upheld",
+  "appeal_denied",
 ] as const;
 export type OperatorAction = (typeof OPERATOR_ACTIONS)[number];
 

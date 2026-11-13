@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PublicBar } from "./bar";
 import { CreatorRef, CreatorSummary } from "./creatorSummary";
 import { CreatorLock } from "./fairOpen";
 import { Address, RawAmount } from "./launch";
@@ -123,6 +124,8 @@ export const CreatorRecord = z.object({
   /** Newest first. */
   coins: z.array(RecordCoin),
   received: z.array(ReceivedCoin),
+  /** Published Bars (spec 6.5), newest first: each confirmed creator bundle with its evidence and appeal status. */
+  bars: z.array(PublicBar),
   /**
    * What every Creator Earnings claim paid the record's Creator wallets, curve fees and LP fees, by quote, in its raw
    * units: SOL always, first, then every other quote a claim paid in, in the order the cluster lists them.

@@ -39,6 +39,11 @@ export const CreatorSummary = z.object({
   /** Coins that never graduated and went quiet: no trade for 7 days. */
   quiet: z.number().int().nonnegative(),
   marks: CreatorMarks,
+  /**
+   * A published Bar (spec 6.5): the coin of the confirmed creator bundle and when the finding was published; null when
+   * the record has none, or only one still in its 72-hour private window.
+   */
+  barred: z.object({ ticker: z.string(), mint: Address, publishedAt: z.iso.datetime() }).nullable(),
   /** When the record started. */
   since: z.iso.datetime(),
 });

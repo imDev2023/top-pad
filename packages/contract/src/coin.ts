@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CoinFinding } from "./bar";
 import { CreatorSummary } from "./creatorSummary";
 import { WindowClaim } from "./earnings";
 import { CreatorLock, TaxShare } from "./fairOpen";
@@ -93,6 +94,8 @@ export const Coin = z.object({
   creator: z.object({ wallet: Address, handle: z.string().nullable() }),
   /** Its launcher's record summary (spec 7, 9): null for a pool made around Heat's flow, which no record launched. */
   record: CreatorSummary.nullable(),
+  /** "Confirmed creator bundle" once an operator confirmed one and its 72-hour private window has passed (spec 6.5). */
+  finding: CoinFinding.nullable(),
   /** When trading opened: the sniper tax counts from here. */
   activatedAt: z.iso.datetime(),
   /** The coin's fixed supply in raw units, and its decimals (spec 3.1). */

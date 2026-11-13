@@ -123,6 +123,11 @@ export const FairOpen = z.object({
   lateAt: z.iso.datetime(),
   phase: FairOpenPhase,
   failure: FairOpenFailure.nullable(),
+  /**
+   * When Heat cancelled it before its window, because its creator was barred (spec 6.5): it takes no deposits and fails
+   * at its open, every rent back to the creator. The reason stays private until the Bar's finding is published.
+   */
+  cancelledAt: z.iso.datetime().nullable(),
   /** Heat's clock when it answered, so a page counts down by it. */
   serverTime: z.iso.datetime(),
   /** What the launch is priced in (ADR 0007): every amount below is in its raw units, shown through its multiplier. */
