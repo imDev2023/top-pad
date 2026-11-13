@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { standInUser, xStandIn } from "./handler";
+import { standInToken, standInUser, xStandIn } from "./handler";
 
 const CALLBACK = "https://api.example/auth/x/callback";
 const ORIGIN = "https://x-stand-in.example";
@@ -128,6 +128,28 @@ describe("the X stand-in", () => {
     const x = standIn();
     expect((await x.get("/2/users/me")).status).toBe(401);
     expect((await x.get("/2/users/me", { authorization: "Bearer someone-elses-token" })).status).toBe(401);
+  });
+
+  it("takes a direct message from Heat's account as X does, only with a token it issued", async () => {
+    const handle = xStandIn({ callbacks: [CALLBACK], now: () => 1_800_000_000_000 });
+    const send = (participant: string, body: unknown, token: string | null = standInToken("heat_devnet_account")) =>
+      handle(
+        new Request(`${ORIGIN}/2/dm_conversations/with/${participant}/messages`, {
+          method: "POST",
+          headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
+          body: JSON.stringify(body),
+        }),
+      );
+    const recipient = await standInUser("heat_tester_bundler");
+    const res = await send(recipient.id, { text: "Heat: an operator confirmed a creator bundle in $FROG." });
+    expect(res.status).toBe(201);
+    const { data } = (await res.json()) as { data: { dm_event_id: string; dm_conversation_id: string } };
+    expect(data.dm_event_id).toMatch(/^\d+$/);
+    expect(data.dm_conversation_id).toContain(recipient.id);
+    expect((await send(recipient.id, { text: "hi" }, null)).status).toBe(401);
+    expect((await send(recipient.id, { text: "hi" }, "someone-elses-token")).status).toBe(401);
+    expect((await send(recipient.id, { text: " " })).status).toBe(400);
+    expect((await send((await standInUser("heat_devnet_account")).id, { text: "me" })).status).toBe(403);
   });
 
   it("escapes what it echoes into its page", async () => {

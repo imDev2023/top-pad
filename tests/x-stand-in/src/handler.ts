@@ -1,5 +1,6 @@
 // A stand-in for X's OAuth 2.0 and users API (spec 2.1 step 1), until Heat has its own X app: the authorize page, the
-// token, `users/me` and revoke endpoints, enough for the API's linking code to run unchanged against it. On its authorize
+// token, `users/me` and revoke endpoints, enough for the API's linking code to run unchanged against it; and X's direct
+// message endpoint, through which Heat's own account tells a barred creator (spec 6.5). On its authorize
 // page the browser picks the handle to link as, where a creator would press "Authorize app" on X.
 // It keeps no state, so it runs alike as a Worker (devnet) and in Node (the end-to-end test): the code carries the PKCE
 // challenge, the callback and the handle, and the access token carries the handle. A handle must be longer than X allows
@@ -159,6 +160,23 @@ const refused = (reason: string) =>
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
 
+/** X's direct message endpoint: `POST /2/dm_conversations/with/:participant_id/messages`. */
+const DM_PATH = /^\/2\/dm_conversations\/with\/(\d{1,20})\/messages$/;
+/** X's longest direct message. */
+const DM_MAX = 10_000;
+
+/** The token the stand-in issues a handle, as its token endpoint does: what Heat's own account sends direct messages with. */
+export const standInToken = (username: string) => TOKEN_PREFIX + seal({ username });
+
+const unauthorized = () => json(401, { title: "Unauthorized", type: "about:blank", status: 401, detail: "Unauthorized" });
+
+/** The handle a bearer token the stand-in issued stands for, or null. */
+function handleOf(request: Request): string | null {
+  const token = (request.headers.get("authorization") ?? "").replace(/^Bearer /, "");
+  const claims = token.startsWith(TOKEN_PREFIX) ? unseal<{ username?: string }>(token.slice(TOKEN_PREFIX.length)) : null;
+  return claims?.username && HANDLE.test(claims.username) ? claims.username : null;
+}
+
 /** The stand-in, as a fetch handler. */
 export function xStandIn({ callbacks, now = Date.now }: XStandInOptions) {
   return async function handle(request: Request): Promise<Response> {
@@ -196,14 +214,28 @@ export function xStandIn({ callbacks, now = Date.now }: XStandInOptions) {
       if (code.expiresAt < now()) return invalid("The authorization code has expired.");
       if (form.get("redirect_uri") !== code.redirectUri) return invalid("redirect_uri does not match the authorization request.");
       if (base64url(await sha256(form.get("code_verifier") ?? "")) !== code.challenge) return invalid("The code_verifier does not match the code_challenge.");
-      return json(200, { token_type: "bearer", expires_in: 7200, access_token: TOKEN_PREFIX + seal({ username: code.username }), scope: SCOPE });
+      return json(200, { token_type: "bearer", expires_in: 7200, access_token: standInToken(code.username), scope: SCOPE });
     }
 
     if (url.pathname === "/2/users/me" && request.method === "GET") {
-      const token = (request.headers.get("authorization") ?? "").replace(/^Bearer /, "");
-      const claims = token.startsWith(TOKEN_PREFIX) ? unseal<{ username?: string }>(token.slice(TOKEN_PREFIX.length)) : null;
-      if (!claims?.username || !HANDLE.test(claims.username)) return json(401, { title: "Unauthorized", type: "about:blank", status: 401, detail: "Unauthorized" });
-      return json(200, { data: await standInUser(claims.username) });
+      const username = handleOf(request);
+      if (!username) return unauthorized();
+      return json(200, { data: await standInUser(username) });
+    }
+
+    // A direct message from the token's account to the participant, answered as X answers it. It keeps nothing: the
+    // sender records X's answer, and nobody's real inbox is ever written to.
+    const dm = DM_PATH.exec(url.pathname);
+    if (dm && request.method === "POST") {
+      const username = handleOf(request);
+      if (!username) return unauthorized();
+      const body = (await request.json().catch(() => null)) as { text?: unknown } | null;
+      const text = typeof body?.text === "string" ? body.text : "";
+      if (!text.trim() || text.length > DM_MAX) return json(400, { title: "Invalid Request", type: "about:blank", status: 400, detail: `text must be 1 to ${DM_MAX} characters.` });
+      const sender = await standInUser(username);
+      if (sender.id === dm[1]) return json(403, { title: "Forbidden", type: "about:blank", status: 403, detail: "You cannot send a direct message to yourself." });
+      const event = (await sha256(`${sender.id}:${dm[1]}:${text}:${now()}`)).slice(0, 7).reduce((n, b) => n * 256n + BigInt(b), 0n).toString();
+      return json(201, { data: { dm_conversation_id: `${sender.id}-${dm[1]}`, dm_event_id: event } });
     }
 
     if (url.pathname === "/2/oauth2/revoke" && request.method === "POST") return json(200, { revoked: true });

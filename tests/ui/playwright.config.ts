@@ -21,6 +21,8 @@ function localServers() {
         "pnpm exec wrangler dev --port 8801",
         "--var X_CLIENT_ID:x-stand-in --var X_CLIENT_SECRET:x-stand-in-has-no-secret",
         `--var X_AUTHORIZE_URL:${X_STAND_IN}/i/oauth2/authorize --var X_API_URL:${X_STAND_IN}`,
+        // Heat's own account on the stand-in, which sends a barred creator their direct message (spec 6.5).
+        "--var X_DM_TOKEN:standin.eyJ1c2VybmFtZSI6ImhlYXRfZGV2bmV0X2FjY291bnQifQ",
         `--var "RPC_URL:${rpcUrl}"`,
         '--var "KEEPER_KEY:$(cat "$HOME/.config/top-pad/devnet/keeper.json")"',
         '--var "ADMISSION_KEY:$(cat "$HOME/.config/top-pad/devnet/admission.json")"',
