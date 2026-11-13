@@ -52,7 +52,7 @@ const TAX_WINDOW_OPEN = 6009;
 const WINDOW_ALREADY_CLAIMED = 6010;
 const NOT_THE_CREATORS_ACCOUNT = 6013;
 
-const pool = async (address: Address): Promise<ClaimablePool> => claimablePool(address, (await fetchVirtualPool(rpc, address)).data.poolState, quoteMint);
+const pool = async (address: Address): Promise<ClaimablePool> => claimablePool(address, (await fetchVirtualPool(rpc, address)).data.poolState, { mint: quoteMint, tokenProgram: TOKEN_PROGRAM_ADDRESS });
 const lamports = async (owner: Address) => (await rpc.getBalance(owner, { commitment: "confirmed" }).send()).value;
 
 /** A landed transaction as the indexer decodes it. */
@@ -130,7 +130,7 @@ describe.skipIf(!existsSync(keeperFile) || !existsSync(bankFile))("fee claims on
           return null;
         });
         const { signature, claim } = await windowClaimAmong(coinRecord, mint.address);
-        const treasuryAccount = await quoteAccount(treasury, quoteMint);
+        const treasuryAccount = await quoteAccount(treasury, quoteMint, TOKEN_PROGRAM_ADDRESS);
         expect(claim).toMatchObject({ pool: address, heat: true, destination: treasuryAccount, amount: taxed, windowEndedAt: opened.windowEndsAt });
         expect(claim.claimedAt - claim.windowEndedAt).toBeLessThan(10n);
         expect(await quoteChange(signature, treasury)).toBe(taxed);
@@ -183,9 +183,9 @@ describe.skipIf(!existsSync(keeperFile) || !existsSync(bankFile))("fee claims on
         expect(toHeir.creator).toBe(heir.address);
         const oldCreators = await getClaimFeesInstructionAsync({
           window: coinRecord,
-          creatorTokenAccount: await quoteAccount(creator.address, quoteMint),
+          creatorTokenAccount: await quoteAccount(creator.address, quoteMint, TOKEN_PROGRAM_ADDRESS),
           treasuryTokenAccount: treasuryAccount,
-          feeClaimerTokenAccount: await quoteAccount(FEE_CLAIMER_ADDRESS, quoteMint),
+          feeClaimerTokenAccount: await quoteAccount(FEE_CLAIMER_ADDRESS, quoteMint, TOKEN_PROGRAM_ADDRESS),
           config: devnet.configs!.instant,
           pool: address,
           baseVault: toHeir.baseVault,

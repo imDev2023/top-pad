@@ -9,6 +9,19 @@ export { DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS };
 /** Metaplex's token metadata program, which DBC calls to write a coin's name, ticker and URI. */
 export const TOKEN_METADATA_PROGRAM_ADDRESS = "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s" as Address;
 export const TOKEN_PROGRAM_ADDRESS = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" as Address;
+/** Token-2022: an xStock quote's program (ADR 0007), and DAMM v2's position NFTs'. */
+export const TOKEN_2022_PROGRAM_ADDRESS = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb" as Address;
+
+/**
+ * The token program of a config's quote, from DBC's `quote_token_flag` (0 SPL Token, 1 Token-2022), which DBC sets from
+ * the quote mint's owner as it makes the config: every account of the quote a pool's swaps, claims and migration name
+ * is the quote's under that program.
+ */
+export function quoteTokenProgramOf(quoteTokenFlag: number): Address {
+  if (quoteTokenFlag === 0) return TOKEN_PROGRAM_ADDRESS;
+  if (quoteTokenFlag === 1) return TOKEN_2022_PROGRAM_ADDRESS;
+  throw new Error(`DBC's quote token flag ${quoteTokenFlag} names no token program`);
+}
 
 /**
  * Where our programs read DBC 0.2.2's zero-copy accounts: the fee program a pool's config, creator, base mint, accrued

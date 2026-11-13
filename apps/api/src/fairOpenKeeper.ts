@@ -56,7 +56,7 @@ import {
 } from "@top-pad/chain";
 import { fetchVirtualPool } from "@top-pad/clients/dbc";
 import { fetchMaybeLaunch, getSeatDecoder, getSeatSize, LaunchStatus, type Launch } from "@top-pad/clients/fair-open";
-import { fetchMaybeCoinRecord, findCoinRecordPda } from "@top-pad/clients/fee";
+import { fetchMaybeCoinRecord, findCoinRecordPda, TAX_WINDOW_SECONDS } from "@top-pad/clients/fee";
 import { fairOpenRungs, fairOpens, launches, metadataItems, pools, type Db } from "@top-pad/db";
 import type { BlobStore, Bindings, Config, SecretBinding } from "./env";
 import { loadKeeper, type Keeper } from "./keeper";
@@ -496,7 +496,7 @@ export async function taxWindowEnd(cfg: Config, launch: Address): Promise<number
   if (!found.exists || found.data.status !== LaunchStatus.Opened) throw new Error(`${launch} has not opened`);
   const pool = await dbcPoolAddress(found.data.dbcConfig, found.data.mint, found.data.quoteMint);
   const state = await fetchVirtualPool(rpc, pool, limited());
-  return Number(claimablePool(pool, state.data.poolState, found.data.quoteMint).windowEndsAt) * 1000;
+  return Number(state.data.poolState.activationPoint + TAX_WINDOW_SECONDS) * 1000;
 }
 
 /**
@@ -514,9 +514,9 @@ export async function collectTaxShare(cfg: Config, keeperKey: SecretBinding, lau
   const record = await fetchMaybeCoinRecord(rpc, (await findCoinRecordPda({ mint: found.data.mint }))[0], limited());
   if (!record.exists) throw new Error(`${found.data.mint} has no CoinRecord on chain yet`);
   const state = await fetchVirtualPool(rpc, record.data.pool, limited());
-  const pool = claimablePool(record.data.pool, state.data.poolState, found.data.quoteMint);
-  const keeper = await loadKeeper(keeperKey, heat.keys.keeper);
   const quote = await fetchQuoteToken(rpc, found.data.quoteMint);
+  const pool = claimablePool(record.data.pool, state.data.poolState, quote);
+  const keeper = await loadKeeper(keeperKey, heat.keys.keeper);
   const sentAt = Date.now();
   try {
     const instructions = await collectTaxShareInstructions({

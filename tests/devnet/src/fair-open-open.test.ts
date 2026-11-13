@@ -46,6 +46,7 @@ import {
   pushTaxShareInstructions,
   rungAtOrBelow,
   seatOutcome,
+  SOL_QUOTE,
   swapInstructions,
   taxShareOf,
   Tier,
@@ -86,6 +87,9 @@ import {
   signedLadder,
   type ScheduledFairOpen,
 } from "./fairOpen";
+
+/** SOL as a swap names its quote. */
+const SOL_IN = { quoteMint: SOL_QUOTE.mint, quoteTokenProgram: SOL_QUOTE.tokenProgram };
 
 const keys = ["keeper.json", "admission.json", "bank.json"].every((name) => existsSync(join(homedir(), ".config/top-pad/devnet", name)));
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -136,7 +140,7 @@ async function sniperBuys(sniper: KeyPairSigner, mint: Address, count: number, a
   const { value: lifetime } = await rpc.getLatestBlockhash({ commitment: "confirmed" }).send();
   return Promise.all(
     Array.from({ length: count }, async (_, i) => {
-      const buy = await swapInstructions({ config: FAIR_OPEN_CONFIG, pool, mint, quoteMint: devnet.quote.mint, trader: sniper, side: "buy", amountIn: amountIn + BigInt(i), minimumOut: 1n });
+      const buy = await swapInstructions({ config: FAIR_OPEN_CONFIG, pool, mint, ...SOL_IN, trader: sniper, side: "buy", amountIn: amountIn + BigInt(i), minimumOut: 1n });
       const transaction = await signTransactionMessageWithSigners(
         pipe(
           createTransactionMessage({ version: 0 }),
@@ -386,7 +390,7 @@ describe.skipIf(!keys).concurrent("a Fair Open's open on devnet", () => {
         await untilChainTime(activation + 60n);
         const state = (await fetchVirtualPool(rpc, pool, { commitment: "confirmed" })).data.poolState;
         const windowFees = state.partnerQuoteFee - record.potFee;
-        const collect = await send(payer, await collectTaxShareInstructions({ launch: launch.launch, pool: claimablePool(pool, state, devnet.quote.mint), treasury: devnet.keys!.treasury, computeUnitPrice: 0n }), table);
+        const collect = await send(payer, await collectTaxShareInstructions({ launch: launch.launch, pool: claimablePool(pool, state, SOL_QUOTE), treasury: devnet.keys!.treasury, computeUnitPrice: 0n }), table);
         console.log(`the Tax Share's collection: ${collect}, ${await programCompute(collect, FAIR_OPEN_PROGRAM_ADDRESS)} compute units`);
         const [collected] = (await decoded(collect)).taxShares;
         const spentBySeats = [...people.map((p) => seatOutcome(after, p.tier, p.deposit).spent), mine.spent].reduce((x, y) => x + y);

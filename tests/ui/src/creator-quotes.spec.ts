@@ -115,7 +115,7 @@ test("a creator's SOL coin and USDC coin each show in their own quote, and one w
     await snap(page, "quotes-1-both-waiting");
 
     // One click, one wallet request holding a transaction a quote, each paying exactly the amount shown.
-    const usdcAccount = await quoteAccount(creator.address, DEVNET_USDC);
+    const usdcAccount = await quoteAccount(creator.address, DEVNET_USDC, TOKEN_PROGRAM_ADDRESS);
     const rent = (await exists(usdcAccount)) ? 0n : await rpc.getMinimumBalanceForRentExemption(165n).send();
     const [solBefore, usdcBefore, approvals] = [await lamports(creator.address), await tokens(usdcAccount), wallet.approvals.length];
     await page.getByRole("button", { name: `Claim ${inSol(solShare)} and ${inUsdc(usdcShare)}` }).click();

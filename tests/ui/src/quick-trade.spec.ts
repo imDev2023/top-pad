@@ -7,7 +7,7 @@
 // 0.08 a run, most of it the tax the trader pays. No page may report an error.
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { address } from "@solana/kit";
-import { FEE_DENOMINATOR, SNIPER_TAX, CLUSTERS, referralAccountOf } from "@top-pad/chain";
+import { FEE_DENOMINATOR, SNIPER_TAX, CLUSTERS, referralAccountOf, TOKEN_PROGRAM_ADDRESS } from "@top-pad/chain";
 import { Coin, CoinTrades } from "@top-pad/contract";
 import { coinBalance, fundedWallets, landed, sweep } from "@top-pad/tests-devnet/devnet";
 import { launchCoin, newTicker, pageErrors, snap } from "./steps";
@@ -125,7 +125,7 @@ test("a trader buys and sells from the coin's page, seeing the fee before signin
     // Every trade is the indexer's now too, once.
     const { trades } = await api(`/coins/${mint}/trades?limit=50`, CoinTrades);
     expect(trades.filter((t) => t.trader === trader.address)).toHaveLength(4);
-    expect(await referralAccountOf(devnet.keys!.treasury, devnet.quote.mint)).toBe("CrQJCsFgWLETU8vPcavPV6SWyQsVSFJ5RkYxckpXWXu7");
+    expect(await referralAccountOf(devnet.keys!.treasury, devnet.quote.mint, TOKEN_PROGRAM_ADDRESS)).toBe("CrQJCsFgWLETU8vPcavPV6SWyQsVSFJ5RkYxckpXWXu7");
 
     // A visitor with no wallet sees the quote and the fee too, and connects from the panel.
     const visitor = await (await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: "dark" })).newPage();

@@ -19,7 +19,7 @@ import { getTransferSolInstruction } from "@solana-program/system";
 import {
   findAssociatedTokenPda,
   getCloseAccountInstruction,
-  getCreateAssociatedTokenIdempotentInstructionAsync,
+  getCreateAssociatedTokenIdempotentInstruction,
   getSyncNativeInstruction,
 } from "@solana-program/token";
 import { findBaseVaultPda, findQuoteVaultPda, getSwap2Instruction } from "@top-pad/clients/dbc";
@@ -47,6 +47,8 @@ export type Swap = {
   pool: Address;
   mint: Address;
   quoteMint: Address;
+  /** The quote's token program: SPL Token, or Token-2022 for an xStock. */
+  quoteTokenProgram: Address;
   /** Who swaps and pays: DBC's `payer`. */
   trader: TransactionSigner;
   side: "buy" | "sell";
@@ -65,24 +67,29 @@ export type Swap = {
   graduatedPool?: Address | null;
 };
 
-/** A wallet's associated account of a mint: where a swap takes its coins from and pays them to. */
-export async function tokenAccountOf(owner: Address, mint: Address): Promise<Address> {
-  const [account] = await findAssociatedTokenPda({ owner, mint, tokenProgram: TOKEN_PROGRAM_ADDRESS });
+/**
+ * A wallet's associated account of a mint under its token program: where a swap takes its coins or quote from and pays
+ * them to. Every Heat coin is an SPL Token mint; a quote may be Token-2022's.
+ */
+export async function tokenAccountOf(owner: Address, mint: Address, tokenProgram: Address): Promise<Address> {
+  const [account] = await findAssociatedTokenPda({ owner, mint, tokenProgram });
   return account;
 }
 
+/** A wallet's associated account of a Heat coin. */
+export const coinAccountOf = (owner: Address, mint: Address) => tokenAccountOf(owner, mint, TOKEN_PROGRAM_ADDRESS);
+
 /** Heat's referral account (spec 4): the treasury's associated account of the quote, where its Platform Fee lands too. */
-export const referralAccountOf = (treasury: Address, quoteMint: Address) => tokenAccountOf(treasury, quoteMint);
+export const referralAccountOf = (treasury: Address, quoteMint: Address, quoteTokenProgram: Address) => tokenAccountOf(treasury, quoteMint, quoteTokenProgram);
 
 /**
  * The instructions of one exact-in swap: the trader's coin and quote accounts opened if missing, SOL wrapped for a buy,
  * the swap, and the wrapped SOL account closed again so what is left (a sell's proceeds) returns as SOL.
  */
 export async function swapInstructions(swap: Swap): Promise<Instruction[]> {
-  const { trader, mint, quoteMint } = swap;
-  const tokens = { tokenProgram: TOKEN_PROGRAM_ADDRESS };
-  const [quoteAccount] = await findAssociatedTokenPda({ owner: trader.address, mint: quoteMint, ...tokens });
-  const [coinAccount] = await findAssociatedTokenPda({ owner: trader.address, mint, ...tokens });
+  const { trader, mint, quoteMint, quoteTokenProgram } = swap;
+  const quoteAccount = await tokenAccountOf(trader.address, quoteMint, quoteTokenProgram);
+  const coinAccount = await coinAccountOf(trader.address, mint);
   const wrapped = quoteMint === WSOL_MINT;
   const buy = swap.side === "buy";
   const swapInstruction = swap.graduatedPool
@@ -90,6 +97,7 @@ export async function swapInstructions(swap: Swap): Promise<Instruction[]> {
         pool: swap.graduatedPool,
         mint,
         quoteMint,
+        quoteTokenProgram,
         trader,
         quoteAccount,
         coinAccount,
@@ -100,11 +108,11 @@ export async function swapInstructions(swap: Swap): Promise<Instruction[]> {
       })
     : await curveSwapInstruction(swap, quoteAccount, coinAccount);
   return [
-    await getCreateAssociatedTokenIdempotentInstructionAsync({ payer: trader, owner: trader.address, mint: quoteMint }),
+    getCreateAssociatedTokenIdempotentInstruction({ payer: trader, ata: quoteAccount, owner: trader.address, mint: quoteMint, tokenProgram: quoteTokenProgram }),
     ...(buy && wrapped
       ? [getTransferSolInstruction({ source: trader, destination: quoteAccount, amount: swap.amountIn }), getSyncNativeInstruction({ account: quoteAccount })]
       : []),
-    await getCreateAssociatedTokenIdempotentInstructionAsync({ payer: trader, owner: trader.address, mint }),
+    getCreateAssociatedTokenIdempotentInstruction({ payer: trader, ata: coinAccount, owner: trader.address, mint, tokenProgram: TOKEN_PROGRAM_ADDRESS }),
     swapInstruction,
     ...(wrapped ? [getCloseAccountInstruction({ account: quoteAccount, destination: trader.address, owner: trader })] : []),
   ];
@@ -125,7 +133,7 @@ async function curveSwapInstruction(swap: Swap, quoteAccount: Address, coinAccou
     quoteMint,
     payer: swap.trader,
     tokenBaseProgram: TOKEN_PROGRAM_ADDRESS,
-    tokenQuoteProgram: TOKEN_PROGRAM_ADDRESS,
+    tokenQuoteProgram: swap.quoteTokenProgram,
     eventAuthority: await eventAuthorityAddress(DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS),
     program: DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS,
     referralTokenAccount: swap.referralAccount ?? undefined,

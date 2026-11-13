@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { address, decompileTransactionMessage, getAddressDecoder, getCompiledTransactionMessageDecoder, type Address } from "@solana/kit";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { CLUSTERS, DEVNET_USDC, FEE_PROGRAM_ADDRESS, positionAddresses, quoteAccount, WSOL_MINT } from "@top-pad/chain";
+import { CLUSTERS, DEVNET_USDC, FEE_PROGRAM_ADDRESS, positionAddresses, quoteAccount, TOKEN_PROGRAM_ADDRESS, WSOL_MINT } from "@top-pad/chain";
 import {
   getPoolDecoder,
   getPoolEncoder,
@@ -289,9 +289,9 @@ describe("a creator's claim", () => {
     const [inUsdc, inSol] = prepared.transactions.map((tx) => decompileTransactionMessage(getCompiledTransactionMessageDecoder().decode(decode(tx).messageBytes)));
     const named = (message: typeof inUsdc) => (message!.instructions as readonly { accounts?: readonly { address: string }[] }[]).flatMap((ix) => (ix.accounts ?? []).map((a) => a.address));
     // The USDC claim pays the creator's USDC account and leaves it open; the SOL claim unwraps into the wallet.
-    expect(named(inUsdc)).toEqual(expect.arrayContaining([dollar.pool, await quoteAccount(WALLET, DEVNET_USDC)]));
+    expect(named(inUsdc)).toEqual(expect.arrayContaining([dollar.pool, await quoteAccount(WALLET, DEVNET_USDC, TOKEN_PROGRAM_ADDRESS)]));
     expect(named(inUsdc)).not.toContain(ember.pool);
-    expect(named(inSol)).toEqual(expect.arrayContaining([ember.pool, await quoteAccount(WALLET, WSOL_MINT)]));
+    expect(named(inSol)).toEqual(expect.arrayContaining([ember.pool, await quoteAccount(WALLET, WSOL_MINT, TOKEN_PROGRAM_ADDRESS)]));
     expect(named(inSol)).not.toContain(dollar.pool);
     expect(inUsdc!.instructions.at(-1)!.programAddress).toBe(FEE_PROGRAM_ADDRESS);
     expect(inSol!.instructions.at(-1)!.programAddress).not.toBe(FEE_PROGRAM_ADDRESS);

@@ -11,7 +11,7 @@ import {
   type Signature,
 } from "@solana/kit";
 import { and, eq, isNull, lt, sql } from "drizzle-orm";
-import { claimablePool, windowClaimMessage, type ClaimablePool } from "@top-pad/chain";
+import { claimablePool, quoteTokenProgramOf, windowClaimMessage, type ClaimablePool, type QuoteToken } from "@top-pad/chain";
 import { fetchPoolConfig, fetchVirtualPool } from "@top-pad/clients/dbc";
 import { fetchAllMaybeCoinRecord, fetchMaybeCoinRecord, findCoinRecordPda } from "@top-pad/clients/fee";
 import { coins, windowClaims, type Db } from "@top-pad/db";
@@ -52,15 +52,15 @@ export async function coinWindow(cfg: Config, mint: Address): Promise<{ pool: Cl
   if (!record.exists) return null;
   const pool = await fetchVirtualPool(rpc, record.data.pool, limited());
   // The coin's quote is its config's, SOL or another (ADR 0007); a config never changes, so each is read once.
-  const quoteMint = await quoteMintOfConfig(rpc, pool.data.poolState.config);
-  return { pool: claimablePool(record.data.pool, pool.data.poolState, quoteMint), windowClaimed: record.data.windowClaimed };
+  const quote = await quoteOfConfig(rpc, pool.data.poolState.config);
+  return { pool: claimablePool(record.data.pool, pool.data.poolState, quote), windowClaimed: record.data.windowClaimed };
 }
 
-const configQuotes = new Map<string, Promise<Address>>();
-function quoteMintOfConfig(rpc: ReturnType<typeof createSolanaRpc>, config: Address): Promise<Address> {
+const configQuotes = new Map<string, Promise<QuoteToken>>();
+function quoteOfConfig(rpc: ReturnType<typeof createSolanaRpc>, config: Address): Promise<QuoteToken> {
   let asked = configQuotes.get(config);
   if (!asked) {
-    asked = fetchPoolConfig(rpc, config, limited()).then((c) => c.data.quoteMint);
+    asked = fetchPoolConfig(rpc, config, limited()).then(({ data }) => ({ mint: data.quoteMint, tokenProgram: quoteTokenProgramOf(data.quoteTokenFlag) }));
     asked.catch(() => configQuotes.delete(config));
     configQuotes.set(config, asked);
   }

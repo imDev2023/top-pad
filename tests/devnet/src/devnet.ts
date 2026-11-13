@@ -30,7 +30,7 @@ import {
 } from "@solana/kit";
 import { getTransferSolInstruction } from "@solana-program/system";
 import { fetchSysvarClock } from "@solana/sysvars";
-import { CLUSTERS, dbcPoolAddress, FEE_PROGRAM_ADDRESS, instantLaunchInstructions, swapInstructions } from "@top-pad/chain";
+import { CLUSTERS, dbcPoolAddress, FEE_PROGRAM_ADDRESS, fetchQuoteToken, instantLaunchInstructions, swapInstructions, type QuoteToken } from "@top-pad/chain";
 import { fetchRawTransaction, type RawTransaction } from "@top-pad/indexer";
 
 export const rpcUrl = process.env.DEVNET_RPC_URL || "https://api.devnet.solana.com";
@@ -156,7 +156,20 @@ export async function swap(
   quoteMint: Address = devnet.quote.mint,
 ): Promise<string> {
   const pool = await dbcPoolAddress(config, mint, quoteMint);
-  return send(trader, await swapInstructions({ config, pool, mint, quoteMint, trader, side, amountIn, minimumOut: 1n }));
+  const { tokenProgram: quoteTokenProgram } = await quoteTokenOf(quoteMint);
+  return send(trader, await swapInstructions({ config, pool, mint, quoteMint, quoteTokenProgram, trader, side, amountIn, minimumOut: 1n }));
+}
+
+const quoteTokens = new Map<Address, Promise<QuoteToken>>();
+/** A quote's mint and token program, its mint account's owner, read once a run. */
+export function quoteTokenOf(mint: Address): Promise<QuoteToken> {
+  let found = quoteTokens.get(mint);
+  if (!found) {
+    found = fetchQuoteToken(rpc, mint);
+    found.catch(() => quoteTokens.delete(mint));
+    quoteTokens.set(mint, found);
+  }
+  return found;
 }
 
 /** The coins a wallet holds of a mint, in raw units. */

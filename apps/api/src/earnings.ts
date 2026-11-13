@@ -24,6 +24,7 @@ import {
   type FeeClaim,
   type GraduatedPosition,
   type HeatCluster,
+  type QuoteToken,
 } from "@top-pad/chain";
 import { fetchAllMaybePool, fetchAllMaybePosition } from "@top-pad/clients/damm-v2";
 import { getVirtualPoolDecoder, getVirtualPoolSize } from "@top-pad/clients/dbc";
@@ -85,7 +86,7 @@ async function heldPools(rpc: Rpc, configs: HeatConfigs, wallet: KitAddress): Pr
   return found.flatMap(({ pubkey, account }) => {
     const state = decoder.decode(base64.encode(account.data[0])).poolState;
     const config = configs.get(state.config);
-    return config ? [claimablePool(pubkey, state, config.quote.mint)] : [];
+    return config ? [claimablePool(pubkey, state, config.quote)] : [];
   });
 }
 
@@ -111,9 +112,9 @@ const partnerFeesOf = (coin: { pool: ClaimablePool; windowClaimed: boolean }) =>
 
 /**
  * The creator's positions in the graduated pools of these coins whose NFT `wallet` holds, as recorded at Graduation,
- * each with what it has accrued in its coin's quote, read from the chain. `quotes` names each coin's quote mint.
+ * each with what it has accrued in its coin's quote, read from the chain. `quotes` names each coin's quote.
  */
-async function lpPositions(rpc: Rpc, db: Db, wallet: string, quotes: ReadonlyMap<string, KitAddress>): Promise<Map<string, { position: GraduatedPosition; fees: bigint }>> {
+async function lpPositions(rpc: Rpc, db: Db, wallet: string, quotes: ReadonlyMap<string, QuoteToken>): Promise<Map<string, { position: GraduatedPosition; fees: bigint }>> {
   const mints = [...quotes.keys()];
   const rows = mints.length ? await db.select().from(graduations).where(inArray(graduations.mint, mints)) : [];
   const held = rows.filter((g) => g.creatorPositionOwner === wallet);
@@ -134,8 +135,9 @@ async function lpPositions(rpc: Rpc, db: Db, wallet: string, quotes: ReadonlyMap
   return found;
 }
 
-/** Each held coin's quote mint, by its mint. */
-const quotesOf = (held: { pool: ClaimablePool }[]) => new Map(held.map((h) => [h.pool.mint as string, h.pool.quoteMint]));
+/** Each held coin's quote, by its mint. */
+const quotesOf = (held: { pool: ClaimablePool }[]) =>
+  new Map<string, QuoteToken>(held.map((h) => [h.pool.mint as string, { mint: h.pool.quoteMint, tokenProgram: h.pool.quoteTokenProgram }]));
 
 /**
  * What every claim has paid `wallet` so far, by coin, with the quote each was paid in (its pool's): curve earnings from

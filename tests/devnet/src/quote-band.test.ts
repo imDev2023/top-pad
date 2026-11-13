@@ -20,6 +20,7 @@ import {
   instantLaunchInstructions,
   outOfBand,
   swapInstructions,
+  TOKEN_PROGRAM_ADDRESS,
   type HeatCluster,
   type QuotePrice,
 } from "@top-pad/chain";
@@ -100,7 +101,7 @@ describe.skipIf(!ready)("the band job on devnet", () => {
     };
     await send(creator, (await instantLaunchInstructions(launch)).filter((ix) => ix.programAddress !== FEE_PROGRAM_ADDRESS));
     const pool = await dbcPoolAddress(before.instantConfig, mint.address, DEVNET_USDC);
-    const buy = await send(creator, await swapInstructions({ config: before.instantConfig, pool, mint: mint.address, quoteMint: DEVNET_USDC, trader: creator, side: "buy", amountIn: 10_000n, minimumOut: 1n }));
+    const buy = await send(creator, await swapInstructions({ config: before.instantConfig, pool, mint: mint.address, quoteMint: DEVNET_USDC, quoteTokenProgram: TOKEN_PROGRAM_ADDRESS, trader: creator, side: "buy", amountIn: 10_000n, minimumOut: 1n }));
     const coins = await coinBalance(creator.address, mint.address);
     console.log(`A coin ${mint.address} on the old Instant config ${before.instantConfig} took a buy of 0.01 USDC for ${coins} raw coins: ${buy}`);
     expect(coins).toBeGreaterThan(0n);

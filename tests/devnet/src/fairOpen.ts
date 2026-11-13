@@ -53,8 +53,9 @@ import {
   potCapOf,
   pushInstructions,
   pushTaxShareInstructions,
-  PUSH_SEATS,
+  pushSeats,
   SEAT_LAYOUT,
+  SOL_QUOTE,
   swapInstructions,
   TOKEN_PROGRAM_ADDRESS,
   closeNonceInstruction,
@@ -197,13 +198,17 @@ export async function creationSignedNow(c: Creation, extra: Instruction[] = []):
   return getBase64EncodedWireTransaction(transaction);
 }
 
-/** Pushes seats their coins and refund, `PUSH_SEATS` a transaction, our keeper paying; the push signatures. */
-export async function pushAll(launch: Address, mint: Address, seats: { seat: Address; wallet: Address }[]): Promise<string[]> {
+/**
+ * Pushes seats their coins and refund, as many a transaction as fit in the launch's quote (`pushSeats`), our keeper
+ * paying; the push signatures.
+ */
+export async function pushAll(launch: Address, mint: Address, seats: { seat: Address; wallet: Address }[], quote?: QuoteToken): Promise<string[]> {
   const payer = await keeper();
   const { address, addresses } = await lookupTable();
   const signatures: string[] = [];
-  for (let i = 0; i < seats.length; i += PUSH_SEATS) {
-    const instructions = await pushInstructions({ launch, mint, payer, seats: seats.slice(i, i + PUSH_SEATS), computeUnitPrice: 0n });
+  const perPush = pushSeats(quote);
+  for (let i = 0; i < seats.length; i += perPush) {
+    const instructions = await pushInstructions({ launch, mint, payer, seats: seats.slice(i, i + perPush), computeUnitPrice: 0n, quote });
     signatures.push(await send(payer, instructions, { [address]: addresses }));
   }
   return signatures;
@@ -223,7 +228,7 @@ export async function sellAll(wallet: KeyPairSigner, mint: Address) {
   if (coins === 0n) return;
   const pool = await dbcPoolAddress(devnet.configs!.fairOpen, mint, devnet.quote.mint);
   const [coinAccount] = await findAssociatedTokenPda({ owner: wallet.address, mint, tokenProgram: TOKEN_PROGRAM_ADDRESS });
-  const sell = await swapInstructions({ config: devnet.configs!.fairOpen, pool, mint, quoteMint: devnet.quote.mint, trader: wallet, side: "sell", amountIn: coins, minimumOut: 1n });
+  const sell = await swapInstructions({ config: devnet.configs!.fairOpen, pool, mint, quoteMint: SOL_QUOTE.mint, quoteTokenProgram: SOL_QUOTE.tokenProgram, trader: wallet, side: "sell", amountIn: coins, minimumOut: 1n });
   await send(wallet, [...sell, getCloseAccountInstruction({ account: coinAccount, destination: wallet.address, owner: wallet })]);
 }
 
@@ -416,7 +421,7 @@ export async function settleOpened(launch: Address): Promise<Settled> {
   if (creatorSeat) settled.lock = await send(payer, await lockCreatorInstructions({ launch, creator, seat: creatorSeat.address, mint, pool, computeUnitPrice: 0n, quote }), table);
   if (!found.data.taxCollected) {
     const state = (await fetchVirtualPool(rpc, pool, { commitment: "confirmed" })).data.poolState;
-    const claimable = claimablePool(pool, state, quoteMint);
+    const claimable = claimablePool(pool, state, quote);
     for (let now = await chainTime(); now < claimable.windowEndsAt; now = await chainTime()) {
       await new Promise((r) => setTimeout(r, Math.min(Number(claimable.windowEndsAt - now) * 1_000, 20_000) + 500));
     }

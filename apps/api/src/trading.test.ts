@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { address, decompileTransactionMessage, getAddressDecoder, getAddressEncoder, getCompiledTransactionMessageDecoder, type Address } from "@solana/kit";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { CLUSTERS, DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS, referralAccountOf, tokenAccountOf } from "@top-pad/chain";
+import { CLUSTERS, coinAccountOf, DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS, referralAccountOf, TOKEN_PROGRAM_ADDRESS } from "@top-pad/chain";
 import {
   getPoolConfigDecoder,
   getPoolConfigEncoder,
@@ -68,7 +68,7 @@ beforeEach(async () => {
   vi.stubGlobal("fetch", fakes.fetch);
   // Heat's referral account, the treasury's account of wrapped SOL, which a swap names only once it exists.
   const treasury = devnet.keys!.treasury;
-  fakes.accounts.set(await referralAccountOf(treasury, devnet.quote.mint), tokenAccount(treasury, devnet.quote.mint, 0n));
+  fakes.accounts.set(await referralAccountOf(treasury, devnet.quote.mint, TOKEN_PROGRAM_ADDRESS), tokenAccount(treasury, devnet.quote.mint, 0n));
 });
 afterEach(() => vi.unstubAllGlobals());
 
@@ -285,7 +285,7 @@ describe("a quick trade's quote", () => {
     const named = (swap!.accounts ?? []).map((a) => a.address);
     expect(named[1]).toBe(dammPool);
     // Heat's referral account takes Meteora's referral share on the graduated pool too.
-    expect(named).toContain(await referralAccountOf(devnet.keys!.treasury, devnet.quote.mint));
+    expect(named).toContain(await referralAccountOf(devnet.keys!.treasury, devnet.quote.mint, TOKEN_PROGRAM_ADDRESS));
     expect(getDammSwap2InstructionDataDecoder().decode(swap!.data!).params).toEqual({ amount0: SOL / 10n, amount1: BigInt(quote.minimumOut), swapMode: 0 });
   });
 
@@ -336,7 +336,7 @@ describe("a quick trade", () => {
     expect(message.feePayer.address).toBe(wallet);
     expect(params).toEqual({ amount0: SOL / 10n, amount1: BigInt(quote.minimumOut), swapMode: 1 });
     expect(accounts[2]).toBe(POOL);
-    expect(accounts[12]).toBe(await referralAccountOf(devnet.keys!.treasury, devnet.quote.mint));
+    expect(accounts[12]).toBe(await referralAccountOf(devnet.keys!.treasury, devnet.quote.mint, TOKEN_PROGRAM_ADDRESS));
   });
 
   it("sells exactly the coins asked, and refuses more than the wallet holds", async () => {
@@ -344,7 +344,7 @@ describe("a quick trade", () => {
     chainAt(600, poolAccount({ quoteReserve: 98_750_000n, sqrtPrice: 35_662_000_000_000_000n }));
     const wallet = random();
     fakes.accounts.set(wallet, { owner: "11111111111111111111111111111111", data: new Uint8Array(), lamports: SOL / 100n });
-    fakes.accounts.set(await tokenAccountOf(wallet, MINT), tokenAccount(wallet, MINT, 1_000_000_000_000n));
+    fakes.accounts.set(await coinAccountOf(wallet, MINT), tokenAccount(wallet, MINT, 1_000_000_000_000n));
     const res = await swapOf({ side: "sell", amount: "1000000000000", slippageBps: 100, wallet });
     expect(res.status).toBe(200);
     const { params } = dbcSwap(PreparedSwap.parse(await res.json()).transaction);
@@ -369,7 +369,7 @@ describe("a quick trade", () => {
   it("says what a wallet holds to trade with", async () => {
     const wallet = random();
     fakes.accounts.set(wallet, { owner: "11111111111111111111111111111111", data: new Uint8Array(), lamports: 123n });
-    fakes.accounts.set(await tokenAccountOf(wallet, MINT), tokenAccount(wallet, MINT, 456n));
+    fakes.accounts.set(await coinAccountOf(wallet, MINT), tokenAccount(wallet, MINT, 456n));
     const holdings = Holdings.parse(await (await request(`/coins/${MINT}/holdings/${wallet}`)).json());
     expect(holdings).toEqual({ wallet, sol: "123", quote: "123", coins: "456" });
     // A wallet that has never held the coin.

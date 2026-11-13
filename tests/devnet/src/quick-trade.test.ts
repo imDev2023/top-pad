@@ -18,6 +18,7 @@ import {
   referralAccountOf,
   SWAP_COMPUTE_UNITS,
   swapMessage,
+  TOKEN_PROGRAM_ADDRESS,
   type InstantLaunch,
 } from "@top-pad/chain";
 import { EVT_SWAP3_EVENT_DISCRIMINATOR, fetchPoolConfig, fetchVirtualPool, parseEvtSwap3Event, type EvtSwap3Event } from "@top-pad/clients/dbc";
@@ -82,7 +83,7 @@ describe.skipIf(!existsSync(keeperFile) || !existsSync(bankFile))("quick buy and
         console.log(`launched ${mint.address}, pool ${pool}`);
         const { data: config } = await fetchPoolConfig(rpc, devnet.configs!.instant);
         const opened = (await fetchVirtualPool(rpc, pool)).data.poolState.activationPoint;
-        const referral = await referralAccountOf(treasury, quoteMint);
+        const referral = await referralAccountOf(treasury, quoteMint, TOKEN_PROGRAM_ADDRESS);
 
         /** A quick trade at `second` after the open, checked against its quote. */
         async function quick(who: KeyPairSigner, second: number, side: "buy" | "sell", amount: () => Promise<bigint>) {
@@ -100,6 +101,7 @@ describe.skipIf(!existsSync(keeperFile) || !existsSync(bankFile))("quick buy and
               pool,
               mint: mint.address,
               quoteMint,
+              quoteTokenProgram: TOKEN_PROGRAM_ADDRESS,
               trader: who,
               side,
               amountIn,

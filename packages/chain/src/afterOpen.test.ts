@@ -23,7 +23,7 @@ import {
   TAX_SHARE_SEATS_IN_TOKENS,
   taxShareOf,
 } from "./afterOpen";
-import { ASSOCIATED_TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
+import { ASSOCIATED_TOKEN_PROGRAM_ADDRESS, TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import { TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import { DEVNET_XSTOCK_STAND_IN } from "./quotes";
 import { CLUSTERS } from "./index";
@@ -98,6 +98,7 @@ describe("the Tax Share", () => {
       config: await random(),
       mint: await random(),
       quoteMint: XSTOCK.mint,
+      quoteTokenProgram: XSTOCK.tokenProgram,
       baseVault: await random(),
       quoteVault: await random(),
       creator: await random(),
@@ -120,6 +121,7 @@ describe("the Tax Share", () => {
       config: devnet.configs!.fairOpen,
       mint: await random(),
       quoteMint: devnet.quote.mint,
+      quoteTokenProgram: TOKEN_PROGRAM_ADDRESS,
       baseVault: await random(),
       quoteVault: await random(),
       creator: await random(),

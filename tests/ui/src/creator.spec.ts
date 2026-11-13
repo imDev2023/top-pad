@@ -5,7 +5,7 @@
 // wallet, the next claim pays the new holder. Real devnet SOL: about 0.1 a run. No page may report an error.
 import { expect, test, type Page } from "@playwright/test";
 import { address, type Address } from "@solana/kit";
-import { CLUSTERS, creatorShare, DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS, eventAuthorityAddress, quoteAccount } from "@top-pad/chain";
+import { CLUSTERS, creatorShare, DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS, eventAuthorityAddress, quoteAccount, TOKEN_PROGRAM_ADDRESS } from "@top-pad/chain";
 import { fetchVirtualPool, getTransferPoolCreatorInstruction } from "@top-pad/clients/dbc";
 import { Coin, CreatorEarnings } from "@top-pad/contract";
 import { fundedWallets, rpc, send, swap, sweep } from "@top-pad/tests-devnet/devnet";
@@ -42,7 +42,7 @@ test("the window's tax reaches the treasury at 60 s, and the creator claims exac
   const errors = pageErrors(page);
   await fetch(`${TARGET.api}/indexer`);
   const [creator, trader, heir] = await fundedWallets(40_000_000n, 250_000_000n, 10_000_000n);
-  const treasuryAccount = await quoteAccount(devnet.keys!.treasury, devnet.quote.mint);
+  const treasuryAccount = await quoteAccount(devnet.keys!.treasury, devnet.quote.mint, TOKEN_PROGRAM_ADDRESS);
   const treasuryBefore = await tokens(treasuryAccount);
 
   const { mint } = await launchCoin(page, creator, { name: "Heat Earnings", ticker: newTicker() });

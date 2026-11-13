@@ -1,6 +1,7 @@
 // The fee program's claims (spec 4, 5.2): the window claim, which Heat's keeper sends the moment a coin's Tax window
 // ends, and the claims of Creator Earnings, which a creator's page puts in one transaction. Each names DBC's accounts for
-// the pool and each payee's associated quote account, and DBC pays straight from the pool into them.
+// the pool and each payee's associated quote account, under the quote's own token program (Token-2022 for an xStock), and
+// DBC pays straight from the pool into them.
 import {
   appendTransactionMessageInstructions,
   createTransactionMessage,
@@ -14,7 +15,7 @@ import {
   type TransactionSigner,
 } from "@solana/kit";
 import { getSetComputeUnitLimitInstruction, getSetComputeUnitPriceInstruction } from "@solana-program/compute-budget";
-import { findAssociatedTokenPda, getCloseAccountInstruction, getCreateAssociatedTokenIdempotentInstructionAsync } from "@solana-program/token";
+import { findAssociatedTokenPda, getCloseAccountInstruction, getCreateAssociatedTokenIdempotentInstruction } from "@solana-program/token";
 import { getTransferPoolCreatorInstruction, type PoolState } from "@top-pad/clients/dbc";
 import {
   findCoinRecordPda,
@@ -25,6 +26,7 @@ import {
   TAX_WINDOW_SECONDS,
 } from "@top-pad/clients/fee";
 import { DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS, eventAuthorityAddress, TOKEN_PROGRAM_ADDRESS } from "./dbc";
+import type { QuoteToken } from "./fairOpen";
 import { creatorLpFeeClaimInstructions, type GraduatedPosition } from "./graduation";
 import { FEE_CLAIMER_ADDRESS, FEE_PROGRAM_ADDRESS, WSOL_MINT } from "./index";
 
@@ -34,6 +36,8 @@ export type ClaimablePool = {
   config: Address;
   mint: Address;
   quoteMint: Address;
+  /** The quote's token program: SPL Token, or Token-2022 for an xStock. */
+  quoteTokenProgram: Address;
   baseVault: Address;
   quoteVault: Address;
   /** Whoever holds the pool's DBC creator role now: the one a claim pays the creator's half to. */
@@ -45,12 +49,13 @@ export type ClaimablePool = {
 };
 
 /** A pool's claimable state, from DBC's `VirtualPool` account and the quote its config trades against. */
-export function claimablePool(pool: Address, state: PoolState, quoteMint: Address): ClaimablePool {
+export function claimablePool(pool: Address, state: PoolState, quote: QuoteToken): ClaimablePool {
   return {
     pool,
     config: state.config,
     mint: state.baseMint,
-    quoteMint,
+    quoteMint: quote.mint,
+    quoteTokenProgram: quote.tokenProgram,
     baseVault: state.baseVault,
     quoteVault: state.quoteVault,
     creator: state.creator,
@@ -77,10 +82,16 @@ export const LP_FEE_CLAIM_COMPUTE_UNITS = 70_000;
 /** What a transaction's other instructions take: up to two quote accounts opened, about 20,000 each, and one closed. */
 const ACCOUNT_COMPUTE_UNITS = 50_000;
 
-/** `owner`'s associated account for the pool's quote, where its share is paid. */
-export async function quoteAccount(owner: Address, quoteMint: Address): Promise<Address> {
-  const [account] = await findAssociatedTokenPda({ owner, mint: quoteMint, tokenProgram: TOKEN_PROGRAM_ADDRESS });
+/** `owner`'s associated account of a quote under its token program, where its share is paid. */
+export async function quoteAccount(owner: Address, quoteMint: Address, tokenProgram: Address): Promise<Address> {
+  const [account] = await findAssociatedTokenPda({ owner, mint: quoteMint, tokenProgram });
   return account;
+}
+
+/** `owner`'s associated account of the pool's quote, made with `payer`'s rent if it is missing; nothing if it exists. */
+async function openQuoteAccount(payer: TransactionSigner, owner: Address, p: { quoteMint: Address; quoteTokenProgram: Address }): Promise<Instruction> {
+  const ata = await quoteAccount(owner, p.quoteMint, p.quoteTokenProgram);
+  return getCreateAssociatedTokenIdempotentInstruction({ payer, ata, owner, mint: p.quoteMint, tokenProgram: p.quoteTokenProgram });
 }
 
 /**
@@ -96,8 +107,8 @@ async function dbcAccounts(p: ClaimablePool) {
     mint: p.mint,
     quoteMint: p.quoteMint,
     tokenBaseProgram: TOKEN_PROGRAM_ADDRESS,
-    tokenQuoteProgram: TOKEN_PROGRAM_ADDRESS,
-    feeClaimerTokenAccount: await quoteAccount(FEE_CLAIMER_ADDRESS, p.quoteMint),
+    tokenQuoteProgram: p.quoteTokenProgram,
+    feeClaimerTokenAccount: await quoteAccount(FEE_CLAIMER_ADDRESS, p.quoteMint, p.quoteTokenProgram),
     eventAuthority: await eventAuthorityAddress(FEE_PROGRAM_ADDRESS),
     program: FEE_PROGRAM_ADDRESS,
   };
@@ -118,13 +129,13 @@ export type WindowClaim = {
 /** A window claim's transaction: the treasury's and the fee claimer's quote accounts opened if missing, then the claim. */
 export async function windowClaimInstructions(w: WindowClaim): Promise<Instruction[]> {
   const { pool, treasury, payer } = w;
-  const accounts = { ...(await dbcAccounts(pool)), treasuryTokenAccount: await quoteAccount(treasury, pool.quoteMint) };
+  const accounts = { ...(await dbcAccounts(pool)), treasuryTokenAccount: await quoteAccount(treasury, pool.quoteMint, pool.quoteTokenProgram) };
   const claim = w.heat ? await getClaimWindowFeesInstructionAsync(accounts) : await getClaimUnlistedWindowFeesInstructionAsync({ ...accounts, payer });
   return [
     getSetComputeUnitLimitInstruction({ units: WINDOW_CLAIM_COMPUTE_UNITS + ACCOUNT_COMPUTE_UNITS }),
     ...priced(w.computeUnitPrice),
-    await getCreateAssociatedTokenIdempotentInstructionAsync({ payer, owner: treasury, mint: pool.quoteMint }),
-    await getCreateAssociatedTokenIdempotentInstructionAsync({ payer, owner: FEE_CLAIMER_ADDRESS, mint: pool.quoteMint }),
+    await openQuoteAccount(payer, treasury, pool),
+    await openQuoteAccount(payer, FEE_CLAIMER_ADDRESS, pool),
     claim,
   ];
 }
@@ -150,12 +161,13 @@ export type CreatorClaim = {
  */
 export async function creatorClaimInstructions(c: CreatorClaim): Promise<Instruction[]> {
   const { creator, claims, treasury } = c;
-  const quoteMint = claims[0]?.pool.quoteMint;
-  if (!quoteMint) throw new Error("a creator's claim needs at least one pool");
-  if (claims.some((x) => x.pool.quoteMint !== quoteMint)) throw new Error("a creator's claim pays one quote");
+  const first = claims[0]?.pool;
+  if (!first) throw new Error("a creator's claim needs at least one pool");
+  const { quoteMint, quoteTokenProgram } = first;
+  if (claims.some((x) => x.pool.quoteMint !== quoteMint || x.pool.quoteTokenProgram !== quoteTokenProgram)) throw new Error("a creator's claim pays one quote");
   if (claims.some((x) => x.pool.creator !== creator.address)) throw new Error("a creator claims only pools whose creator role they hold");
-  const creatorTokenAccount = await quoteAccount(creator.address, quoteMint);
-  const treasuryTokenAccount = await quoteAccount(treasury, quoteMint);
+  const creatorTokenAccount = await quoteAccount(creator.address, quoteMint, quoteTokenProgram);
+  const treasuryTokenAccount = await quoteAccount(treasury, quoteMint, quoteTokenProgram);
   const instructions: Instruction[] = [];
   for (const claim of claims) {
     const window = claim.heat ? (await findCoinRecordPda({ mint: claim.pool.mint }))[0] : (await findWindowClaimPda({ pool: claim.pool.pool }))[0];
@@ -163,7 +175,8 @@ export async function creatorClaimInstructions(c: CreatorClaim): Promise<Instruc
       await getClaimFeesInstructionAsync({ ...(await dbcAccounts(claim.pool)), window, creatorTokenAccount, treasuryTokenAccount, maxAmount: claim.maxAmount }),
     );
     if (claim.lpPosition) {
-      if (claim.lpPosition.mint !== claim.pool.mint || claim.lpPosition.quoteMint !== quoteMint) throw new Error("an LP position of another coin");
+      const p = claim.lpPosition;
+      if (p.mint !== claim.pool.mint || p.quoteMint !== quoteMint || p.quoteTokenProgram !== quoteTokenProgram) throw new Error("an LP position of another coin");
       instructions.push(...(await creatorLpFeeClaimInstructions({ position: claim.lpPosition, creator })));
     }
   }
@@ -172,7 +185,7 @@ export async function creatorClaimInstructions(c: CreatorClaim): Promise<Instruc
   return [
     getSetComputeUnitLimitInstruction({ units: claims.length * FEE_CLAIM_COMPUTE_UNITS + lpClaims * LP_FEE_CLAIM_COMPUTE_UNITS + ACCOUNT_COMPUTE_UNITS }),
     ...priced(c.computeUnitPrice),
-    await getCreateAssociatedTokenIdempotentInstructionAsync({ payer: creator, owner: creator.address, mint: quoteMint }),
+    await openQuoteAccount(creator, creator.address, first),
     ...instructions,
     ...(unwrap ? [getCloseAccountInstruction({ account: creatorTokenAccount, destination: creator.address, owner: creator })] : []),
   ];

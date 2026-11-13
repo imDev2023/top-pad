@@ -116,7 +116,7 @@ export async function collectTaxShareInstructions(c: {
     feeConfig: (await findFeeConfigPda())[0],
     coinRecord: (await findCoinRecordPda({ mint: p.mint }))[0],
     feeClaimer: FEE_CLAIMER_ADDRESS,
-    feeClaimerTokenAccount: quote ? await quoteTokenAccount(FEE_CLAIMER_ADDRESS, quote) : await quoteAccount(FEE_CLAIMER_ADDRESS, p.quoteMint),
+    feeClaimerTokenAccount: await quoteAccount(FEE_CLAIMER_ADDRESS, p.quoteMint, p.quoteTokenProgram),
     poolAuthority: DBC_POOL_AUTHORITY,
     dbcConfig: p.config,
     pool: p.pool,

@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { address, decompileTransactionMessage, getAddressDecoder, getCompiledTransactionMessageDecoder, type Address } from "@solana/kit";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { CLUSTERS, FEE_PROGRAM_ADDRESS, quoteAccount } from "@top-pad/chain";
+import { CLUSTERS, FEE_PROGRAM_ADDRESS, quoteAccount, TOKEN_PROGRAM_ADDRESS } from "@top-pad/chain";
 import { CLAIM_WINDOW_FEES_DISCRIMINATOR, findCoinRecordPda } from "@top-pad/clients/fee";
 import { coins, createDb, indexedTransactions, windowClaims, type Db } from "@top-pad/db";
 import type { RawTransaction } from "@top-pad/indexer";
@@ -73,7 +73,7 @@ describe("the window claim", () => {
     const [claim] = message.instructions.filter((ix) => ix.programAddress === FEE_PROGRAM_ADDRESS);
     expect([...claim!.data!.slice(0, 8)]).toEqual([...CLAIM_WINDOW_FEES_DISCRIMINATOR]);
     const named = (claim!.accounts ?? []).map((a) => a.address);
-    expect(named).toEqual(expect.arrayContaining([coin.pool, coin.mint, await quoteAccount(devnet.keys!.treasury, devnet.quote.mint)]));
+    expect(named).toEqual(expect.arrayContaining([coin.pool, coin.mint, await quoteAccount(devnet.keys!.treasury, devnet.quote.mint, TOKEN_PROGRAM_ADDRESS)]));
   });
 
   it("sends nothing once the coin's window claim has run, so a step tried again is safe", async () => {

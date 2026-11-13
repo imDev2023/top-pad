@@ -9,7 +9,7 @@
 // error.
 import { expect, test, type Page } from "@playwright/test";
 import { address, type Address } from "@solana/kit";
-import { CLUSTERS, graduatedPoolAddress, swapInstructions } from "@top-pad/chain";
+import { CLUSTERS, graduatedPoolAddress, swapInstructions, TOKEN_PROGRAM_ADDRESS } from "@top-pad/chain";
 import { fetchMaybePool } from "@top-pad/clients/damm-v2";
 import { Coin, CreatorEarnings } from "@top-pad/contract";
 import { coinBalance, fundedWallets, landed, rpc, send, sweep } from "@top-pad/tests-devnet/devnet";
@@ -154,6 +154,7 @@ async function sellBack(trader: Parameters<typeof sweep>[0], mint: Address) {
     pool,
     mint,
     quoteMint: devnet.quote.mint,
+    quoteTokenProgram: TOKEN_PROGRAM_ADDRESS,
     trader,
     side: "sell",
     amountIn: held,

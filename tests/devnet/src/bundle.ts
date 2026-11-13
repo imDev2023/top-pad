@@ -75,7 +75,7 @@ export async function wrapSol(wallet: KeyPairSigner, lamports: bigint) {
 /** A buy from wrapped SOL already in the wallet: the coin's account made if need be, then DBC's `swap2`. */
 async function bareBuy(trader: KeyPairSigner, mint: Address, config: Address, amountIn: bigint) {
   const pool = await dbcPoolAddress(config, mint, WSOL);
-  const ixs = await swapInstructions({ config, pool, mint, quoteMint: WSOL, trader, side: "buy", amountIn, minimumOut: 1n });
+  const ixs = await swapInstructions({ config, pool, mint, quoteMint: WSOL, quoteTokenProgram: TOKEN_PROGRAM_ADDRESS, trader, side: "buy", amountIn, minimumOut: 1n });
   // swapInstructions wraps and unwraps around the swap: keep the coin account's creation and the swap alone.
   const kept = ixs.filter((ix, i) => ix.programAddress === DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS || (i > 0 && ix.accounts?.some((a) => a.address === mint)));
   if (kept.length !== 2 || kept[1]!.programAddress !== DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS) throw new Error("a buy is the coin account's creation and the swap");
@@ -155,7 +155,7 @@ export async function sellAndClose(wallet: KeyPairSigner, mint: Address, config:
   const pool = await dbcPoolAddress(config, mint, WSOL);
   const [coinAccount] = await findAssociatedTokenPda({ owner: wallet.address, mint, tokenProgram: TOKEN_PROGRAM_ADDRESS });
   const [wsolAccount] = await findAssociatedTokenPda({ owner: wallet.address, mint: WSOL, tokenProgram: TOKEN_PROGRAM_ADDRESS });
-  const sell = coins > 0n ? await swapInstructions({ config, pool, mint, quoteMint: WSOL, trader: wallet, side: "sell", amountIn: coins, minimumOut: 1n }) : [];
+  const sell = coins > 0n ? await swapInstructions({ config, pool, mint, quoteMint: WSOL, quoteTokenProgram: TOKEN_PROGRAM_ADDRESS, trader: wallet, side: "sell", amountIn: coins, minimumOut: 1n }) : [];
   const { value: coinInfo } = await rpc.getAccountInfo(coinAccount, { commitment: "confirmed", encoding: "base64" }).send();
   const { value: wsolInfo } = await rpc.getAccountInfo(wsolAccount, { commitment: "confirmed", encoding: "base64" }).send();
   // A sell unwraps and closes the wrapped-SOL account itself; without one, close what is left open.

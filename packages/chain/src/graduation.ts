@@ -14,7 +14,7 @@ import {
   type TransactionSigner,
 } from "@solana/kit";
 import { getSetComputeUnitLimitInstruction, getSetComputeUnitPriceInstruction } from "@solana-program/compute-budget";
-import { findAssociatedTokenPda, getCreateAssociatedTokenIdempotentInstructionAsync } from "@solana-program/token";
+import { findAssociatedTokenPda, getCreateAssociatedTokenIdempotentInstruction, getCreateAssociatedTokenIdempotentInstructionAsync } from "@solana-program/token";
 import {
   CP_AMM_PROGRAM_ADDRESS,
   findPositionNftAccountPda,
@@ -24,7 +24,8 @@ import {
 } from "@top-pad/clients/damm-v2";
 import { findMigrationMetadataPda, getMigrationDammV2Instruction, type PoolState } from "@top-pad/clients/dbc";
 import { getBurnLeftoverInstruction, getClaimLpFeesInstructionAsync, getClaimSurplusInstructionAsync } from "@top-pad/clients/fee";
-import { DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS, eventAuthorityAddress, TOKEN_PROGRAM_ADDRESS } from "./dbc";
+import { DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS, eventAuthorityAddress, TOKEN_2022_PROGRAM_ADDRESS, TOKEN_PROGRAM_ADDRESS } from "./dbc";
+import type { QuoteToken } from "./fairOpen";
 import { FEE_CLAIMER_ADDRESS, FEE_PROGRAM_ADDRESS } from "./index";
 
 export const DAMM_V2_PROGRAM_ADDRESS = CP_AMM_PROGRAM_ADDRESS;
@@ -32,8 +33,6 @@ export const DAMM_V2_PROGRAM_ADDRESS = CP_AMM_PROGRAM_ADDRESS;
 export const DAMM_V2_POOL_AUTHORITY = "HLnpSz9h2S4hiLQ43rnSD9XkcUThA7B8hQMKmDaiTLcC" as Address;
 /** DBC's pool authority, which creates the graduated pool and owns both positions until it hands them on. */
 export const DBC_POOL_AUTHORITY = "FhVo3mqL8PW5pH5U2CN4XE33DokiyZnUwuGpH2hmHLuM" as Address;
-/** Token-2022, which DAMM v2's position NFTs live under. */
-export const TOKEN_2022_PROGRAM_ADDRESS = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb" as Address;
 const SYSTEM_PROGRAM_ADDRESS = "11111111111111111111111111111111" as Address;
 
 /**
@@ -100,16 +99,19 @@ export type Graduating = {
   config: Address;
   mint: Address;
   quoteMint: Address;
+  /** The quote's token program: SPL Token, or Token-2022 for an xStock, the graduated pool's token B too. */
+  quoteTokenProgram: Address;
   baseVault: Address;
   quoteVault: Address;
 };
 
 /** A pool's state as DBC holds it, for its migration. */
-export const graduating = (pool: Address, state: PoolState, quoteMint: Address): Graduating => ({
+export const graduating = (pool: Address, state: PoolState, quote: QuoteToken): Graduating => ({
   pool,
   config: state.config,
   mint: state.baseMint,
-  quoteMint,
+  quoteMint: quote.mint,
+  quoteTokenProgram: quote.tokenProgram,
   baseVault: state.baseVault,
   quoteVault: state.quoteVault,
 });
@@ -160,7 +162,7 @@ export async function migrationInstructions(m: Migration): Promise<Instruction[]
     quoteVault: p.quoteVault,
     payer: m.payer,
     tokenBaseProgram: TOKEN_PROGRAM_ADDRESS,
-    tokenQuoteProgram: TOKEN_PROGRAM_ADDRESS,
+    tokenQuoteProgram: p.quoteTokenProgram,
     token2022Program: TOKEN_2022_PROGRAM_ADDRESS,
     dammEventAuthority: await eventAuthorityAddress(DAMM_V2_PROGRAM_ADDRESS),
     systemProgram: SYSTEM_PROGRAM_ADDRESS,
@@ -190,9 +192,15 @@ export function surplusOf(quoteReserve: bigint, graduationTarget: bigint): { cre
   return { creator, treasury: partner - creator };
 }
 
-/** `owner`'s associated account of `mint`. */
+/** `owner`'s associated account of a coin, opened if missing: every Heat coin is an SPL Token mint. */
 async function associated(payer: TransactionSigner, owner: Address, mint: Address) {
   return getCreateAssociatedTokenIdempotentInstructionAsync({ payer, owner, mint });
+}
+
+/** `owner`'s associated account of a quote under its token program, opened if missing. */
+async function associatedQuote(payer: TransactionSigner, owner: Address, q: { quoteMint: Address; quoteTokenProgram: Address }) {
+  const ata = await accountOf(owner, q.quoteMint, q.quoteTokenProgram);
+  return getCreateAssociatedTokenIdempotentInstruction({ payer, ata, owner, mint: q.quoteMint, tokenProgram: q.quoteTokenProgram });
 }
 
 export type SurplusClaim = {
@@ -210,16 +218,16 @@ export type SurplusClaim = {
 export async function surplusClaimInstructions(s: SurplusClaim): Promise<Instruction[]> {
   const { pool, payer } = s;
   const [creatorTokenAccount, treasuryTokenAccount, feeClaimerTokenAccount] = await Promise.all([
-    quoteAccountOf(s.creator, pool.quoteMint),
-    quoteAccountOf(s.treasury, pool.quoteMint),
-    quoteAccountOf(FEE_CLAIMER_ADDRESS, pool.quoteMint),
+    accountOf(s.creator, pool.quoteMint, pool.quoteTokenProgram),
+    accountOf(s.treasury, pool.quoteMint, pool.quoteTokenProgram),
+    accountOf(FEE_CLAIMER_ADDRESS, pool.quoteMint, pool.quoteTokenProgram),
   ]);
   return [
     getSetComputeUnitLimitInstruction({ units: GRADUATION_CLAIM_COMPUTE_UNITS }),
     ...priced(s.computeUnitPrice),
-    await associated(payer, FEE_CLAIMER_ADDRESS, pool.quoteMint),
-    ...(s.surplus.creator > 0n ? [await associated(payer, s.creator, pool.quoteMint)] : []),
-    ...(s.surplus.treasury > 0n ? [await associated(payer, s.treasury, pool.quoteMint)] : []),
+    await associatedQuote(payer, FEE_CLAIMER_ADDRESS, pool),
+    ...(s.surplus.creator > 0n ? [await associatedQuote(payer, s.creator, pool)] : []),
+    ...(s.surplus.treasury > 0n ? [await associatedQuote(payer, s.treasury, pool)] : []),
     await getClaimSurplusInstructionAsync({
       creatorTokenAccount,
       treasuryTokenAccount,
@@ -228,7 +236,7 @@ export async function surplusClaimInstructions(s: SurplusClaim): Promise<Instruc
       pool: pool.pool,
       quoteVault: pool.quoteVault,
       quoteMint: pool.quoteMint,
-      tokenQuoteProgram: TOKEN_PROGRAM_ADDRESS,
+      tokenQuoteProgram: pool.quoteTokenProgram,
       eventAuthority: await eventAuthorityAddress(FEE_PROGRAM_ADDRESS),
       program: FEE_PROGRAM_ADDRESS,
     }),
@@ -244,7 +252,7 @@ export async function burnLeftoverInstructions(b: { pool: Graduating; payer: Tra
     await associated(payer, FEE_CLAIMER_ADDRESS, pool.mint),
     getBurnLeftoverInstruction({
       feeClaimer: FEE_CLAIMER_ADDRESS,
-      feeClaimerCoinAccount: await quoteAccountOf(FEE_CLAIMER_ADDRESS, pool.mint),
+      feeClaimerCoinAccount: await accountOf(FEE_CLAIMER_ADDRESS, pool.mint, TOKEN_PROGRAM_ADDRESS),
       poolAuthority: DBC_POOL_AUTHORITY,
       config: pool.config,
       pool: pool.pool,
@@ -265,6 +273,8 @@ export type GraduatedPosition = {
   pool: Address;
   mint: Address;
   quoteMint: Address;
+  /** The quote's token program, token B's in the pool. */
+  quoteTokenProgram: Address;
   position: Address;
   nftAccount: Address;
 };
@@ -275,11 +285,11 @@ export async function lpFeeClaimInstructions(c: { heat: GraduatedPosition; treas
   return [
     getSetComputeUnitLimitInstruction({ units: GRADUATION_CLAIM_COMPUTE_UNITS }),
     ...priced(c.computeUnitPrice),
-    await associated(payer, c.treasury, heat.quoteMint),
+    await associatedQuote(payer, c.treasury, heat),
     await associated(payer, FEE_CLAIMER_ADDRESS, heat.mint),
     await getClaimLpFeesInstructionAsync({
-      treasuryTokenAccount: await quoteAccountOf(c.treasury, heat.quoteMint),
-      feeClaimerCoinAccount: await quoteAccountOf(FEE_CLAIMER_ADDRESS, heat.mint),
+      treasuryTokenAccount: await accountOf(c.treasury, heat.quoteMint, heat.quoteTokenProgram),
+      feeClaimerCoinAccount: await accountOf(FEE_CLAIMER_ADDRESS, heat.mint, TOKEN_PROGRAM_ADDRESS),
       pool: heat.pool,
       position: heat.position,
       positionNftAccount: heat.nftAccount,
@@ -288,7 +298,7 @@ export async function lpFeeClaimInstructions(c: { heat: GraduatedPosition; treas
       mint: heat.mint,
       quoteMint: heat.quoteMint,
       tokenBaseProgram: TOKEN_PROGRAM_ADDRESS,
-      tokenQuoteProgram: TOKEN_PROGRAM_ADDRESS,
+      tokenQuoteProgram: heat.quoteTokenProgram,
       eventAuthority: await eventAuthorityAddress(FEE_PROGRAM_ADDRESS),
       program: FEE_PROGRAM_ADDRESS,
     }),
@@ -308,8 +318,8 @@ export async function creatorLpFeeClaimInstructions(c: { position: GraduatedPosi
       poolAuthority: DAMM_V2_POOL_AUTHORITY,
       pool: position.pool,
       position: position.position,
-      tokenAAccount: await quoteAccountOf(creator.address, position.mint),
-      tokenBAccount: await quoteAccountOf(creator.address, position.quoteMint),
+      tokenAAccount: await accountOf(creator.address, position.mint, TOKEN_PROGRAM_ADDRESS),
+      tokenBAccount: await accountOf(creator.address, position.quoteMint, position.quoteTokenProgram),
       tokenAVault: await dammV2VaultAddress(position.pool, position.mint),
       tokenBVault: await dammV2VaultAddress(position.pool, position.quoteMint),
       tokenAMint: position.mint,
@@ -317,16 +327,16 @@ export async function creatorLpFeeClaimInstructions(c: { position: GraduatedPosi
       positionNftAccount: position.nftAccount,
       signer: creator,
       tokenAProgram: TOKEN_PROGRAM_ADDRESS,
-      tokenBProgram: TOKEN_PROGRAM_ADDRESS,
+      tokenBProgram: position.quoteTokenProgram,
       eventAuthority: await eventAuthorityAddress(DAMM_V2_PROGRAM_ADDRESS),
       program: DAMM_V2_PROGRAM_ADDRESS,
     }),
   ];
 }
 
-/** `owner`'s associated account of `mint` under SPL Token. */
-async function quoteAccountOf(owner: Address, mint: Address): Promise<Address> {
-  const [account] = await findAssociatedTokenPda({ owner, mint, tokenProgram: TOKEN_PROGRAM_ADDRESS });
+/** `owner`'s associated account of `mint` under `tokenProgram`. */
+async function accountOf(owner: Address, mint: Address, tokenProgram: Address): Promise<Address> {
+  const [account] = await findAssociatedTokenPda({ owner, mint, tokenProgram });
   return account;
 }
 
@@ -338,6 +348,8 @@ export type DammSwap = {
   pool: Address;
   mint: Address;
   quoteMint: Address;
+  /** The quote's token program, token B's in the pool. */
+  quoteTokenProgram: Address;
   trader: TransactionSigner;
   /** The trader's accounts: the quote's on a buy is the input, the coin's the output; a sell the other way round. */
   quoteAccount: Address;
@@ -362,7 +374,7 @@ export async function dammSwapInstruction(s: DammSwap): Promise<Instruction> {
     tokenBMint: s.quoteMint,
     payer: s.trader,
     tokenAProgram: TOKEN_PROGRAM_ADDRESS,
-    tokenBProgram: TOKEN_PROGRAM_ADDRESS,
+    tokenBProgram: s.quoteTokenProgram,
     referralTokenAccount: s.referralAccount ?? undefined,
     eventAuthority: await eventAuthorityAddress(DAMM_V2_PROGRAM_ADDRESS),
     program: DAMM_V2_PROGRAM_ADDRESS,

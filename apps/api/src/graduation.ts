@@ -27,10 +27,12 @@ import {
   migrationInstructions,
   MIGRATION_PROGRESS,
   positionAddresses,
+  quoteTokenProgramOf,
   surplusClaimInstructions,
   surplusOf,
   type GraduatedPosition,
   type Graduating,
+  type QuoteToken,
 } from "@top-pad/chain";
 import { fetchPool, fetchPosition } from "@top-pad/clients/damm-v2";
 import { fetchPoolConfig, fetchVirtualPool, type PoolState } from "@top-pad/clients/dbc";
@@ -68,9 +70,9 @@ export async function readCurve(cfg: Config, mint: Address): Promise<CurveState 
   if (!record.exists) return null;
   const { poolState: state } = (await fetchVirtualPool(rpc, record.data.pool, limited())).data;
   // The coin's quote is its config's, SOL or another (ADR 0007).
-  const { migrationQuoteThreshold, quoteMint } = (await fetchPoolConfig(rpc, state.config, limited())).data;
+  const { migrationQuoteThreshold, quoteMint, quoteTokenFlag } = (await fetchPoolConfig(rpc, state.config, limited())).data;
   return {
-    pool: graduating(record.data.pool, state, quoteMint),
+    pool: graduating(record.data.pool, state, { mint: quoteMint, tokenProgram: quoteTokenProgramOf(quoteTokenFlag) }),
     state,
     graduationTarget: migrationQuoteThreshold,
     complete: state.quoteReserve >= migrationQuoteThreshold,
@@ -207,12 +209,13 @@ export async function sweepGraduations(db: Db, env: Bindings): Promise<{ due: nu
  */
 export const LP_FEE_CLAIM_MINIMUM = 1_000_000n;
 
-/** A graduated coin's two positions, as recorded. */
-export function positionsOf(g: typeof graduations.$inferSelect, quoteMint: Address): Promise<{ heat: GraduatedPosition; creator: GraduatedPosition }> {
+/** A graduated coin's two positions, as recorded, in its quote. */
+export function positionsOf(g: typeof graduations.$inferSelect, quote: QuoteToken): Promise<{ heat: GraduatedPosition; creator: GraduatedPosition }> {
   const position = async (nftMint: string): Promise<GraduatedPosition> => ({
     pool: g.pool as Address,
     mint: g.mint as Address,
-    quoteMint,
+    quoteMint: quote.mint,
+    quoteTokenProgram: quote.tokenProgram,
     ...(await positionAddresses(nftMint as Address)),
   });
   return Promise.all([position(g.heatPositionNftMint), position(g.creatorPositionNftMint)]).then(([heat, creator]) => ({ heat, creator }));
@@ -238,7 +241,9 @@ export async function claimHeatLpFees(db: Db, env: Bindings): Promise<{ graduate
   let claimed = 0;
   let keeper: Keeper | null = null;
   for (const { graduation: row, quoteMint } of rows) {
-    const { heat: position } = await positionsOf(row, quoteMint as Address);
+    const quote = heat.quotes.find((q) => q.mint === quoteMint);
+    if (!quote) throw new Error(`${row.mint} is priced in ${quoteMint}, which Heat does not list on ${cfg.cluster}`);
+    const { heat: position } = await positionsOf(row, quote);
     if ((await unclaimedLpFees(rpc, position)) < LP_FEE_CLAIM_MINIMUM) continue;
     keeper ??= await keeperOf(cfg, keeperKey);
     await keeperSends(cfg, rpc, keeper, await lpFeeClaimInstructions({ heat: position, treasury: heat.keys.treasury, payer: keeper.signer, computeUnitPrice: cfg.computeUnitPrice }));
