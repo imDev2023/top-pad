@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { Address, RawAmount } from "./launch";
+import { QuoteInfo } from "./quote";
 import { LooksLike } from "./vampShield";
 
 /** A transaction's signature, base58. */
@@ -37,15 +38,29 @@ export const EarningsCoin = z.object({
 });
 export type EarningsCoin = z.infer<typeof EarningsCoin>;
 
+/**
+ * A wallet's Creator Earnings in one quote: the coins priced in it whose creator role the wallet holds, each amount in
+ * the quote's raw units, shown through its `QuoteInfo`'s multiplier, and their totals. One claim pays one quote.
+ */
+export const EarningsQuote = z.object({
+  quote: QuoteInfo,
+  /** Most waiting first. */
+  coins: z.array(EarningsCoin),
+  /** The sum of the coins' `waiting`. */
+  waiting: RawAmount,
+  /** What the wallet has been paid in this quote so far, by claims the indexer has seen, coins handed over since included. */
+  claimed: RawAmount,
+});
+export type EarningsQuote = z.infer<typeof EarningsQuote>;
+
 /** `GET /earnings/:wallet`: the Creator Earnings waiting for a wallet in each Heat coin whose creator role it holds. */
 export const CreatorEarnings = z.object({
   wallet: Address,
-  quote: z.object({ symbol: z.string(), decimals: z.number().int().nonnegative() }),
-  /** Most waiting first. */
-  coins: z.array(EarningsCoin),
-  /** The sum of the coins' `waiting` and `claimed`. */
-  waiting: RawAmount,
-  claimed: RawAmount,
+  /**
+   * By quote: SOL always, first, then every other quote the wallet holds a coin's creator role in or was paid in, in the
+   * order the cluster lists them.
+   */
+  quotes: z.array(EarningsQuote).min(1),
 });
 export type CreatorEarnings = z.infer<typeof CreatorEarnings>;
 
@@ -56,13 +71,17 @@ export const ClaimRequest = z.object({
 export type ClaimRequest = z.infer<typeof ClaimRequest>;
 
 /**
- * The claim, for the wallet to sign and send: as few transactions as hold it, usually one (`@top-pad/chain`'s
- * `creatorClaimMessages`), each unsigned, base64, with the wallet paying its network fee.
+ * The claim, for the wallet to sign and send in one request: as few transactions as hold it, each paying one quote,
+ * usually one a quote (`@top-pad/chain`'s `creatorClaimMessages`), each unsigned, base64, with the wallet paying its
+ * network fee.
  */
 export const PreparedClaim = z.object({
   transactions: z.array(z.string()).min(1),
-  /** What the claim pays the wallet, in all and by coin: exactly what the page showed, or more as LP fees accrue. */
-  pays: RawAmount,
+  /**
+   * What the claim pays the wallet in each quote, by the quote's mint, in its raw units, and by coin: exactly what the page
+   * showed, or more as LP fees accrue.
+   */
+  quotes: z.array(z.object({ mint: Address, pays: RawAmount })).min(1),
   coins: z.array(z.object({ mint: Address, pays: RawAmount })),
 });
 export type PreparedClaim = z.infer<typeof PreparedClaim>;
@@ -82,8 +101,8 @@ export const ClaimOutcome = z.object({
       explorer: z.string().url(),
     }),
   ),
-  /** What the landed transactions paid the creator role holder, in all and by coin. */
-  paid: RawAmount,
+  /** What the landed transactions paid the creator role holder in each quote, by the quote's mint, and by coin. */
+  quotes: z.array(z.object({ mint: Address, paid: RawAmount })),
   coins: z.array(z.object({ mint: Address, paid: RawAmount })),
 });
 export type ClaimOutcome = z.infer<typeof ClaimOutcome>;

@@ -2,7 +2,7 @@
 // service wrote, so every fact on it can be recomputed from the chain and Heat's database, with no composite score.
 // History stays with the launcher: a coin stays on the record that launched it, whoever holds its DBC creator role now,
 // and is marked "handed over to ..." on both records, while Creator Earnings follow the role (spec 4).
-import { WSOL_MINT } from "@top-pad/chain";
+import type { HeatCluster } from "@top-pad/chain";
 import type { CreatorRecord, CreatorRef, CreatorSummary, RecordCoin, RecordWallet, ReceivedCoin } from "@top-pad/contract";
 import { Address } from "@top-pad/contract";
 import {
@@ -255,20 +255,23 @@ export async function recordOf(cfg: Config, db: Db, creatorId: string, now = new
   const holderRecords = await currentRecordsOf(db, holders);
   const refs = await refsOf(db, [...holderRecords.values(), ...[...launcherIds.values()].filter((id): id is string => !!id)]);
 
-  // What Creator Earnings claims paid the record's wallets, in SOL coins (#99 brings the others).
-  const solPools = sql`(select ${pools.pool} from ${pools} where ${pools.quoteMint} = ${WSOL_MINT})`;
-  const [curve] = own.length
+  // What Creator Earnings claims paid the record's wallets, by the quote each coin is priced in (its pool's).
+  const curvePaid = own.length
     ? await db
-        .select({ amount: sql<string>`coalesce(sum(${feeClaims.creatorAmount}), 0)::text` })
+        .select({ quoteMint: pools.quoteMint, amount: sql<string>`sum(${feeClaims.creatorAmount})::text` })
         .from(feeClaims)
-        .where(and(inArray(feeClaims.creator, own), sql`${feeClaims.pool} in ${solPools}`))
-    : [{ amount: "0" }];
-  const [lp] = own.length
+        .innerJoin(pools, eq(pools.pool, feeClaims.pool))
+        .where(inArray(feeClaims.creator, own))
+        .groupBy(pools.quoteMint)
+    : [];
+  const lpPaid = own.length
     ? await db
-        .select({ amount: sql<string>`coalesce(sum(${lpFeeClaims.quoteAmount}), 0)::text` })
+        .select({ quoteMint: pools.quoteMint, amount: sql<string>`sum(${lpFeeClaims.quoteAmount})::text` })
         .from(lpFeeClaims)
-        .where(and(inArray(lpFeeClaims.owner, own), sql`${lpFeeClaims.mint} in (select ${pools.mint} from ${pools} where ${pools.quoteMint} = ${WSOL_MINT})`))
-    : [{ amount: "0" }];
+        .innerJoin(pools, eq(pools.mint, lpFeeClaims.mint))
+        .where(inArray(lpFeeClaims.owner, own))
+        .groupBy(pools.quoteMint)
+    : [];
 
   const heat = cfg.heat!;
   const coinViews: RecordCoin[] = [];
@@ -346,9 +349,24 @@ export async function recordOf(cfg: Config, db: Db, creatorId: string, now = new
     },
     coins: coinViews,
     received,
-    earnings: { claimed: (BigInt(curve!.amount) + BigInt(lp!.amount)).toString(), curve: curve!.amount, lp: lp!.amount },
+    earnings: await earningsByQuote(cfg, heat, curvePaid, lpPaid),
     servedAt: now.toISOString(),
   };
+}
+
+/**
+ * What claims paid, curve fees and LP fees, by quote: SOL always, first, then every other quote a claim paid in, in the
+ * order the cluster lists them.
+ */
+async function earningsByQuote(cfg: Config, heat: HeatCluster, curve: { quoteMint: string; amount: string }[], lp: { quoteMint: string; amount: string }[]) {
+  const amountIn = (rows: { quoteMint: string; amount: string }[], mint: string) => BigInt(rows.find((r) => r.quoteMint === mint)?.amount ?? "0");
+  const byQuote = [];
+  for (const [i, listed] of heat.quotes.entries()) {
+    const paid = { curve: amountIn(curve, listed.mint), lp: amountIn(lp, listed.mint) };
+    if (i > 0 && paid.curve === 0n && paid.lp === 0n) continue;
+    byQuote.push({ quote: await quoteInfoOf(cfg, heat, listed.mint), claimed: `${paid.curve + paid.lp}`, curve: `${paid.curve}`, lp: `${paid.lp}` });
+  }
+  return byQuote;
 }
 
 /** `GET /creators/:key`: a record by its id or by a wallet that is or was its Creator wallet. */

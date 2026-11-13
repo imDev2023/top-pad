@@ -123,8 +123,11 @@ export const CreatorRecord = z.object({
   /** Newest first. */
   coins: z.array(RecordCoin),
   received: z.array(ReceivedCoin),
-  /** What every Creator Earnings claim paid the record's Creator wallets, curve fees and LP fees, in SOL coins. */
-  earnings: z.object({ claimed: RawAmount, curve: RawAmount, lp: RawAmount }),
+  /**
+   * What every Creator Earnings claim paid the record's Creator wallets, curve fees and LP fees, by quote, in its raw
+   * units: SOL always, first, then every other quote a claim paid in, in the order the cluster lists them.
+   */
+  earnings: z.array(z.object({ quote: QuoteInfo, claimed: RawAmount, curve: RawAmount, lp: RawAmount })).min(1),
   servedAt: z.iso.datetime(),
 });
 export type CreatorRecord = z.infer<typeof CreatorRecord>;

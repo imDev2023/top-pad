@@ -1,6 +1,6 @@
 import { generateKeyPairSigner, getBase58Decoder } from "@solana/kit";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { CLUSTERS, WSOL_MINT } from "@top-pad/chain";
+import { CLUSTERS, DEVNET_USDC, WSOL_MINT } from "@top-pad/chain";
 import { Coin, CreatorRecord } from "@top-pad/contract";
 import {
   bundleCases,
@@ -19,6 +19,7 @@ import {
 } from "@top-pad/db";
 import { createTestDatabase } from "@top-pad/db/testing";
 import { orderKey } from "@top-pad/indexer";
+import { eq } from "drizzle-orm";
 import { app } from "./index";
 import { Fakes, testBindings, testContext } from "./test/fakes";
 
@@ -280,7 +281,7 @@ describe("a Creator record", () => {
     expect(shown.received).toEqual([
       expect.objectContaining({ mint: received.mint, name: "Gift", launcher: { id: s!.id, handle: null, wallet: x }, holder: b, at: at(22).toISOString() }),
     ]);
-    expect(shown.earnings).toEqual({ claimed: "157", curve: "150", lp: "7" });
+    expect(shown.earnings).toEqual([{ quote: expect.objectContaining({ mint: WSOL_MINT, symbol: "SOL" }), claimed: "157", curve: "150", lp: "7" }]);
 
     // The launcher's other side: S's record keeps its coin, handed over to R.
     const theirs = await record(x);
@@ -310,6 +311,21 @@ describe("a Creator record", () => {
       evidenceKey: "k",
     });
     expect((await record(r!.id)).summary.marks.verifiedCreator).toBe(false);
+  });
+
+  it("counts what claims paid in each coin's own quote, SOL first (#99)", async () => {
+    vi.stubGlobal("fetch", new Fakes().fetch);
+    const wallet = await addr();
+    const [r] = await db.insert(creators).values({ createdAt: at(0) }).returning();
+    await db.insert(creatorWallets).values({ creatorId: r!.id, wallet, via: "sign_in", proof: "proof", proofMessage: "message", startedAt: at(0) });
+    const dollar = await coin({ creatorId: r!.id, wallet, mode: "instant", createdAt: at(1), slot: 100, name: "Dollar" });
+    await db.update(pools).set({ quoteMint: DEVNET_USDC }).where(eq(pools.pool, dollar.pool));
+    await db.insert(feeClaims).values({ signature: signature(), eventIndex: 0, slot: 1, at: at(2), pool: dollar.pool, mint: dollar.mint, creator: wallet, creatorAmount: 45_000n, treasuryAmount: 45_000n });
+    const shown = await record(r!.id);
+    expect(shown.earnings).toEqual([
+      { quote: expect.objectContaining({ symbol: "SOL" }), claimed: "0", curve: "0", lp: "0" },
+      { quote: expect.objectContaining({ mint: DEVNET_USDC, symbol: "USDC", decimals: 6 }), claimed: "45000", curve: "45000", lp: "0" },
+    ]);
   });
 
   it("answers 404 for a key with no record, and finds a record by any wallet it ever had", async () => {
