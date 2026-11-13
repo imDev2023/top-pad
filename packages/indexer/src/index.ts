@@ -6,6 +6,7 @@ import { eq, inArray, sql } from "drizzle-orm";
 import { indexedTransactions, indexerCursors, type Db } from "@top-pad/db";
 import type { RawTransaction } from "./decode";
 
+export * from "./board";
 export * from "./candles";
 export * from "./configs";
 export * from "./decode";

@@ -707,6 +707,9 @@ export const trades = pgTable(
     primaryKey({ columns: [t.signature, t.eventIndex] }),
     index("trades_mint_order_idx").on(t.mint, t.orderKey),
     index("trades_trader_idx").on(t.trader),
+    // Trending reads the last hour's trades, and the known-bot job each coin's first seconds (spec 8, #57).
+    index("trades_at_idx").on(t.at),
+    index("trades_mint_at_idx").on(t.mint, t.at),
   ],
 );
 
@@ -1154,6 +1157,67 @@ export const bundleCases = pgTable(
 );
 
 /**
+ * What Bundle Radar labels on each Heat coin, in short (spec 6.4, 8, #57): the wallets it ties to the coin's creator,
+ * which Trending never counts, what they bought toward the case floor, and the creation-slot buys of wallets it does not
+ * tie, the board's red and yellow flags. Written whenever the indexer or the case job reads the coin's radar, so the
+ * board reads one row a coin rather than working out each coin's radar.
+ */
+export const coinRadar = pgTable("coin_radar", {
+  mint: text("mint").primaryKey(),
+  /** The wallets directly linked to the Creator wallet (the Creator wallet itself is never among them). */
+  linkedWallets: text("linked_wallets").array().notNull(),
+  /** What the linked wallets bought across the pot and the first hour, in the coin's raw units. */
+  linkedCoins: bigint("linked_coins", { mode: "bigint" }).notNull(),
+  /** Buys in the creation slot by wallets not linked: timing alone, a yellow flag. */
+  earlyBuys: integer("early_buys").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * Heat's known-bot list (spec 8, #57), which Trending never counts: wallets that bought in the first 2 seconds of 3 or
+ * more Heat launches, and wallets that bought and sold inside one transaction, as the five-minute cron's `known-bots`
+ * job finds them. An operator can remove a wallet in the operator app; a removed wallet stays removed, its row kept.
+ */
+export const knownBots = pgTable(
+  "known_bots",
+  {
+    wallet: text("wallet").primaryKey(),
+    /** The Heat launches it bought in the first 2 seconds of, and the transactions in which it bought and sold. */
+    earlyLaunches: integer("early_launches").notNull(),
+    roundTrips: integer("round_trips").notNull(),
+    /** Up to ten of each: `{ early: [{ mint, signature, seconds }], roundTrips: [signature] }`. */
+    evidence: jsonb("evidence").notNull(),
+    listedAt: timestamp("listed_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    /** The operator's removal: when, who (by the email Access signed them in with) and why. */
+    removedAt: timestamp("removed_at", { withTimezone: true }),
+    removedBy: text("removed_by"),
+    removedNote: text("removed_note"),
+  },
+  (t) => [index("known_bots_listed_idx").on(t.listedAt)],
+);
+
+/**
+ * The signed daily snapshot of Heat's coins (spec 8, #57): each finished UTC day, every coin the fee program's
+ * `CoinRecord` accounts list as this database mirrors them, created before the day ended, signed by the launch key that
+ * co-signed them. The body is kept in R2 byte for byte, as signed; this row says where and what was signed, and how it
+ * compared with the chain when it was made.
+ */
+export const coinRecordSnapshots = pgTable("coin_record_snapshots", {
+  day: text("day").primaryKey(),
+  coins: integer("coins").notNull(),
+  /** The body's SHA-256, hex, and the launch key's Ed25519 signature on the signed message, base58. */
+  sha256: text("sha256").notNull(),
+  signer: text("signer").notNull(),
+  signature: text("signature").notNull(),
+  storageKey: text("storage_key").notNull(),
+  /** What the chain listed when the job checked it, and how the two differed: null when the chain could not be read. */
+  chainCoins: integer("chain_coins"),
+  mismatches: jsonb("mismatches"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
  * Every DBC config pair Heat has made or adopted for a quote other than SOL's own (ADR 0007, the band): the band job
  * makes a pair at the live price whenever a quote's settings drift past the band, and names it in the quote's
  * `QuoteSettings` with the quote manager key. A config can never be changed or closed, so the pairs a quote has left
@@ -1305,6 +1369,7 @@ export const OPERATOR_ACTIONS = [
   "case_dismissed",
   "appeal_upheld",
   "appeal_denied",
+  "bot_removed",
 ] as const;
 export type OperatorAction = (typeof OPERATOR_ACTIONS)[number];
 
