@@ -172,9 +172,12 @@ test("the board ranks a cohort's coins by their people, every 15 s, and shows on
     await waitFor(async () => (await db.select().from(coinRadar).where(inArray(coinRadar.mint, [a, b, c]))).length, (n) => n === 3, 120_000);
     const radars = await db.select().from(coinRadar).where(inArray(coinRadar.mint, [a, b, c]));
     const botTied = [a, b, c].map((m) => radars.find((r) => r.mint === m)!.linkedWallets.includes(w.bot.address));
+    // A sprayed buy may miss its coin altogether, all its copies sent before the coin existed.
+    const botBought = await db.selectDistinct({ mint: trades.mint }).from(trades).where(and(eq(trades.trader, w.bot.address), eq(trades.side, "buy")));
+    const botCounted = [a, b, c].map((m, i) => botBought.some((t) => t.mint === m) && !botTied[i]);
     const listedCounts = [4, 2, 1];
-    const unlistedCounts = listedCounts.map((n, i) => n + (botTied[i] ? 0 : 1));
-    console.log(`the bot is tied to the creator on ${botTied.filter(Boolean).length} of the 3 coins`);
+    const unlistedCounts = listedCounts.map((n, i) => n + (botCounted[i] ? 1 : 0));
+    console.log(`the bot bought ${botBought.length} coins, is tied to the creator on ${botTied.filter(Boolean).length} of the cohort's 3, counted on ${botCounted.filter(Boolean).length} once taken off the list`);
     const same = (x: number[], y: number[]) => JSON.stringify(x) === JSON.stringify(y);
     const ranked = await waitFor(board, (x) => same(counts(x.trending), unlistedCounts) || same(counts(x.trending), listedCounts), 180_000);
     // Ranked by people: more buyers first.
