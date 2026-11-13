@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { CLUSTERS } from "@top-pad/chain";
 import { bars, bundleCases, coinRadar, coins, createDb, indexedTransactions, knownBots, pools, trades, transfers, type Db } from "@top-pad/db";
 import { createTestDatabase } from "@top-pad/db/testing";
-import { refreshKnownBots, summarizeRadar, trendingOf } from "./board";
+import { refreshKnownBots, summarizeMissingRadars, summarizeRadar, trendingOf } from "./board";
 import { orderKey } from "./heat";
 
 let db: Db;
@@ -210,6 +210,18 @@ describe("Trending", () => {
     expect(await ranked()).toEqual([]);
     await db.update(bars).set({ liftedAt: NOW, liftedBy: "op2" }).where(eq(bars.id, bar!.id));
     expect(await ranked()).toEqual([a.mint]);
+  });
+});
+
+describe("radar summaries", () => {
+  it("backfills the summary of each Heat coin without one, and no pool made around Heat's flow", async () => {
+    const a = await coin("first");
+    const b = await coin("second");
+    await coin("outside", { heat: false });
+    await summarizeRadar(db, a.mint);
+    expect(await summarizeMissingRadars(db)).toEqual({ summarized: 1 });
+    expect((await db.select({ mint: coinRadar.mint }).from(coinRadar)).map((r) => r.mint).sort()).toEqual([a.mint, b.mint].sort());
+    expect(await summarizeMissingRadars(db)).toEqual({ summarized: 0 });
   });
 });
 

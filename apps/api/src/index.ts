@@ -8,7 +8,7 @@ import { cors } from "hono/cors";
 import { HTTPException } from "hono/http-exception";
 import { Health, type LaunchRefusal, type Platform } from "@top-pad/contract";
 import { createDb, launches, probe, sessions, xAuthorizations, type Db } from "@top-pad/db";
-import { pruneCandles, refreshKnownBots } from "@top-pad/indexer";
+import { pruneCandles, refreshKnownBots, summarizeMissingRadars } from "@top-pad/indexer";
 import { notifyPending, runJob } from "@top-pad/jobs";
 import { finishXLink, logout, me, startXLink, walletSignIn, walletSignInMessage } from "./auth";
 import { verifyMessageRoute, verifyRoute } from "./verify";
@@ -270,6 +270,8 @@ async function scheduled(_controller: ScheduledController, env: Bindings, ctx: E
     await runJob(db, "graduations", () => sweepGraduations(db, env), { exclusive: true }).catch(() => undefined);
     // Bundle Radar's case job: each coin an hour after its open, then hourly through its 7 days (spec 6.5, 10.2).
     await runJob(db, "bundle-radar", () => reviewBundles(db, env), { exclusive: true }).catch(() => undefined);
+    // The radar summary of any coin without one, which the board's flags and Trending read (spec 8).
+    await runJob(db, "radar-summaries", () => summarizeMissingRadars(db), { exclusive: true }).catch(() => undefined);
     // Heat's known-bot list, which Trending never counts (spec 8).
     await runJob(db, "known-bots", () => refreshKnownBots(db), { exclusive: true }).catch(() => undefined);
     // The signed daily snapshot of the CoinRecord list, once each UTC day has ended (spec 8).

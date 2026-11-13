@@ -172,3 +172,15 @@ export async function summarizeRadar(db: Db, mint: string): Promise<Radar | null
   if (radar) await saveRadarSummary(db, radar);
   return radar;
 }
+
+/**
+ * Writes the radar summary of Heat coins that have none yet, a bounded number a run: coins indexed before the summaries
+ * existed, or whose live summary failed. Reads only Postgres. Returns how many it wrote.
+ */
+export async function summarizeMissingRadars(db: Db, limit = 50): Promise<{ summarized: number }> {
+  const missing = await db.execute<{ mint: string }>(sql`
+    select c.mint from coins c left join coin_radar r on r.mint = c.mint where r.mint is null order by c.created_at desc limit ${limit}
+  `);
+  for (const { mint } of missing) await summarizeRadar(db, mint);
+  return { summarized: missing.length };
+}

@@ -498,9 +498,36 @@
     flex: 1 1 100%;
   }
 
-  .coinRow {
-    gap: 10px;
+  /* The figures go under the name, so the name has the row's width. */
+  .coinRow,
+  .coinRow:not(:has(.rank)) {
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: 10px;
+    row-gap: 6px;
     padding: 12px;
+  }
+
+  .coinRow:has(.rank) {
+    grid-template-columns: auto auto minmax(0, 1fr);
+  }
+
+  .rank,
+  .thumb {
+    grid-row: span 2;
+    align-self: start;
+  }
+
+  .rank {
+    margin-top: 12px;
+  }
+
+  .coinFigures {
+    grid-column: -2;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 12px;
+    text-align: left;
   }
 
   .rank {
