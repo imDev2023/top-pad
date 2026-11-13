@@ -5,7 +5,7 @@ import type { Child, FC, PropsWithChildren } from "hono/jsx";
 import { raw } from "hono/html";
 import type { ProtectedMatch } from "@top-pad/contract";
 import type { Operator } from "./env";
-import { AIM_HOURS, ageOf, type AdmissionItem, type CaseItem, type LaunchItem, type LaunchKey, type QueueItem, type Refusing } from "./queue";
+import { AIM_HOURS, ageOf, creatorName, type AdmissionItem, type CaseItem, type LaunchItem, type LaunchKey, type QueueItem, type Refusing } from "./queue";
 import { STYLES } from "./styles";
 
 const FONTS = "https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Saira+Condensed:wght@600;700&display=swap";
@@ -175,7 +175,7 @@ function itemLine(item: QueueItem): { href: string; title: string; who: string; 
     return {
       href: launchHref(item.key),
       title: `$${item.key.ticker} · ${item.key.name}`,
-      who: `@${item.handle}`,
+      who: creatorName(item),
       why:
         item.appeals.length > 0
           ? `Appealed: "${item.appeals[0]!.message}"`
@@ -320,7 +320,7 @@ export const LaunchPage: FC<Shell & { item: LaunchItem; now: Date; error: string
       <div class="panel pad stack">
         <dl class="facts">
           <dt>Creator</dt>
-          <dd>@{item.handle}</dd>
+          <dd>{creatorName(item)}</dd>
           <dt>Waiting</dt>
           <dd>
             <Age since={item.since} now={now} inline />
@@ -359,7 +359,7 @@ export const LaunchPage: FC<Shell & { item: LaunchItem; now: Date; error: string
         <fieldset class="choices">
           <legend class="visually-hidden">Decision</legend>
           <Choice name="decision" value="cleared" title="Clear this launch">
-            @{item.handle} may launch {item.refusing.length > 0 ? `this ${item.refusing.map((r) => r.field).join(" and ")}` : "it"}: their own checks pass it with no label. Anyone else is still refused.
+            {creatorName(item)} may launch {item.refusing.length > 0 ? `this ${item.refusing.map((r) => r.field).join(" and ")}` : "it"}: their own checks pass it with no label. Anyone else is still refused.
             {item.appeals.length > 0 && " The appeal is upheld."}
           </Choice>
           <Choice name="decision" value="kept" title="Keep it refused">
@@ -816,8 +816,11 @@ const ACTION_NAMES: Record<string, string> = {
 /** What an action was taken on, in words: the coin and its creator, a wallet, a case, the export. */
 function subjectLine(row: AuditRow) {
   const [kind, ...rest] = row.subject.split(":");
-  const d = (row.detail ?? {}) as { ticker?: string; creator?: { handle?: string } };
-  if (kind === "launch") return `$${d.ticker ?? rest.at(-1)}${d.creator?.handle ? ` by @${d.creator.handle}` : ""}`;
+  const d = (row.detail ?? {}) as { ticker?: string; creator?: { handle?: string | null; wallet?: string | null } };
+  if (kind === "launch") {
+    const by = d.creator?.handle ? `@${d.creator.handle}` : d.creator?.wallet ? short(d.creator.wallet) : null;
+    return `$${d.ticker ?? rest.at(-1)}${by ? ` by ${by}` : ""}`;
+  }
   if (kind === "wallet") return `Wallet ${short(rest[0] ?? "")}`;
   if (kind === "case") return `Case of ${short(rest[0] ?? "")}`;
   if (kind === "job") return "The export";

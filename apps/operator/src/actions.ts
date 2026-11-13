@@ -60,7 +60,7 @@ export async function decideLaunch(db: Db, operator: Operator, key: LaunchKey, d
     }
     const auditId = await audit(tx, operator, decision === "cleared" ? "launch_cleared" : "launch_kept", `launch:${key.creatorId}:${key.ticker}`, {
       review: review!.id,
-      creator: { id: key.creatorId, handle: item.handle },
+      creator: { id: key.creatorId, handle: item.handle, wallet: item.creatorWallet },
       ticker: key.ticker,
       name: key.name,
       imageSha256: key.imageSha256,

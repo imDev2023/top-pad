@@ -3,7 +3,7 @@
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { ProtectedMatch } from "@top-pad/contract";
-import { admissionReviews, bundleCases, creators, launches, launchReviews, vampAppeals, type DbOrTransaction } from "@top-pad/db";
+import { admissionReviews, bundleCases, creators, creatorWallets, launches, launchReviews, vampAppeals, type DbOrTransaction } from "@top-pad/db";
 
 /** How soon the queue aims to answer each item (spec 6.6). */
 export const AIM_HOURS = 48;
@@ -19,10 +19,16 @@ export type Appeal = { id: string; original: string | null; message: string; cre
 /** Which refused launch an item is: a creator's ticker, name and image as Vamp Shield refused them. */
 export type LaunchKey = { creatorId: string; ticker: string; name: string; imageSha256: string | null };
 
+/** A launch item's creator as the pages name them: their X handle, or their Creator wallet when they linked no X. */
+export const creatorName = (item: Pick<LaunchItem, "handle" | "creatorWallet">) =>
+  item.handle ? `@${item.handle}` : item.creatorWallet ? `${item.creatorWallet.slice(0, 4)}\u{2026}${item.creatorWallet.slice(-4)}` : "a creator with no Creator wallet yet";
+
 export type LaunchItem = {
   kind: "launch";
   key: LaunchKey;
-  handle: string;
+  /** The creator's linked X handle, null when they linked none (ADR 0008), and their Creator wallet now. */
+  handle: string | null;
+  creatorWallet: string | null;
   /** When the queue's clock started: the first appeal if there is one, since that asks for an answer; else the first refusal. */
   since: Date;
   /** How often launching it was refused, and when last; none when only an appeal brought it. */
@@ -120,7 +126,8 @@ export async function launchItems(tx: DbOrTransaction): Promise<LaunchItem[]> {
     last_at: Date | string;
     attempts: number;
     matches: unknown;
-    x_handle: string;
+    x_handle: string | null;
+    creator_wallet: string | null;
   }>(sql`
     with refusals as (
       select creator_id, ticker, name, image_sha256, min(at) as first_at, max(at) as last_at, count(*)::int as attempts,
@@ -129,8 +136,9 @@ export async function launchItems(tx: DbOrTransaction): Promise<LaunchItem[]> {
       where stage = 'prepare' and outcome = 'refused' and creator_id is not null and ticker is not null and name is not null
       group by creator_id, ticker, name, image_sha256
     )
-    select r.*, c.x_handle
+    select r.*, c.x_handle, cw.wallet as creator_wallet
     from refusals r join creators c on c.id = r.creator_id
+    left join creator_wallets cw on cw.creator_id = r.creator_id and cw.ended_at is null
     where not exists (
       select 1 from launch_reviews lr
       where lr.creator_id = r.creator_id and lr.ticker = r.ticker and lr.name = r.name
@@ -138,9 +146,10 @@ export async function launchItems(tx: DbOrTransaction): Promise<LaunchItem[]> {
     )
   `);
   const appeals = await tx
-    .select({ appeal: vampAppeals, handle: creators.xHandle })
+    .select({ appeal: vampAppeals, handle: creators.xHandle, creatorWallet: creatorWallets.wallet })
     .from(vampAppeals)
     .innerJoin(creators, eq(creators.id, vampAppeals.creatorId))
+    .leftJoin(creatorWallets, and(eq(creatorWallets.creatorId, vampAppeals.creatorId), isNull(creatorWallets.endedAt)))
     .where(eq(vampAppeals.status, "open"))
     .orderBy(vampAppeals.createdAt);
 
@@ -148,13 +157,14 @@ export async function launchItems(tx: DbOrTransaction): Promise<LaunchItem[]> {
     kind: "launch",
     key: { creatorId: r.creator_id, ticker: r.ticker, name: r.name, imageSha256: r.image_sha256 },
     handle: r.x_handle,
+    creatorWallet: r.creator_wallet,
     since: date(r.first_at),
     attempts: r.attempts,
     lastRefusedAt: date(r.last_at),
     refusing: refusingIn(r.matches),
     appeals: [],
   }));
-  for (const { appeal, handle } of appeals) {
+  for (const { appeal, handle, creatorWallet } of appeals) {
     const shown: Appeal = { id: appeal.id, original: appeal.original, message: appeal.message, createdAt: appeal.createdAt, imageSha256: appeal.imageSha256 };
     const key = { creatorId: appeal.creatorId, ticker: appeal.ticker, name: appeal.name };
     // An appeal goes with the refusal of the same ticker and name: the one with its image if there is one, else the latest.
@@ -168,6 +178,7 @@ export async function launchItems(tx: DbOrTransaction): Promise<LaunchItem[]> {
         kind: "launch",
         key: { ...key, imageSha256: appeal.imageSha256 },
         handle,
+        creatorWallet,
         since: appeal.createdAt,
         attempts: 0,
         lastRefusedAt: null,

@@ -6,6 +6,7 @@ import {
   bundleCases,
   createDb,
   creators,
+  creatorWallets,
   jobRuns,
   launches,
   launchReviews,
@@ -227,6 +228,23 @@ describe("the queue", () => {
     expect(after.html).not.toContain("data-kind=\"launch\"");
     // The item is gone; a second decision on it finds nothing.
     expect((await post(href, { decision: "kept", note: "again" })).status).toBe(404);
+  });
+
+  it("names a creator who linked no X by their Creator wallet, in the list, on the item and in the audit row (ADR 0008)", async () => {
+    const [plain] = await db.insert(creators).values({}).returning();
+    const creatorWallet = wallet(7);
+    await db.insert(creatorWallets).values({ creatorId: plain!.id, wallet: creatorWallet, via: "sign_in", proof: "proof", proofMessage: "message" });
+    await db.insert(vampChecks).values({ stage: "prepare", creatorId: plain!.id, ticker: "PLAIN", name: "Plain Frog", outcome: "refused", matches: imageRefused });
+    const named = `${creatorWallet.slice(0, 4)}\u{2026}${creatorWallet.slice(-4)}`;
+    expect((await page("/")).html).toContain(`<span class="note">${named}</span></div><span class="item-title">$PLAIN · Plain Frog</span>`);
+    const href = `/launch?creator=${plain!.id}&ticker=PLAIN&name=Plain+Frog`;
+    const shown = await page(href);
+    expect(shown.html).toContain(`${named} may launch`);
+    expect(shown.html).not.toContain("@null");
+    const res = await post(href, { decision: "kept", note: "A copy" });
+    const done = Number(new URL(res.headers.get("location")!, ORIGIN).searchParams.get("done"));
+    const [row] = await db.select().from(auditLog).where(eq(auditLog.id, done));
+    expect(row!.detail).toMatchObject({ creator: { id: plain!.id, handle: null, wallet: creatorWallet } });
   });
 
   it("keeps a refused launch refused, denying its appeal, and it comes back only with a new refusal", async () => {
