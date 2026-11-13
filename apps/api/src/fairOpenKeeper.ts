@@ -176,8 +176,11 @@ const couldOpen = (launch: Launch) => {
 /** What the upload step did: the items it sent, and how long after its upload the gateway first served each. */
 export type UploadOutcome = {
   uploaded: number;
-  /** Why nothing went up: the pot could not open as it stood, or the launch failed, so its coin stays sealed for good. */
-  held: "cannot_open" | "failed" | null;
+  /**
+   * Why nothing went up: the pot could not open as it stood, the launch failed, or a Bar cancelled it (spec 6.5), so its
+   * coin stays sealed for good.
+   */
+  held: "cannot_open" | "failed" | "cancelled" | null;
   servedAfterMs: { image: number | null; metadata: number | null };
 };
 
@@ -206,6 +209,7 @@ export async function uploadMetadata(
 
 /** Why a launch's items must stay back, if they must: it failed, or its pot could not open as it stands. */
 async function heldBack(db: Db, cfg: Config, launch: Address, row: LaunchRow): Promise<UploadOutcome["held"]> {
+  if (await cancelled(db, row.id)) return "cancelled";
   const rpc = createSolanaRpc(cfg.rpcUrl);
   const account = await fetchMaybeLaunch(rpc, launch, { commitment: "confirmed", ...limited() });
   if (!account.exists) {
@@ -217,6 +221,16 @@ async function heldBack(db: Db, cfg: Config, launch: Address, row: LaunchRow): P
   if (data.status === LaunchStatus.Opened) return null;
   if (data.status === LaunchStatus.Failed || data.failure.__option === "Some") return "failed";
   return couldOpen(data) ? null : "cannot_open";
+}
+
+/**
+ * Whether a Bar cancelled the launch before its window (spec 6.5): our keeper then sends none of its rungs and uploads
+ * nothing, and it fails at its open through the failure path. Read afresh each time, since an operator may confirm the
+ * case while the Workflow sleeps.
+ */
+export async function cancelled(db: Db, launchId: string): Promise<boolean> {
+  const [row] = await db.select({ at: launches.cancelledAt }).from(launches).where(eq(launches.id, launchId));
+  return !!row?.at;
 }
 
 /** Uploads every item of the launch not yet uploaded; says how many went up. */
@@ -317,6 +331,12 @@ export async function sendOpen(db: Db, cfg: Config, blobs: BlobStore, keeperKey:
     if (phase.phase !== "due") {
       // Close to the open the chain's clock is read every quarter second; it moves one slot, about 0.4 s, at a time.
       await sleep(Math.min(Math.max(Number(account.data.opensAt - now) * 1000 - 1_500, 250), 5_000));
+      continue;
+    }
+    if (await cancelled(db, row.id)) {
+      // A Bar cancelled it (spec 6.5): no rung goes out, and it fails once the open is late, if its pot had not already
+      // failed it. Its window took no deposits, so nobody waits on it.
+      await sleep(Math.min(Math.max(Number(phase.lateAt - now) * 1000, 250), 5_000));
       continue;
     }
 

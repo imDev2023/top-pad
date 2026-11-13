@@ -246,6 +246,7 @@ export async function getFairOpen(c: Context<AppEnv>) {
     lateAt: iso(terms.opensAt + LATE_OPEN_SECONDS),
     phase,
     failure,
+    cancelledAt: scheduled?.cancelledAt?.toISOString() ?? null,
     serverTime: new Date().toISOString(),
     quote: await quoteInfoOf(cfg, heat, launch?.quoteMint ?? row!.quoteMint),
     step: `${terms.step}`,
@@ -552,6 +553,7 @@ async function openRungFor(c: Context<AppEnv>, rpc: Rpc) {
   const scheduled = await launchRow(c.var.db, address);
   if (!scheduled) return { refusal: notFound(c) } as const;
   if (scheduled.ladder !== "at_open") return { refusal: refuse(c, 409, { error: "This Fair Open's ladder was signed in advance: our keeper opens it.", code: "already_signed" }) } as const;
+  if (scheduled.cancelledAt) return { refusal: refuse(c, 409, { error: "Heat cancelled this Fair Open before its window: it can no longer open.", code: "not_due" }) } as const;
   const phase = fairOpenPhase(launch, now());
   if (phase.phase !== "due") {
     const error =

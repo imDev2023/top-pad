@@ -3,7 +3,7 @@
 // History stays with the launcher: a coin stays on the record that launched it, whoever holds its DBC creator role now,
 // and is marked "handed over to ..." on both records, while Creator Earnings follow the role (spec 4).
 import type { HeatCluster } from "@top-pad/chain";
-import type { CreatorRecord, CreatorRef, CreatorSummary, RecordCoin, RecordWallet, ReceivedCoin } from "@top-pad/contract";
+import type { CreatorRecord, CreatorRef, CreatorSummary, PrivateBars, RecordCoin, RecordWallet, ReceivedCoin } from "@top-pad/contract";
 import { Address } from "@top-pad/contract";
 import {
   bundleCases,
@@ -25,6 +25,8 @@ import { radarOf } from "@top-pad/indexer";
 import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import type { Context } from "hono";
 import { creatorLockOf } from "./afterOpen";
+import { sessionCreator } from "./auth";
+import { hasStandingBar, privateBars, publishedBars, walletsOfRecord } from "./bars";
 import { completeRotations, walletChangeView } from "./creatorWallets";
 import { explorerUrl, type Config } from "./env";
 import type { AppEnv } from "./http";
@@ -137,7 +139,7 @@ type Launched = Awaited<ReturnType<typeof launchedCoins>>[number];
 const isQuiet = (c: Launched, now: Date) =>
   !c.graduation && !c.pool.curveCompletedAt && now.getTime() - (c.lastTradeAt ?? c.coin.createdAt).getTime() >= QUIET_MS;
 
-/** Whether any of the record's coins has an open bundling case (spec 6.5). Bars come with #56. */
+/** Whether any of the record's coins has an open bundling case (spec 6.5). */
 async function hasOpenCase(db: Db, creatorId: string, walletAddresses: string[]) {
   const [row] = await db
     .select({ id: bundleCases.id })
@@ -156,11 +158,24 @@ async function walletsOf(db: Db, creatorId: string) {
   return db.select().from(creatorWallets).where(eq(creatorWallets.creatorId, creatorId)).orderBy(creatorWallets.startedAt);
 }
 
+/** What stands against a record's good standing (spec 7): an open bundling case, a Bar, and its published finding. */
+type Standing = { openCase: boolean; barred: boolean; published: { ticker: string; mint: string; publishedAt: string } | null };
+
+async function standingOf(db: Db, creatorId: string, walletAddresses: string[], now: Date): Promise<Standing> {
+  const [openCase, barred, published] = await Promise.all([
+    hasOpenCase(db, creatorId, walletAddresses),
+    hasStandingBar(db, creatorId, walletAddresses),
+    publishedBars(db, creatorId, walletAddresses, now),
+  ]);
+  const latest = published[0];
+  return { openCase, barred, published: latest ? { ticker: latest.coin.ticker, mint: latest.coin.mint, publishedAt: latest.publishedAt } : null };
+}
+
 function summarize(
   creator: typeof creators.$inferSelect,
   wallets: WalletRow[],
   launched: Launched[],
-  openCase: boolean,
+  standing: Standing,
   now: Date,
 ): CreatorSummary {
   const own = new Set(wallets.map((w) => w.wallet));
@@ -174,7 +189,9 @@ function summarize(
     graduationRate: launched.length ? graduated / launched.length : null,
     handedOver: launched.filter((c) => c.role && !own.has(c.role.toWallet)).length,
     quiet: launched.filter((c) => isQuiet(c, now)).length,
-    marks: { verifiedCreator: graduated > 0 && !openCase, verifiedHuman: false },
+    // A good record (spec 7): a graduated coin, no Bar (a private one too) and no open bundling case.
+    marks: { verifiedCreator: graduated > 0 && !standing.openCase && !standing.barred, verifiedHuman: false },
+    barred: standing.published,
     since: creator.createdAt.toISOString(),
   };
 }
@@ -186,8 +203,7 @@ export async function summaryOf(db: Db, creatorId: string | null, now = new Date
   if (!creator) return null;
   const wallets = await walletsOf(db, creatorId);
   const launched = await launchedCoins(db, creatorId, wallets);
-  const openCase = await hasOpenCase(db, creatorId, wallets.map((w) => w.wallet));
-  return summarize(creator, wallets, launched, openCase, now);
+  return summarize(creator, wallets, launched, await standingOf(db, creatorId, wallets.map((w) => w.wallet), now), now);
 }
 
 /** A whole record (spec 7, 9 screen 5). */
@@ -198,8 +214,7 @@ export async function recordOf(cfg: Config, db: Db, creatorId: string, now = new
   const own = wallets.map((w) => w.wallet);
   const ownSet = new Set(own);
   const launched = await launchedCoins(db, creatorId, wallets);
-  const openCase = await hasOpenCase(db, creatorId, own);
-  const summary = summarize(creator, wallets, launched, openCase, now);
+  const summary = summarize(creator, wallets, launched, await standingOf(db, creatorId, own, now), now);
 
   const changes = await db.select().from(walletChanges).where(eq(walletChanges.creatorId, creatorId)).orderBy(desc(walletChanges.requestedAt));
 
@@ -349,6 +364,7 @@ export async function recordOf(cfg: Config, db: Db, creatorId: string, now = new
     },
     coins: coinViews,
     received,
+    bars: await publishedBars(db, creatorId, own, now),
     earnings: await earningsByQuote(cfg, heat, curvePaid, lpPaid),
     servedAt: now.toISOString(),
   };
@@ -398,4 +414,20 @@ export async function getCurrentRecord(c: Context<AppEnv>) {
   if (row) await completeRotations(db, new Date(), row.id);
   c.header("cache-control", "no-store");
   return c.json(row ? await summaryOf(db, row.id) : null);
+}
+
+/**
+ * `GET /creators/:key/bars`: the record's Bars with their evidence, replies and appeals (spec 6.5, 9 screen 5), for its
+ * own creator only, signed in as the record: nobody else sees a finding before it is published.
+ */
+export async function getPrivateBars(c: Context<AppEnv>) {
+  const { db } = c.var;
+  c.header("cache-control", "no-store");
+  const creator = await sessionCreator(c);
+  if (!creator) return c.json({ error: "Sign in as this record's creator to see its private view." }, 401);
+  const id = await resolveRecord(db, c.req.param("key")!);
+  if (!id) return c.json({ error: "Heat has no Creator record for this." }, 404);
+  if (id !== creator.id) return c.json({ error: "Only this record's own creator sees its private view." }, 403);
+  const body: PrivateBars = { bars: await privateBars(db, id, await walletsOfRecord(db, id)) };
+  return c.json(body);
 }

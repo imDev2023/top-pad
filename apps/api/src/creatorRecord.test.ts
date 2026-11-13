@@ -249,6 +249,7 @@ describe("a Creator record", () => {
       handedOver: 1,
       quiet: 1,
       marks: { verifiedCreator: true, verifiedHuman: false },
+      barred: null,
       since: at(0).toISOString(),
     });
     expect(shown.launches).toEqual({ instant: 2, fairOpen: { opened: 1, failed: 1, scheduled: 1 } });

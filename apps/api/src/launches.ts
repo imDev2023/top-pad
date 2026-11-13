@@ -39,6 +39,7 @@ import { offeredQuote } from "./quotes";
 import { startKeeper } from "./windowClaims";
 import { refuse, type AppEnv } from "./http";
 import { loadKeeper } from "./keeper";
+import { barProblem } from "./bars";
 import { MetadataUploadFailed, signItems, sniffImageType, storeItems, uploadItem, waitServed, type ImageType } from "./metadata";
 import { firstRefusal, judgeLaunch, judgeLaunchText } from "./vampShield";
 
@@ -98,11 +99,20 @@ export const vampShieldRefusal = (verdict: {
   ...(verdict.imageSha256 ? { imageSha256: verdict.imageSha256 } : {}),
 });
 
+/** The X account a record has linked, by X's numeric id, or null. */
+async function xUserIdOf(db: DbOrTransaction, creatorId: string) {
+  const [row] = await db.select({ xUserId: creators.xUserId }).from(creators).where(eq(creators.id, creatorId));
+  return row?.xUserId ?? null;
+}
+
 /**
- * Why the creator cannot launch from `wallet` now, or null: one Creator wallet at a time (spec 7), the record's, or,
+ * Why the creator cannot launch from `wallet` now, or null: a Bar (spec 6.5); one Creator wallet at a time (spec 7), the record's, or,
  * before its first launch, any wallet no other record holds; and only so many launches waiting to be signed.
  */
 export async function launchProblem(db: Db, creatorId: string, wallet: string): Promise<{ status: 403 | 409 | 429; refusal: LaunchRefusal } | null> {
+  // A Bar first (spec 6.5): our launch key co-signs nothing for a barred record, wallet or X account.
+  const barred = await barProblem(db, { creatorId, wallet, xUserId: await xUserIdOf(db, creatorId) });
+  if (barred) return { status: 403, refusal: barred };
   const current = await currentCreatorWallet(db, creatorId);
   if (current && current !== wallet) {
     return {
@@ -249,7 +259,7 @@ async function prepareInstant(c: Context<AppEnv>, creator: Creator, body: Form) 
 export class Refused extends Error {
   constructor(
     readonly status: 403 | 409,
-    readonly code: "not_the_creator_wallet" | "wallet_taken",
+    readonly code: "not_the_creator_wallet" | "wallet_taken" | "barred",
     message: string,
   ) {
     super(message);
@@ -262,7 +272,10 @@ export class Refused extends Error {
  * wallets. Throws `Refused` when the wallet is not, or can no longer become, the record's.
  */
 export async function bindCreatorWallet(tx: DbOrTransaction, creatorId: string, wallet: string, signature: string) {
-  await tx.select({ id: creators.id }).from(creators).where(eq(creators.id, creatorId)).for("update");
+  const [locked] = await tx.select({ id: creators.id, xUserId: creators.xUserId }).from(creators).where(eq(creators.id, creatorId)).for("update");
+  // Checked again as the launch key is about to co-sign: a case confirmed since the launch was prepared refuses it.
+  const barred = await barProblem(tx, { creatorId, wallet, xUserId: locked?.xUserId ?? null });
+  if (barred) throw new Refused(403, "barred", barred.error);
   const current = await currentCreatorWallet(tx, creatorId);
   if (current && current !== wallet) {
     throw new Refused(403, "not_the_creator_wallet", `Your Creator wallet is ${short(current)}, the only wallet that can sign your launches.`);

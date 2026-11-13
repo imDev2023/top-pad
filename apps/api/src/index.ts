@@ -15,7 +15,8 @@ import { verifyMessageRoute, verifyRoute } from "./verify";
 import { getCoinRadar, reviewBundles } from "./bundleRadar";
 import { getCoin, getCoinCandles, getCoinTrades } from "./coins";
 import { getEarnings, prepareClaim, reportClaim } from "./earnings";
-import { getCreatorRecord, getCurrentRecord } from "./creatorRecord";
+import { appealBar, getEnforcement, replyToBar, sendBarNotices } from "./bars";
+import { getCreatorRecord, getCurrentRecord, getPrivateBars } from "./creatorRecord";
 import { prepareCreatorRole, reportCreatorRole } from "./creatorRole";
 import {
   acceptHandover,
@@ -124,7 +125,7 @@ app.post("*", async (c, next) => {
   const refusal: LaunchRefusal = { error: `The image is too large: a coin's image can be at most ${Math.round(maxImageBytes / 1024)} KB.`, code: "image" };
   return bodyLimit({ maxSize: maxImageBytes + 16 * 1024, onError: (c) => c.json(refusal, 413) })(c, next);
 });
-for (const path of ["/auth/*", "/me", "/verify", "/verify/*", "/launches", "/launches/*", "/vamp-shield/*", "/coins/*", "/earnings/*", "/fair-opens/*", "/creators/*"]) app.use(path, withDb);
+for (const path of ["/auth/*", "/me", "/verify", "/verify/*", "/launches", "/launches/*", "/vamp-shield/*", "/coins/*", "/earnings/*", "/fair-opens/*", "/creators/*", "/bars/*", "/enforcement"]) app.use(path, withDb);
 app.get("/auth/x/start", startXLink);
 app.get("/auth/x/callback", finishXLink);
 app.post("/auth/wallet/message", walletSignInMessage);
@@ -166,6 +167,10 @@ app.post("/creators/changes/:id/cancel/message", cancelMessageRoute);
 app.post("/creators/changes/:id/cancel", cancelChange);
 app.get("/creators/current/:wallet", getCurrentRecord);
 app.get("/creators/:key", getCreatorRecord);
+app.get("/creators/:key/bars", getPrivateBars);
+app.post("/bars/:id/replies", replyToBar);
+app.post("/bars/:id/appeals", appealBar);
+app.get("/enforcement", getEnforcement);
 app.post("/fair-opens/transactions", reportFairOpenTransaction);
 app.get("/fair-opens/:launch", getFairOpen);
 app.post("/fair-opens/:launch/deposit", prepareDeposit);
@@ -266,6 +271,8 @@ async function scheduled(_controller: ScheduledController, env: Bindings, ctx: E
     if (new Date(_controller.scheduledTime).getUTCMinutes() < 5) {
       await runJob(db, "lp-fees", () => claimHeatLpFees(db, env), { exclusive: true }).catch(() => undefined);
     }
+    // The X direct messages Bars owe their creators (spec 6.5), written by the operator app as it confirms a case.
+    await runJob(db, "bar-notices", () => sendBarNotices(db, cfg, env), { exclusive: true }).catch(() => undefined);
     // Creator wallet rotations through X whose 7-day cooldown has ended take effect (spec 7).
     await runJob(db, "creator-rotations", () => completeRotations(db), { exclusive: true }).catch(() => undefined);
     await runJob(db, "housekeeping", () => housekeeping(db, env), { exclusive: true }).catch(() => undefined);

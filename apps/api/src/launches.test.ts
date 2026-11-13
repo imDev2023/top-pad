@@ -19,7 +19,7 @@ import { CLUSTERS, DYNAMIC_BONDING_CURVE_PROGRAM_ADDRESS } from "@top-pad/chain"
 import { parseInitializeVirtualPoolWithSplTokenInstruction } from "@top-pad/clients/dbc";
 import { FEE_PROGRAM_ADDRESS, parseRegisterCoinInstruction } from "@top-pad/clients/fee";
 import { LaunchRefusal, LaunchStatus, Me, PreparedLaunch } from "@top-pad/contract";
-import { coins, createDb, creatorWallets, launches, protectedCoins, type Db } from "@top-pad/db";
+import { bars, bundleCases, coins, createDb, creatorWallets, launches, protectedCoins, type Db } from "@top-pad/db";
 import { createTestDatabase } from "@top-pad/db/testing";
 import { candidateKeys, FOLD_VERSION } from "@top-pad/vamp-shield";
 import { app } from "./index";
@@ -276,6 +276,68 @@ describe("an Instant launch", () => {
 
     const someoneElse = await linkX({ id: "2005", username: "someone_else" });
     expect(await refusal(await prepare(someoneElse, { ticker: "TAKEN", wallet: wallet.address }))).toMatchObject({ status: 409, code: "wallet_taken" });
+  });
+
+  /** A confirmed case's Bar, as the operator app writes it (spec 6.5). */
+  async function barOn(o: { creatorId?: string | null; wallet: string; xUserId?: string | null; lifted?: boolean }) {
+    const mint = (await testKeypair()).signer.address;
+    const [c] = await db
+      .insert(bundleCases)
+      .values({ mint, creatorWallet: o.wallet, creatorId: o.creatorId ?? null, status: "confirmed", linkedWallets: 4, linkedCoins: 1n, supply: 100n, evidence: {}, evidenceKey: `k/${mint}` })
+      .returning();
+    const now = new Date();
+    await db.insert(bars).values({
+      caseId: c!.id,
+      mint,
+      creatorId: o.creatorId ?? null,
+      creatorWallet: o.wallet,
+      xUserId: o.xUserId ?? null,
+      confirmedBy: "operator@heat.test",
+      confirmedAt: now,
+      publishAt: new Date(now.getTime() + 72 * 3_600_000),
+      note: "confirmed",
+      liftedAt: o.lifted ? now : null,
+    });
+  }
+
+  it("is refused for a barred record, its Creator wallet or its X account, before the launch key co-signs anything (spec 6.5)", async () => {
+    // The record itself.
+    const cookie = await linkX({ id: "2601", username: "barred_record" });
+    const wallet = (await testKeypair()).signer;
+    const launch = await prepared(await prepare(cookie, { ticker: "BEFORE", wallet: wallet.address }));
+    expect((await submit(cookie, launch.id, await signAsWallet(launch, wallet))).status).toBe(200);
+    const [{ id }] = await db.select({ id: creatorWallets.creatorId }).from(creatorWallets).where(eq(creatorWallets.wallet, wallet.address)) as [{ id: string }];
+    await barOn({ creatorId: id, wallet: wallet.address });
+    const refused = await refusal(await prepare(cookie, { ticker: "AFTER", wallet: wallet.address }));
+    expect(refused).toMatchObject({ status: 403, code: "barred" });
+    expect(refused.error).toContain("confirmed a creator bundle");
+    expect(refused.error).toContain("Creator record");
+
+    // A wallet barred under another record: a fresh record that signs in with it is still refused.
+    const banned = (await testKeypair()).signer;
+    await barOn({ wallet: banned.address });
+    expect(await refusal(await prepare(await signInWallet(request, banned), { ticker: "FRESH", wallet: banned.address }))).toMatchObject({ status: 403, code: "barred" });
+
+    // An X account barred under another record: linking it to a new record is no way back.
+    await barOn({ wallet: (await testKeypair()).signer.address, xUserId: "2602" });
+    const again = await linkX({ id: "2602", username: "came_back" });
+    expect(await refusal(await prepare(again, { ticker: "BACK", wallet: (await testKeypair()).signer.address }))).toMatchObject({ status: 403, code: "barred" });
+
+    // A lifted Bar stands against nothing.
+    const cleared = (await testKeypair()).signer;
+    await barOn({ wallet: cleared.address, lifted: true });
+    await prepared(await prepare(await signInWallet(request, cleared), { ticker: "CLEARED", wallet: cleared.address }));
+  });
+
+  it("refuses the submit of a launch prepared before its creator was barred", async () => {
+    const wallet = (await testKeypair()).signer;
+    const cookie = await signInWallet(request, wallet);
+    const launch = await prepared(await prepare(cookie, { ticker: "RACED", wallet: wallet.address }));
+    const [{ id }] = await db.select({ id: creatorWallets.creatorId }).from(creatorWallets).where(eq(creatorWallets.wallet, wallet.address)) as [{ id: string }];
+    await barOn({ creatorId: id, wallet: wallet.address });
+    expect(await refusal(await submit(cookie, launch.id, await signAsWallet(launch, wallet)))).toMatchObject({ status: 403, code: "barred" });
+    expect((await db.select({ status: launches.status }).from(launches).where(eq(launches.id, launch.id)))[0]!.status).toBe("prepared");
+    expect(fakes.sent).toEqual([]);
   });
 
   it("is refused for a ticker outside A to Z and 0 to 9, the reason shown", async () => {

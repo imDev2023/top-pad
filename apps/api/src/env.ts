@@ -28,6 +28,12 @@ export type Bindings = {
   /** The X app's OAuth 2.0 client (spec 2.1 step 1); linking X is off until both are set. */
   X_CLIENT_ID?: string;
   X_CLIENT_SECRET?: string;
+  /**
+   * Heat's own X account's OAuth 2.0 user token with `dm.write`, which sends a barred creator their X direct message
+   * (spec 6.5): a Secrets Store binding with the real X app, or a plain var naming the stand-in's account on devnet.
+   * Without it the messages wait in `x_messages`.
+   */
+  X_DM_TOKEN?: SecretBinding | string;
   /** X's endpoints, overridable so tests can stand in for X. */
   X_AUTHORIZE_URL?: string;
   X_API_URL?: string;

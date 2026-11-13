@@ -73,7 +73,11 @@
         "X_CLIENT_ID": "x-stand-in",
         "X_CLIENT_SECRET": "x-stand-in-has-no-secret",
         "X_AUTHORIZE_URL": "https://top-pad-x-stand-in-devnet.rc-labs.workers.dev/i/oauth2/authorize",
-        "X_API_URL": "https://top-pad-x-stand-in-devnet.rc-labs.workers.dev"
+        "X_API_URL": "https://top-pad-x-stand-in-devnet.rc-labs.workers.dev",
+        // Heat's own X account on the stand-in, @heat_devnet_account, whose token sends a barred creator their direct
+        // message (spec 6.5): the stand-in's token for that handle, no secret. The real app replaces it with the secret
+        // X_DM_TOKEN, Heat's account's user token with dm.write, which only the owner can grant.
+        "X_DM_TOKEN": "standin.eyJ1c2VybmFtZSI6ImhlYXRfZGV2bmV0X2FjY291bnQifQ"
       },
       // `top-pad-devnet-mac`, in front of the devnet database on the owner's Mac through the Workers VPC service and the
       // tunnel `top-pad-devnet-db` (ops/devnet-db, spec 10.4, #102), with its query cache off: Hyperdrive never

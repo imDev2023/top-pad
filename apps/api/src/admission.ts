@@ -23,7 +23,7 @@ import {
 import { and, eq, isNotNull, lt, ne, sql } from "drizzle-orm";
 import { admissionMessage, FAIR_OPEN_PROGRAM_ADDRESS, signAdmission, Tier, tierCap, type Admission, type HeatCluster } from "@top-pad/chain";
 import type { DepositorTier } from "@top-pad/contract";
-import { admissionReviews, admissions, creators, creatorWallets, linkageHubs, walletClearances, walletVerifications, type Db } from "@top-pad/db";
+import { admissionReviews, admissions, creators, creatorWallets, launches, linkageHubs, walletClearances, walletVerifications, type Db } from "@top-pad/db";
 import { FundingUnreadable, traceFunding, type FundingSource, type FundingTrace } from "@top-pad/indexer";
 import type { SecretBinding } from "./env";
 
@@ -290,6 +290,7 @@ export async function refusalOf(
   person: Person,
   seatExists: (seat: Address) => Promise<boolean>,
 ): Promise<string | null> {
+  if (await cancelledLaunch(db, launch.launch)) return CANCELLED;
   const refused = (await creatorTie(db, linkage, launch, wallet, person)) ?? (await heldElsewhere(db, linkage, launch, wallet, person, seatExists));
   if (refused) await record(db, launch, wallet, person, refused);
   return refused?.reason ?? null;
@@ -317,6 +318,8 @@ export async function admit(
   now: bigint,
   seatExists: (seat: Address) => Promise<boolean>,
 ): Promise<Admitted> {
+  // A launch a Bar cancelled takes no deposits (spec 6.5); nobody is to blame, so nothing goes to the operator's queue.
+  if (await cancelledLaunch(db, launch.launch)) throw new AdmissionRefused(CANCELLED);
   const refuse = async (review: Review) => {
     await record(db, launch, wallet, person, review);
     return new AdmissionRefused(review.reason);
@@ -356,3 +359,11 @@ export async function admit(
 }
 
 export class AdmissionRefused extends Error {}
+
+const CANCELLED = "Heat cancelled this Fair Open before its window: it takes no deposits, and fails at its open.";
+
+/** Whether a Bar cancelled the launch before its window (spec 6.5). */
+async function cancelledLaunch(db: Db, launch: Address) {
+  const [row] = await db.select({ at: launches.cancelledAt }).from(launches).where(eq(launches.fairOpen, launch));
+  return !!row?.at;
+}
