@@ -1185,7 +1185,7 @@ export const knownBots = pgTable(
     /** The Heat launches it bought in the first 2 seconds of, and the transactions in which it bought and sold. */
     earlyLaunches: integer("early_launches").notNull(),
     roundTrips: integer("round_trips").notNull(),
-    /** Up to ten of each: `{ early: [{ mint, signature, seconds }], roundTrips: [signature] }`. */
+    /** Up to ten of each: `{ early: [{ mint, signature, seconds }], roundTrips: [signature] }`, a launch's first early buy. */
     evidence: jsonb("evidence").notNull(),
     listedAt: timestamp("listed_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

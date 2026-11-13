@@ -139,10 +139,20 @@ export function DiscoverBoard({ initial }: { initial: Board | null }) {
     };
   }, [query]);
 
+  // The calendar by the clock: an entry moves to Live now as its window begins, and off the board as it opens, between reads.
+  const { liveNow, upNext } = useMemo(() => {
+    const entries = [...(board?.liveNow ?? []), ...(board?.upNext ?? [])].filter((e) => Date.parse(e.opensAt) > now);
+    const open = (e: CalendarEntry) => Date.parse(e.depositsOpenAt) <= now;
+    return {
+      liveNow: entries.filter(open).sort((a, b) => a.opensAt.localeCompare(b.opensAt)),
+      upNext: entries.filter((e) => !open(e)),
+    };
+  }, [board?.liveNow, board?.upNext, now]);
+
   // Up next, by UTC day.
   const days = useMemo(() => {
     const groups: { heading: string; entries: CalendarEntry[] }[] = [];
-    for (const entry of board?.upNext ?? []) {
+    for (const entry of upNext) {
       const heading = dayHeading(entry.opensAt, now);
       const last = groups.at(-1);
       if (last?.heading === heading) last.entries.push(entry);
@@ -151,9 +161,7 @@ export function DiscoverBoard({ initial }: { initial: Board | null }) {
     // Each day's featured slots first, then the rest by their time.
     for (const g of groups) g.entries.sort((a, b) => Number(b.featured) - Number(a.featured) || a.opensAt.localeCompare(b.opensAt));
     return groups;
-  }, [board?.upNext, now]);
-
-  const liveNow = (board?.liveNow ?? []).filter((e) => Date.parse(e.opensAt) > now);
+  }, [upNext, now]);
 
   return (
     <div className={`page ${styles.board}`}>
@@ -210,7 +218,7 @@ export function DiscoverBoard({ initial }: { initial: Board | null }) {
             )}
           </Section>
 
-          <Section id="next" title="Up next" count={board.upNext.length} note="The sealed calendar for the next 7 days. Each coin stays a question mark until it opens.">
+          <Section id="next" title="Up next" count={upNext.length} note="The sealed calendar for the next 7 days. Each coin stays a question mark until it opens.">
             {days.length ? (
               <div className={styles.days}>
                 {days.map((day) => (

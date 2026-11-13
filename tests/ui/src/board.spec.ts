@@ -10,42 +10,26 @@
 // Run it alone with `e2e:devnet board.spec.ts`, after starting the operator apps:
 // `direnv exec "<main checkout>" pnpm --filter @top-pad/tests-ui operators` (OPERATOR_URL overrides http://localhost:8803).
 // About 30 minutes and 0.25 devnet SOL a run, most of it three pools' rent; the wallets derive from the bank's key and the
-// run's name, which it logs, and are swept back at the end.
+// run's name, which it logs, and are swept back at the end; a stopped run is swept with
+// `pnpm exec tsx tests/ui/src/boardRun.ts <run> [--fair-open <mint>] [instant mint...]`.
 import { expect, test, type Page } from "@playwright/test";
-import { createKeyPairSignerFromPrivateKeyBytes, getUtf8Encoder, type Address, type KeyPairSigner } from "@solana/kit";
+import type { Address, KeyPairSigner } from "@solana/kit";
 import { Tier } from "@top-pad/chain";
 import { fetchLaunch } from "@top-pad/clients/fair-open";
 import { Board, LiveBatch, PreparedLaunch, SearchResults } from "@top-pad/contract";
-import { coins, fairOpens, knownBots, launches, pools, trades } from "@top-pad/db";
-import { sellAndClose, signedBundle, spray, wrapSol } from "@top-pad/tests-devnet/bundle";
-import { bankFile, chainTime, fund, poolAroundHeat, rpc, swap, sweep } from "@top-pad/tests-devnet/devnet";
-import { admitted, deposit, newPerson, sellAll } from "@top-pad/tests-devnet/fair-open";
+import { coinRadar, coins, fairOpens, knownBots, launches, pools, trades } from "@top-pad/db";
+import { signedBundle, spray, wrapSol } from "@top-pad/tests-devnet/bundle";
+import { chainTime, fund, poolAroundHeat, rpc, swap } from "@top-pad/tests-devnet/devnet";
+import { admitted, deposit, newPerson } from "@top-pad/tests-devnet/fair-open";
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { readFileSync } from "node:fs";
 import { api, BUY, COPIES, database, INSTANT, SOL, sleep, waitFor } from "./bundler";
+import { boardWallets, sweepBoardRun } from "./boardRun";
 import { expectVampLaunchable, launchCoin, newTicker, pageErrors, runName, signInOnLaunch, snap, uniqueCoinImage } from "./steps";
 import { TARGET } from "./target";
 import { installTestWallet } from "./wallet";
 
 const OPERATOR = process.env.OPERATOR_URL ?? "http://localhost:8803";
 const board = () => api("/board", Board);
-
-/** The run's wallets, derived from the bank's key and the run's name, so a stopped run can be swept back. */
-async function runWallets(run: string) {
-  const secret = Uint8Array.from(JSON.parse(readFileSync(bankFile, "utf8")) as number[]).slice(0, 32);
-  const wallet = async (label: string) =>
-    createKeyPairSignerFromPrivateKeyBytes(new Uint8Array(await crypto.subtle.digest("SHA-256", new Uint8Array([...secret, ...getUtf8Encoder().encode(`heat devnet board ${run} ${label}`)]))));
-  const many = (label: string, n: number) => Promise.all(Array.from({ length: n }, (_, i) => wallet(`${label} ${i}`)));
-  return {
-    creators: await many("creator", 5),
-    openNow: await wallet("fair open now"),
-    openLater: await wallet("fair open later"),
-    bot: await wallet("bot"),
-    buyers: await many("buyer", 7),
-    depositor: await wallet("depositor"),
-    around: await wallet("around"),
-  };
-}
 
 /** Schedules a Fair Open from the site, now or with its window starting `startIn` ms from now, and returns its launch. */
 async function scheduleFromSite(page: Page, creator: KeyPairSigner, teaser: string, startIn: number | null): Promise<Address> {
@@ -111,14 +95,14 @@ test("the board ranks a cohort's coins by their people, every 15 s, and shows on
   const errors = pageErrors(page);
   await fetch(`${TARGET.api}/indexer`);
   const run = `board-${Date.now()}`;
-  const w = await runWallets(run);
+  const w = await boardWallets(run);
   console.log(`board run ${run}: bot ${w.bot.address}`);
   const { db, close } = database();
   const mints: Address[] = [];
   let around: { mint: Address } | null = null;
   let openedMint: Address | null = null;
   let laterLaunch: Address | null = null;
-  const all = [...w.creators, w.openNow, w.openLater, w.bot, ...w.buyers, w.depositor, w.around];
+  const all = w.all;
   try {
     await fund(all, [...w.creators.map(() => SOL / 20n), SOL / 20n, SOL / 20n, SOL / 20n, ...w.buyers.map(() => SOL / 50n), (SOL * 35n) / 100n, SOL / 20n]);
     await wrapSol(w.bot, BUY * BigInt(COPIES) * 6n);
@@ -181,11 +165,22 @@ test("the board ranks a cohort's coins by their people, every 15 s, and shows on
     await buy(w.buyers[6]!, c);
     for (const buyer of w.buyers.slice(0, 3)) await buy(buyer, around.mint);
 
-    // Trending ranks them by people. The bot bought all three: counted until the known-bot job lists it.
+    // Trending ranks them by people. The bot bought all three: counted until the known-bot job lists it, except where its
+    // buy landed in the four transactions right after the creation, which Bundle Radar takes for a direct link to the
+    // creator (spec 6.5), so Trending never counts it on that coin.
     const counts = (t: Board["trending"]) => [a, b, c].map((m) => t.find((x) => x.mint === m)?.trending?.buyers ?? 0);
-    const ranked = await waitFor(board, (x) => [[5, 3, 2], [4, 2, 1]].some((want) => JSON.stringify(counts(x.trending)) === JSON.stringify(want)), 180_000);
+    await waitFor(async () => (await db.select().from(coinRadar).where(inArray(coinRadar.mint, [a, b, c]))).length, (n) => n === 3, 120_000);
+    const radars = await db.select().from(coinRadar).where(inArray(coinRadar.mint, [a, b, c]));
+    const botTied = [a, b, c].map((m) => radars.find((r) => r.mint === m)!.linkedWallets.includes(w.bot.address));
+    const listedCounts = [4, 2, 1];
+    const unlistedCounts = listedCounts.map((n, i) => n + (botTied[i] ? 0 : 1));
+    console.log(`the bot is tied to the creator on ${botTied.filter(Boolean).length} of the 3 coins`);
+    const same = (x: number[], y: number[]) => JSON.stringify(x) === JSON.stringify(y);
+    const ranked = await waitFor(board, (x) => same(counts(x.trending), unlistedCounts) || same(counts(x.trending), listedCounts), 180_000);
+    // Ranked by people: more buyers first.
     const order = ranked.trending.map((x) => x.mint).filter((m) => ([a, b, c] as string[]).includes(m));
-    expect(order).toEqual([a, b, c]);
+    expect(order.map((m) => counts(ranked.trending)[[a, b, c].indexOf(m as Address)])).toEqual([...counts(ranked.trending)].sort((x, y) => y - x));
+    expect(order[0]).toBe(a);
     console.log(`trending: ${JSON.stringify(counts(ranked.trending))}`);
 
     // Pushed every 15 s over the board's live room, read without a reload.
@@ -207,7 +202,7 @@ test("the board ranks a cohort's coins by their people, every 15 s, and shows on
     // The known-bot job lists the bot, and Trending stops counting it.
     const listed = await waitFor(async () => (await db.select().from(knownBots).where(eq(knownBots.wallet, w.bot.address)))[0] ?? null, (r) => r !== null, 7 * 60_000);
     expect(listed!.earlyLaunches).toBeGreaterThanOrEqual(3);
-    await waitFor(board, (x) => JSON.stringify(counts(x.trending)) === JSON.stringify([4, 2, 1]), 60_000);
+    await waitFor(board, (x) => same(counts(x.trending), listedCounts), 60_000);
     await expect(page.locator(`[data-testid="coin-row"][data-mint="${a}"]`).getByTestId("buyers")).toContainText("4 buyers", { timeout: 30_000 });
     await snap(page, "board-2-trending");
 
@@ -221,8 +216,8 @@ test("the board ranks a cohort's coins by their people, every 15 s, and shows on
     await row.getByRole("button", { name: "Remove" }).click();
     await expect(operator.getByText("Done, and written to the audit log")).toBeVisible();
     await operator.close();
-    await waitFor(board, (x) => JSON.stringify(counts(x.trending)) === JSON.stringify([5, 3, 2]), 60_000);
-    await expect(page.locator(`[data-testid="coin-row"][data-mint="${a}"]`).getByTestId("buyers")).toContainText("5 buyers", { timeout: 30_000 });
+    await waitFor(board, (x) => same(counts(x.trending), unlistedCounts), 60_000);
+    await expect(page.locator(`[data-testid="coin-row"][data-mint="${a}"]`).getByTestId("buyers")).toContainText(`${unlistedCounts[0]} buyers`, { timeout: 30_000 });
 
     // The pool made around Heat's flow is nowhere: not on the board, the page, nor in search by its mint or its name.
     expect(JSON.stringify(await board())).not.toContain(around.mint);
@@ -256,14 +251,9 @@ test("the board ranks a cohort's coins by their people, every 15 s, and shows on
         console.warn(`the later Fair Open ${laterLaunch} has not failed yet: sweep ${w.openLater.address} once it has`),
       );
     }
-    if (openedMint) {
-      await sleep(70_000);
-      await sellAll(w.depositor, openedMint).catch((e) => console.warn("selling the Fair Open's coins failed", e));
-    }
-    for (const mint of [...mints, ...(around ? [around.mint] : [])]) {
-      for (const wallet of [w.bot, ...w.buyers]) await sellAndClose(wallet, mint, INSTANT).catch(() => undefined);
-    }
-    await sweep(...all).catch((e) => console.warn("sweeping failed", e));
+    // The Fair Open's coins are sold once its Tax window has ended and the keeper has pushed them.
+    if (openedMint) await sleep(70_000);
+    await sweepBoardRun(run, [...mints, ...(around ? [around.mint] : [])], openedMint).catch((e) => console.warn("sweeping failed", e));
     await close();
   }
 });

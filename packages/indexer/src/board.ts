@@ -104,12 +104,15 @@ export async function refreshKnownBots(db: Db, now = new Date()): Promise<{ list
       join trades t on t.mint = c.mint and t.at < p.activated_at + make_interval(secs => ${EARLY_SECONDS})
       where t.side = 'buy' and t.signature <> c.created_signature
     ),
+    first_early_buys as (
+      select distinct on (wallet, mint) wallet, mint, signature, at, seconds from early_buys order by wallet, mint, at, signature
+    ),
     early as (
-      select wallet, count(distinct mint)::int as launches,
+      select wallet, count(*)::int as launches,
         (jsonb_agg(jsonb_build_object('mint', mint, 'signature', signature, 'seconds', seconds) order by at desc)) as evidence
-      from early_buys
+      from first_early_buys
       group by wallet
-      having count(distinct mint) >= ${EARLY_LAUNCHES}
+      having count(*) >= ${EARLY_LAUNCHES}
     ),
     trips as (
       select signature, trader, min(at) as at

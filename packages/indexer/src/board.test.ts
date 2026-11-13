@@ -232,6 +232,8 @@ describe("the known-bot list", () => {
     const twice = addr("twice");
     for (const [i, l] of launches.entries()) {
       await swap(l.mint, sniper, "buy", new Date(l.opened.getTime() + (i === 2 ? 1_000 : 0)));
+      // A second copy of the snipe in the same launch: still one launch, one piece of evidence.
+      await swap(l.mint, sniper, "buy", new Date(l.opened.getTime() + 1_000));
       if (i < 2) await swap(l.mint, twice, "buy", new Date(l.opened.getTime() + 1_000));
       // Two seconds after the open is the third second: not "the first 2 seconds".
       await swap(l.mint, addr("late"), "buy", new Date(l.opened.getTime() + 2_000));
