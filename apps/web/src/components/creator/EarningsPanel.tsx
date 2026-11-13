@@ -4,7 +4,7 @@ import { getBase58Decoder } from "@solana/kit";
 import { useSignAndSendTransactions } from "@solana/react";
 import type { UiWalletAccount } from "@wallet-standard/react";
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import type { ClaimOutcome, CreatorEarnings, EarningsCoin, EarningsQuote, QuoteInfo } from "@top-pad/contract";
 import { ApiProblem, getEarnings, prepareClaim, prepareCreatorRole, reportClaim, reportCreatorRole } from "@/lib/api";
 import { quoteText, shortAddress, type QuoteUnit } from "@/lib/format";
@@ -141,7 +141,13 @@ export function EarningsPanel({ account, chain, onChanged }: { account: UiWallet
               <div className={styles.quoteHead}>
                 <h3>Priced in {group.quote.symbol}</h3>
                 <p className="note">
-                  <span className="num">{earned(group.waiting, group.quote)}</span> waiting, claimed in a transaction of its own
+                  {BigInt(group.waiting) > 0n ? (
+                    <>
+                      <span className="num">{earned(group.waiting, group.quote)}</span> waiting, claimed in a transaction of its own
+                    </>
+                  ) : (
+                    `Nothing waiting in ${group.quote.symbol} now`
+                  )}
                 </p>
               </div>
             )}
@@ -411,10 +417,14 @@ function ClaimStatus({ claim, quotes }: { claim: Claim; quotes: EarningsQuote[] 
         <b>{paid.length ? `Claimed ${inWords(paid)}` : "Claimed"}</b>
         <span className="note">
           It is in your wallet{paid.length === 1 && paid[0]!.quote.symbol === "SOL" ? " as SOL" : ""}.{" "}
+          {outcome.transactions.length > 1 && "See it on the explorer: "}
           {outcome.transactions.map((t, i) => (
-            <a key={t.signature} href={t.explorer} target="_blank" rel="noreferrer">
-              {outcome.transactions.length > 1 ? `Transaction ${i + 1}` : "See it on the explorer"}
-            </a>
+            <Fragment key={t.signature}>
+              {i > 0 && ", "}
+              <a href={t.explorer} target="_blank" rel="noreferrer">
+                {outcome.transactions.length > 1 ? `transaction ${i + 1}` : "See it on the explorer"}
+              </a>
+            </Fragment>
           ))}
         </span>
       </div>
