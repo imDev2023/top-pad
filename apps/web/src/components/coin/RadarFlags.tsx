@@ -51,7 +51,7 @@ export function RadarFlags({ mint, ticker, decimals, quote, version }: { mint: s
   const toggle = (flag: Flag) => setOpen((o) => (o === flag ? null : flag));
 
   return (
-    <section className={styles.radar} aria-label="Bundle Radar" data-testid="radar">
+    <section id="radar" className={styles.radar} aria-label="Bundle Radar" data-testid="radar">
       <div className={styles.strip}>
         <span className="eyebrow">Bundle Radar</span>
         {!radar ? (

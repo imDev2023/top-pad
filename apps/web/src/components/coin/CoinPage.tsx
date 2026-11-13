@@ -4,6 +4,7 @@ import type { Coin, LiveBatch, Trade } from "@top-pad/contract";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { coinLiveUrl, getCoin, getCoinTrades } from "@/lib/api";
 import { ago, coinAmount, compactNumber, scaledFigure, shortAddress } from "@/lib/format";
+import { CreatorSummaryCard } from "../creator/CreatorSummaryCard";
 import { QuoteLabels } from "../quote/QuoteLabels";
 import { CandleChart, type ChartFeed } from "./CandleChart";
 import styles from "./Coin.module.css";
@@ -330,6 +331,7 @@ export function CoinPage({ initial }: { initial: Coin }) {
             </span>
           </div>
         </aside>
+          {coin.record && <CreatorSummaryCard summary={coin.record} fallbackWallet={coin.creator.wallet} />}
           <QuoteLabels quote={coin.quote} place="coin" />
         </div>
       </div>

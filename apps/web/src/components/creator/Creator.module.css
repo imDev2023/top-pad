@@ -299,3 +299,38 @@
   gap: 2px;
   min-width: 0;
 }
+
+/* Handing a coin's creator role to another wallet, under its row */
+.roleAction,
+.roleForm {
+  grid-column: 1 / -1;
+}
+
+.roleAction {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: -6px;
+}
+
+.roleForm {
+  display: grid;
+  gap: 10px;
+  max-width: 560px;
+  justify-self: end;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+}
+
+@media (max-width: 640px) {
+  .roleAction {
+    justify-content: flex-start;
+    margin-top: 0;
+  }
+
+  .roleForm {
+    justify-self: stretch;
+  }
+}

@@ -157,3 +157,10 @@ export function marketCapBars<T extends { time: number; open: string; high: stri
   const scale = supply * quote.multiplier;
   return candles.map((c) => ({ time: c.time, open: Number(c.open) * scale, high: Number(c.high) * scale, low: Number(c.low) * scale, close: Number(c.close) * scale }));
 }
+
+/** A day as the pages write it, in UTC so the server and the browser agree: 13 Nov 2026. */
+export const dayOf = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+
+/** A moment as the pages write it, in UTC: 13 Nov 2026, 09:41 UTC. */
+export const momentOf = (iso: string) =>
+  `${dayOf(iso)}, ${new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "UTC" })} UTC`;

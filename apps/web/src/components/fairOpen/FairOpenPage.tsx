@@ -8,6 +8,7 @@ import { useLiveRoom } from "../coin/useLiveRoom";
 import { QuoteLabels } from "../quote/QuoteLabels";
 import { useWallet } from "../WalletProvider";
 import { DepositPanel } from "./DepositPanel";
+import { CreatorSummaryCard } from "../creator/CreatorSummaryCard";
 import styles from "./FairOpen.module.css";
 import { PotMeter } from "./PotMeter";
 import { SignOpenPanel } from "./SignOpenPanel";
@@ -189,6 +190,7 @@ export function FairOpenPage({ initial }: { initial: FairOpen }) {
             </div>
           )}
           {!ended && !open?.closed && <IfClosedNow view={view} />}
+          {view.record && <CreatorSummaryCard summary={view.record} fallbackWallet={view.creator.wallet} />}
         </aside>
 
         <div className={styles.main}>

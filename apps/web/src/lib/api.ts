@@ -6,8 +6,11 @@ import {
   CoinCandles,
   CoinTrades,
   CreatorEarnings,
+  CreatorRecord,
+  CreatorRoleOutcome,
   FairOpen,
   FairOpenOutcome,
+  HandoverOffers,
   Health,
   Holdings,
   LaunchRefusal,
@@ -16,6 +19,7 @@ import {
   Platform,
   QuoteList,
   PreparedClaim,
+  PreparedCreatorRole,
   PreparedFairOpenTransaction,
   PreparedLaunch,
   PreparedSwap,
@@ -27,6 +31,8 @@ import {
   VampShieldVerdict,
   VerifiedWallet,
   VerifyMessage,
+  WalletChange,
+  WalletChangeMessage,
   WalletSignInMessage,
   type VampAppealForm,
   type CandleSeconds,
@@ -268,3 +274,49 @@ export const reportFairOpen = (signature: string) => call(FairOpenOutcome, "/fai
 
 /** A Fair Open's live room: its deposits, withdrawals and failure as they land (spec 10.2). */
 export const fairOpenLiveUrl = (launch: string) => `${API_URL.replace(/^http/, "ws")}/live/fair-opens/${encodeURIComponent(launch)}`;
+
+/** A Creator record (spec 7, screen 5), by its id or by any wallet that is or was its Creator wallet. */
+export const getCreatorRecord = (key: string) => call(CreatorRecord, `/creators/${encodeURIComponent(key)}`);
+
+/** A Creator record as the server renders its page: "missing" when there is none, "unavailable" when the API did not answer. */
+export async function loadCreatorRecord(key: string): Promise<CreatorRecord | "missing" | "unavailable"> {
+  try {
+    const res = await fetch(`${API_URL}/creators/${encodeURIComponent(key)}`, { cache: "no-store", signal: AbortSignal.timeout(8_000) });
+    if (res.status === 404) return "missing";
+    const parsed = CreatorRecord.safeParse(await res.json());
+    return res.ok && parsed.success ? parsed.data : "unavailable";
+  } catch {
+    return "unavailable";
+  }
+}
+
+/** The message the current Creator wallet signs to offer its record to another wallet. */
+export const handoverMessage = (from: string, to: string) => call(WalletChangeMessage, "/creators/handover/message", postJson({ from, to }));
+
+/** The old wallet's signature, base64: the record is offered to the new wallet for a day. */
+export const offerHandover = (wallet: string, message: string, signature: string) => call(WalletChange, "/creators/handover", postJson({ wallet, message, signature }));
+
+/** The handovers offered to a wallet and not yet taken. */
+export const getHandoverOffers = (wallet: string) => call(HandoverOffers, `/creators/offers/${encodeURIComponent(wallet)}`);
+
+/** The new wallet's signature over the handover's message, base64: it is the record's Creator wallet from now on. */
+export const acceptHandover = (id: string, signature: string) => call(WalletChange, `/creators/changes/${encodeURIComponent(id)}/accept`, postJson({ signature }));
+
+/** The message a new wallet signs to rotate a lost Creator wallet through X, from a browser X signed in just now. */
+export const rotationMessage = (to: string) => call(WalletChangeMessage, "/creators/rotation/message", postJson({ to }));
+
+/** The new wallet's signature, base64: the rotation waits out its public 7-day cooldown. */
+export const requestRotation = (wallet: string, message: string, signature: string) => call(WalletChange, "/creators/rotation", postJson({ wallet, message, signature }));
+
+/** The message the current Creator wallet signs to cancel a pending handover or rotation. */
+export const cancelMessage = (id: string) => call(WalletChangeMessage, `/creators/changes/${encodeURIComponent(id)}/cancel/message`, postJson({}));
+
+/** The current Creator wallet's signature, base64: the change is cancelled. */
+export const cancelChange = (id: string, wallet: string, message: string, signature: string) =>
+  call(WalletChange, `/creators/changes/${encodeURIComponent(id)}/cancel`, postJson({ wallet, message, signature }));
+
+/** A coin's creator role, handed by the wallet holding it to another: the transaction for that wallet to sign and send. */
+export const prepareCreatorRole = (mint: string, holder: string, to: string) => call(PreparedCreatorRole, `/coins/${encodeURIComponent(mint)}/creator-role`, postJson({ holder, to }));
+
+/** A sent hand-over, settled by the API against the chain and indexed at once. */
+export const reportCreatorRole = (mint: string, signature: string) => call(CreatorRoleOutcome, `/coins/${encodeURIComponent(mint)}/creator-role/sent`, postJson({ signature }));

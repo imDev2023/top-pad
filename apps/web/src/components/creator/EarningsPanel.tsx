@@ -6,7 +6,7 @@ import type { UiWalletAccount } from "@wallet-standard/react";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import type { ClaimOutcome, CreatorEarnings, EarningsCoin } from "@top-pad/contract";
-import { ApiProblem, getEarnings, prepareClaim, reportClaim } from "@/lib/api";
+import { ApiProblem, getEarnings, prepareClaim, prepareCreatorRole, reportClaim, reportCreatorRole } from "@/lib/api";
 import { shortAddress, sol } from "@/lib/format";
 import type { SolanaChain } from "../WalletProvider";
 import { LooksLikeChip } from "../vampShield/LooksLike";
@@ -33,7 +33,7 @@ type Claim =
  * that accrue meanwhile come too). A claim the wallet signs is sent by the wallet, and the
  * API then reads what it paid from the chain.
  */
-export function EarningsPanel({ account, chain }: { account: UiWalletAccount; chain: SolanaChain }) {
+export function EarningsPanel({ account, chain, onChanged }: { account: UiWalletAccount; chain: SolanaChain; onChanged?: () => Promise<void> }) {
   const wallet = account.address;
   const [earnings, setEarnings] = useState<CreatorEarnings | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
@@ -115,7 +115,16 @@ export function EarningsPanel({ account, chain }: { account: UiWalletAccount; ch
           </div>
           <ul className={styles.list}>
             {earnings.coins.map((coin) => (
-              <CoinRow key={coin.mint} coin={coin} />
+              <CoinRow
+                key={coin.mint}
+                coin={coin}
+                account={account}
+                chain={chain}
+                onHandedOver={async () => {
+                  await load();
+                  await onChanged?.();
+                }}
+              />
             ))}
           </ul>
         </section>
@@ -124,7 +133,7 @@ export function EarningsPanel({ account, chain }: { account: UiWalletAccount; ch
   );
 }
 
-function CoinRow({ coin }: { coin: EarningsCoin }) {
+function CoinRow({ coin, account, chain, onHandedOver }: { coin: EarningsCoin; account: UiWalletAccount; chain: SolanaChain; onHandedOver: () => Promise<void> }) {
   return (
     <li className={styles.coin} data-testid="earnings-coin">
       <Link href={`/coin/${coin.mint}`} className={styles.identity}>
@@ -162,7 +171,95 @@ function CoinRow({ coin }: { coin: EarningsCoin }) {
         <span className={`eyebrow ${styles.label}`}>Claimed</span>
         <span className="num muted">{amount(coin.claimed)}</span>
       </span>
+      {account.features.includes(SIGN_AND_SEND) && <RoleHandover coin={coin} account={account} chain={chain} onHandedOver={onHandedOver} />}
     </li>
+  );
+}
+
+type Handing = { phase: "closed" } | { phase: "open" } | { phase: "sending" } | { phase: "failed"; problem: string };
+
+/**
+ * The coin's creator role handed to another wallet (spec 7), DBC's own `transfer_pool_creator`, signed and sent by this
+ * wallet: what waits now and every fee after goes to the new holder, while the coin stays on its launcher's record.
+ */
+function RoleHandover({ coin, account, chain, onHandedOver }: { coin: EarningsCoin; account: UiWalletAccount; chain: SolanaChain; onHandedOver: () => Promise<void> }) {
+  const signAndSend = useSignAndSendTransactions(account, chain);
+  const [to, setTo] = useState("");
+  const [handing, setHanding] = useState<Handing>({ phase: "closed" });
+  const valid = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(to.trim()) && to.trim() !== account.address;
+
+  async function handOver() {
+    setHanding({ phase: "sending" });
+    try {
+      const { transaction } = await prepareCreatorRole(coin.mint, account.address, to.trim());
+      let sent;
+      try {
+        sent = await signAndSend({ transaction: toBytes(transaction) });
+      } catch (e) {
+        setHanding({ phase: "failed", problem: declined(e) ? "You declined in your wallet. Nothing was sent." : `Your wallet could not send it: ${(e as Error).message}` });
+        return;
+      }
+      const outcome = await reportCreatorRole(coin.mint, getBase58Decoder().decode(sent[0]!.signature));
+      if (outcome.status !== "landed") {
+        setHanding({ phase: "failed", problem: outcome.status === "failed" ? `It failed on chain: ${outcome.error ?? "no reason given"}.` : "It has not confirmed yet. Check it on the explorer." });
+        return;
+      }
+      setHanding({ phase: "closed" });
+      await onHandedOver();
+    } catch (e) {
+      setHanding({ phase: "failed", problem: e instanceof ApiProblem ? e.message : `It did not go through: ${(e as Error).message}` });
+    }
+  }
+
+  if (handing.phase === "closed") {
+    return (
+      <div className={styles.roleAction}>
+        <button type="button" className="btn btn-sm btn-ghost" onClick={() => setHanding({ phase: "open" })}>
+          Hand over creator role
+        </button>
+      </div>
+    );
+  }
+  return (
+    <form
+      className={styles.roleForm}
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (valid) void handOver();
+      }}
+    >
+      <div className="field">
+        <label htmlFor={`role-to-${coin.mint}`}>Hand {coin.ticker}&apos;s creator role to</label>
+        <input
+          id={`role-to-${coin.mint}`}
+          className="input mono"
+          value={to}
+          onChange={(e) => setTo(e.target.value)}
+          placeholder="A wallet's address"
+          autoComplete="off"
+          spellCheck={false}
+          aria-invalid={to.trim() !== "" && !valid}
+        />
+      </div>
+      <p className="note">
+        That wallet gets what waits now and every fee after, and can claim them; the coin stays on the record that launched it. One transaction, signed by{" "}
+        <span className="mono">{shortAddress(account.address)}</span>.
+      </p>
+      <div className="row">
+        <button type="submit" className="btn btn-sm btn-go" disabled={!valid || handing.phase === "sending"}>
+          {handing.phase === "sending" ? "Handing over…" : "Sign and hand over"}
+        </button>
+        <button type="button" className="btn btn-sm btn-ghost" onClick={() => setHanding({ phase: "closed" })} disabled={handing.phase === "sending"}>
+          Keep it
+        </button>
+      </div>
+      {handing.phase === "failed" && (
+        <div className="verdict verdict-stop" role="alert">
+          <b>The creator role was not handed over</b>
+          <span className="note">{handing.problem}</span>
+        </div>
+      )}
+    </form>
   );
 }
 

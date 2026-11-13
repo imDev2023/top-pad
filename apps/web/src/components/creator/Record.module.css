@@ -1,0 +1,500 @@
+/* The Creator record (spec 9, screen 5) and the record summary other pages reuse. */
+.page {
+  display: grid;
+  gap: 20px;
+  max-width: 960px;
+}
+
+/* Who the record is, and its Creator wallet */
+.head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px 28px;
+  padding: 20px 22px;
+}
+
+.who {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+
+.avatar,
+.monogram {
+  flex: none;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--panel-2);
+}
+
+.monogram,
+.monogramSmall,
+.coinMonogram {
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-family: var(--font-display);
+  font-weight: 700;
+}
+
+.monogram {
+  font-size: 1.6rem;
+}
+
+.title {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.title h1 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.current {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+  text-align: right;
+}
+
+.current .mono {
+  font-size: 1.05rem;
+}
+
+.pending {
+  gap: 8px;
+}
+
+/* The facts, every one recomputable */
+.facts {
+  padding: 4px 0;
+}
+
+.factGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+}
+
+.factGrid div {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  padding: 14px 22px;
+  border-top: 1px solid var(--line);
+}
+
+.factGrid div:nth-child(-n + 3) {
+  border-top: none;
+}
+
+.factGrid div:not(:nth-child(3n + 1)) {
+  border-left: 1px solid var(--line);
+}
+
+.factGrid dt {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.factGrid dd {
+  margin: 0;
+}
+
+.factGrid dd.num {
+  font-size: 1.15rem;
+  line-height: 1.5;
+}
+
+/* Sections */
+.section {
+  display: grid;
+  gap: 10px;
+}
+
+.sectionHead {
+  display: grid;
+  gap: 4px;
+}
+
+.sectionHead h2 {
+  font-size: 1.25rem;
+}
+
+.empty {
+  padding: 16px 18px;
+  color: var(--muted);
+}
+
+.publicEarnings {
+  display: grid;
+  gap: 10px;
+  padding: 18px 22px;
+  border-left: 4px solid var(--go);
+}
+
+.earningsFigures {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 40px;
+  margin: 0;
+}
+
+.earningsFigures dd {
+  margin: 2px 0 0;
+  font-size: 1.4rem;
+}
+
+/* The coins */
+.coinList,
+.history {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.coin {
+  display: grid;
+  gap: 12px;
+  padding: 16px 22px;
+}
+
+.coin + .coin,
+.historyItem + .historyItem {
+  border-top: 1px solid var(--line);
+}
+
+.coinHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  flex-wrap: wrap;
+}
+
+.coinChips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.checker {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+.identity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  color: var(--fg);
+}
+
+.identity:hover {
+  text-decoration: none;
+}
+
+.identity:hover b {
+  text-decoration: underline;
+}
+
+.image,
+.coinMonogram {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+  background: var(--panel-2);
+}
+
+.coinMonogram {
+  font-size: 1.2rem;
+}
+
+.names {
+  display: grid;
+  min-width: 0;
+}
+
+.names b,
+.names span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.names b {
+  font-weight: 600;
+}
+
+.names span {
+  font-size: 0.82rem;
+}
+
+.coinFactsGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px 20px;
+  margin: 0;
+}
+
+.coinFactsGrid div {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  min-width: 0;
+}
+
+.coinFactsGrid dt {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.coinFactsGrid dd {
+  margin: 0;
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+
+.radar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.handedOver {
+  padding: 8px 12px;
+  border-left: 3px solid var(--info);
+  border-radius: var(--radius-sm);
+  background: var(--info-soft);
+  font-size: 0.9rem;
+}
+
+.coinFacts {
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+/* The Creator wallet's history */
+.historyItem {
+  display: grid;
+  gap: 6px;
+  padding: 12px 22px;
+}
+
+.historyLine {
+  display: flex;
+  align-items: center;
+  gap: 6px 12px;
+  flex-wrap: wrap;
+}
+
+.details summary {
+  width: fit-content;
+  color: var(--info);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.details[open] summary {
+  margin-bottom: 8px;
+}
+
+.message {
+  margin: 0;
+  padding: 10px 12px;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.signatures {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0 0;
+}
+
+.signatures dt {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.signatures dd {
+  display: grid;
+  gap: 6px;
+  margin: 2px 0 0;
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+/* Forms: a handover offered, taken, a rotation asked for */
+.form,
+.offer {
+  display: grid;
+  gap: 12px;
+  padding: 18px 22px;
+}
+
+.form {
+  max-width: 640px;
+}
+
+.offer {
+  border-left: 4px solid var(--info);
+}
+
+.offerTitle {
+  font-size: 1.15rem;
+}
+
+/* The record summary on the coin page, the Fair Open page and the creator's page */
+.summaryCard {
+  display: grid;
+  gap: 12px;
+  padding: 16px 18px;
+}
+
+.summaryWho {
+  display: flex;
+  align-items: center;
+  gap: 10px 12px;
+  flex-wrap: wrap;
+}
+
+.avatarSmall,
+.monogramSmall {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--panel-2);
+}
+
+.monogramSmall {
+  font-size: 1.05rem;
+}
+
+.summaryName {
+  display: grid;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.handle {
+  overflow: hidden;
+  color: var(--fg);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.summaryMarks {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.summaryFigures {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 16px;
+  margin: 0;
+}
+
+.summaryFigures div {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.summaryFigures dt {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.summaryFigures dd {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.summaryLink {
+  width: fit-content;
+  font-size: 0.9rem;
+}
+
+@media (max-width: 760px) {
+  .factGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .factGrid div:nth-child(3) {
+    border-top: 1px solid var(--line);
+  }
+
+  .factGrid div:not(:nth-child(3n + 1)) {
+    border-left: none;
+  }
+
+  .factGrid div:nth-child(2n) {
+    border-left: 1px solid var(--line);
+  }
+
+  .coinFactsGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .head {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 18px 16px;
+  }
+
+  .current {
+    justify-items: start;
+    text-align: left;
+  }
+
+  .factGrid div,
+  .coin,
+  .historyItem {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .publicEarnings,
+  .form,
+  .offer {
+    padding: 16px;
+  }
+}
