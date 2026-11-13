@@ -55,7 +55,7 @@ export function CalendarCard({ entry, now, live = false }: { entry: CalendarEntr
         <div className={styles.pot}>
           <div className={styles.potBar} role="img" aria-label={`The pot holds ${quoteText(entry.pot.total, quote)} of ${quoteText(entry.potCap, quote)}`}>
             <span className={styles.potFill} style={{ width: `${fill * 100}%` }} />
-            <span className={styles.potFloor} style={{ left: `${floor * 100}%` }} />
+            {floor > 0 && <span className={styles.potFloor} style={{ left: `${floor * 100}%` }} title="The minimum raise" />}
           </div>
           <div className={styles.potFigures}>
             <span>
@@ -68,7 +68,7 @@ export function CalendarCard({ entry, now, live = false }: { entry: CalendarEntr
       <dl className={styles.terms}>
         <div>
           <dt>Minimum raise</dt>
-          <dd className="num">{quoteText(entry.minRaise, quote)}</dd>
+          <dd className="num">{BigInt(entry.minRaise) > 0n ? quoteText(entry.minRaise, quote) : "None"}</dd>
         </div>
         <div>
           <dt>Pot cap</dt>

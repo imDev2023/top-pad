@@ -128,10 +128,22 @@ test("the operator works the queue, and every action is in the audit log", async
   await page.getByRole("row", { name: /Bridge router/ }).getByRole("button", { name: "Remove" }).click();
   await expect(page.getByText("Bridge router")).toHaveCount(0);
 
+  // The known-bot list: why each wallet is on it, and one taken off for good.
+  await page.getByRole("link", { name: "Known bots" }).click();
+  await expect(page.getByText("Bought in the first 2 seconds of 3 launches")).toBeVisible();
+  await expect(page.getByText("2 buys and sells inside one transaction")).toBeVisible();
+  await snap(page, "operator-17-bots");
+  await page.locator("tr", { hasText: "2 buys and sells" }).getByRole("textbox").fill("A market maker's rebalancer, not a bot sniping launches.");
+  await page.locator("tr", { hasText: "2 buys and sells" }).getByRole("button", { name: "Remove" }).click();
+  await expect(page.getByRole("status")).toContainText("written to the audit log");
+  await expect(page.getByRole("heading", { name: "Taken off" })).toBeVisible();
+  await snap(page, "operator-18-bot-removed");
+
   // The audit log: every action above, newest first, by the signed-in operator; then the export.
   await page.getByRole("link", { name: "Audit log" }).click();
   const actions = await page.getByTestId("audit-rows").locator("tbody tr td:nth-child(3) b").allTextContents();
   expect(actions).toEqual([
+    "Took a wallet off the known-bot list",
     "Removed a hub",
     "Named a hub",
     "Upheld an appeal: Bar lifted",

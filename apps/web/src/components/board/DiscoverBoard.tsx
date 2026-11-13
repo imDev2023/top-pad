@@ -16,6 +16,12 @@ const RELOAD_DEBOUNCE_MS = 1_500;
 /** Windows begin and opens pass on the clock alone: the board reads itself again this often. */
 const RELOAD_EVERY_MS = 60_000;
 
+/** When Trending was last worked out: "Updated just now", "Updated 9s ago". */
+function updatedText(ms: number) {
+  const since = ago(ms);
+  return since === "now" ? "Updated just now" : `Updated ${since} ago`;
+}
+
 /** A UTC day's heading, relative to today: Today, Tomorrow, or Sat 15 Nov. */
 function dayHeading(iso: string, now: number) {
   const days = Math.floor(Date.parse(iso) / DAY_MS) - Math.floor(now / DAY_MS);
@@ -232,7 +238,7 @@ export function DiscoverBoard({ initial }: { initial: Board | null }) {
             aside={
               <span className={styles.liveState} data-state={live} data-testid="trending-state">
                 <span className={styles.liveDot} aria-hidden="true" />
-                {live === "live" ? `Updated ${ago(now - Date.parse(board.trendingAt))} ago` : live === "connecting" ? "Connecting" : "Reconnecting"}
+                {live === "live" ? updatedText(now - Date.parse(board.trendingAt)) : live === "connecting" ? "Connecting" : "Reconnecting"}
               </span>
             }
           >

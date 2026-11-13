@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { sql } from "drizzle-orm";
-import { admissionReviews, barAppeals, barReplies, bars, bundleCases, createDb, creators, launches, linkageHubs, vampAppeals, vampChecks, xMessages } from "@top-pad/db";
+import { admissionReviews, barAppeals, barReplies, bars, bundleCases, createDb, creators, knownBots, launches, linkageHubs, vampAppeals, vampChecks, xMessages } from "@top-pad/db";
 import { runMigrations } from "@top-pad/db/migrate";
 
 import { FIRST_OPERATOR, NAME, SERVER } from "./operator-demo-shared";
@@ -30,6 +30,8 @@ const W = {
   linkedA: "3Mc6vR2uX8yQnJ5tL1wKp9fZhB7dGsE4aT6oYcVmNiRu",
   linkedB: "HqT5bW1nZ8eK3vX7mJ2cR9yL4sG6dF1pA5uN8oQwEiTt",
   faucet: "FauCetDr1p2wV9mQ4kZ7tH3nB6xR8yL5cJ1sE4aG2dPu",
+  sniper: "SnipEr7bQ2wV9mQ4kZ7tH3nB6xR8yL5cJ1sE4aG2dPuX",
+  looper: "LooPer4kZ7tH3nB6xR8yL5cJ1sE4aG2dPu9mQ2wVb7Q",
 };
 const SEALED = "LNTRNSeaLedFa1rWindowAccount11111111111111111";
 const MOON = "MooNx1WmjBp2nN7JyKuJ8rMjQQYmex3f6aEaYZ6PwLJQh";
@@ -234,6 +236,17 @@ async function main() {
       filedAt: hoursAgo(9),
     });
     await db.insert(linkageHubs).values({ address: W.faucet, label: "Devnet faucet drip", addedBy: null, createdAt: hoursAgo(70) });
+    // The known-bot list (spec 8, #57): a sniper of three launches, and a wallet that bought and sold in one transaction.
+    await db.insert(knownBots).values([
+      {
+        wallet: W.sniper,
+        earlyLaunches: 3,
+        roundTrips: 0,
+        evidence: { early: [MOON, OPENED, frog].map((mint, i) => ({ mint, signature: sig(i + 5), seconds: i % 2 })), roundTrips: [] },
+        listedAt: hoursAgo(5),
+      },
+      { wallet: W.looper, earlyLaunches: 0, roundTrips: 2, evidence: { early: [], roundTrips: [sig(8), sig(9)] }, listedAt: hoursAgo(2) },
+    ]);
     // The first case's pack in the operator Worker's local R2, as the case job stores it; the second has none.
     const dir = mkdtempSync(join(tmpdir(), "operator-demo-"));
     const file = join(dir, "pack.json");
