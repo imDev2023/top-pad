@@ -418,7 +418,7 @@ describe("Bars", () => {
     expect((await post(`/cases/${MINT}`, { decision: "dismissed", note: "again" })).status).toBe(409);
     const barPage = await page(`/bars/${bar!.id}`);
     expect(barPage.html).toContain("Private window");
-    expect(barPage.html).toContain("Not sent yet");
+    expect(barPage.html).toContain("Owed: the API&#39;s five-minute cron sends it");
     expect((await page("/bars")).html).toContain("$FROG · Frog Bundle");
   });
 
