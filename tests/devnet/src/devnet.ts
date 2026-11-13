@@ -143,10 +143,20 @@ export async function sweep(...wallets: KeyPairSigner[]) {
   }
 }
 
-/** An exact-in swap on a coin's pool, on the Instant config unless another is given; its signature once confirmed. */
-export async function swap(trader: KeyPairSigner, mint: Address, side: "buy" | "sell", amountIn: bigint, config = devnet.configs!.instant): Promise<string> {
-  const pool = await dbcPoolAddress(config, mint, devnet.quote.mint);
-  return send(trader, await swapInstructions({ config, pool, mint, quoteMint: devnet.quote.mint, trader, side, amountIn, minimumOut: 1n }));
+/**
+ * An exact-in swap on a coin's pool, on SOL's Instant config unless another config and its quote are given; its signature
+ * once confirmed. A buy in a quote other than SOL spends the trader's own account of it.
+ */
+export async function swap(
+  trader: KeyPairSigner,
+  mint: Address,
+  side: "buy" | "sell",
+  amountIn: bigint,
+  config = devnet.configs!.instant,
+  quoteMint: Address = devnet.quote.mint,
+): Promise<string> {
+  const pool = await dbcPoolAddress(config, mint, quoteMint);
+  return send(trader, await swapInstructions({ config, pool, mint, quoteMint, trader, side, amountIn, minimumOut: 1n }));
 }
 
 /** The coins a wallet holds of a mint, in raw units. */
