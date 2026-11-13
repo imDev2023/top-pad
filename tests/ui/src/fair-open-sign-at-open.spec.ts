@@ -50,7 +50,8 @@ test("a creator whose wallet cannot sign a batch schedules a Fair Open and signs
     await page.getByRole("button", { name: "Sign the schedule only, and the open at its time" }).click();
     await expect(page.getByRole("heading", { name: "Scheduled" })).toBeVisible({ timeout: 150_000 });
     await expect(page.getByText(/Come back at .* to sign your open/)).toBeVisible();
-    expect(wallet.approvals).toEqual([1]);
+    // The sign-in message, then the schedule alone.
+    expect(wallet.approvals).toEqual([1, 1]);
     await snap(page, "fair-open-sign-at-open-2-done");
 
     await page.getByRole("link", { name: "Open its page" }).click();
@@ -68,7 +69,7 @@ test("a creator whose wallet cannot sign a batch schedules a Fair Open and signs
     await snap(page, "fair-open-sign-at-open-4-due");
     await page.getByRole("button", { name: "Sign your open" }).click();
     await expect(page.getByTestId("fair-open-phase")).toContainText("The coin is live", { timeout: 120_000 });
-    expect(wallet.approvals).toEqual([1, 1]);
+    expect(wallet.approvals).toEqual([1, 1, 1]);
     expect((await fetchLaunch(rpc, launch)).data.status).toBe(LaunchStatus.Opened);
 
     // The keeper pushes the seat.

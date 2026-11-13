@@ -103,7 +103,7 @@ export async function snap(page: Page, step: string) {
  */
 export async function signInOnLaunch(page: Page) {
   await expect(page.getByRole("heading", { name: "Connect your wallet" })).toBeVisible();
-  await connectTestWallet(page, page.getByRole("main").getByRole("button", { name: "Connect wallet" }));
+  await connectTestWallet(page, page.getByRole("region", { name: "Connect your wallet" }).getByRole("button", { name: "Connect wallet" }));
   await page.getByRole("button", { name: "Sign in with this wallet" }).click();
   await expect(page.getByRole("heading", { name: "How should your coin start trading?" })).toBeVisible();
 }
@@ -114,7 +114,7 @@ export async function signInOnLaunch(page: Page) {
  */
 export async function linkXOnLaunch(page: Page): Promise<string> {
   const handle = newHandle();
-  await page.getByRole("button", { name: "Connect wallet" }).first().click();
+  await page.getByRole("list", { name: "Steps" }).getByRole("button", { name: "Connect wallet" }).click();
   await page.getByRole("link", { name: "Link X" }).click();
   await page.getByLabel("Handle").fill(handle);
   await page.getByRole("button", { name: "Authorize app" }).click();

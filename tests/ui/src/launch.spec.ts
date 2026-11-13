@@ -25,15 +25,15 @@ test("a creator launches an Instant launch from the site, signed in with a walle
   await expect(page.getByRole("list", { name: "Steps" })).toHaveText(/^Connect walletLaunch modeCoinScheduleSignDone$/);
   await snap(page, "1-connect-wallet");
 
-  await connectTestWallet(page, page.getByRole("main").getByRole("button", { name: "Connect wallet" }));
+  await connectTestWallet(page, page.getByRole("region", { name: "Connect your wallet" }).getByRole("button", { name: "Connect wallet" }));
   await expect(page.getByRole("button", { name: "Sign in with this wallet" })).toBeVisible();
   await snap(page, "1b-sign-in");
   await page.getByRole("button", { name: "Sign in with this wallet" }).click();
+  await expect(page.getByRole("heading", { name: "How should your coin start trading?" })).toBeVisible();
   // One message, no transaction: the Sign In With Solana message naming the site and the wallet.
   expect(wallet.messages).toHaveLength(1);
   expect(wallet.messages[0]).toContain(`${new URL(TARGET.web).host} wants you to sign in with your Solana account:\n${creator.address}`);
   expect(wallet.requests).toHaveLength(0);
-  await expect(page.getByRole("heading", { name: "How should your coin start trading?" })).toBeVisible();
   // The card names the Creator wallet, there being no X account.
   await expect(page.getByRole("complementary").getByText(short(creator.address))).toBeVisible();
   // Fair Open is preselected; this spec launches an Instant launch (fair-open-scheduled.spec.ts schedules a Fair Open).
@@ -91,7 +91,7 @@ test("a creator launches an Instant launch from the site, signed in with a walle
 
   // The first step, signed in: the Creator wallet and its launch, and X offered as optional.
   await page.getByRole("button", { name: "Launch another" }).click();
-  await page.getByRole("button", { name: "Connect wallet" }).first().click();
+  await page.getByRole("list", { name: "Steps" }).getByRole("button", { name: "Connect wallet" }).click();
   await expect(page.getByTestId("signed-in")).toContainText(`Signed in as ${short(creator.address)}`);
   await expect(page.getByTestId("signed-in")).toContainText("1 launch so far.");
   await expect(page.getByRole("link", { name: "Link X" })).toBeVisible();
@@ -112,7 +112,7 @@ test("a creator launches an Instant launch from the site, signed in with a walle
   const otherTicker = newTicker();
   await otherPage.goto("/launch");
   await expect(otherPage.getByText(`This browser is signed in as ${short(creator.address)}. Connect that wallet to go on.`)).toBeVisible();
-  await connectTestWallet(otherPage, otherPage.getByRole("main").getByRole("button", { name: "Connect wallet" }));
+  await connectTestWallet(otherPage, otherPage.getByRole("region", { name: "Connect your wallet" }).getByRole("button", { name: "Connect wallet" }));
   await expect(otherPage.getByText(`This browser is signed in as ${short(creator.address)}. Connect that wallet, or sign in with this one.`)).toBeVisible();
   await expect(otherPage.getByRole("button", { name: "Continue" })).toBeDisabled();
   await snap(otherPage, "9-another-wallet");

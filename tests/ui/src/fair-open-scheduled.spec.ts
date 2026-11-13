@@ -95,7 +95,8 @@ test("a creator schedules a Fair Open from the site and signs once; the keeper o
     await snap(page, "fair-open-scheduled-4-sign");
     await page.getByRole("button", { name: "Sign your open in advance" }).click();
     await expect(page.getByRole("heading", { name: "Scheduled" })).toBeVisible({ timeout: 150_000 });
-    expect(wallet.approvals).toEqual([65]);
+    // The sign-in message, then the schedule and every rung in one approval.
+    expect(wallet.approvals).toEqual([1, 65]);
     await expect(page.getByText("Your open is signed")).toBeVisible();
     await snap(page, "fair-open-scheduled-5-done");
 

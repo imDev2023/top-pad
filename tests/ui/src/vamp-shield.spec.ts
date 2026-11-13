@@ -225,8 +225,9 @@ test("Vamp Shield refuses copies of a Protected coin and labels a near one", asy
   expect(heatBypass.status()).toBe(422);
   expect(LaunchRefusal.parse(await heatBypass.json()).verdict?.verdicts.ticker).toMatchObject({ status: "refused", match: { mint: heat.mint, source: "heat" } });
 
-  // A clear coin still launches as before.
-  await page.getByLabel("Ticker").fill(`${ticker.slice(0, 7)}OK`);
+  // A clear coin still launches as before. Its ticker is drawn afresh: one made from the run's own shares its first seven
+  // characters, which a protected E2E coin may share too, making it a near match (2026-11-13: E2ENBFWOK near E2ENBFWI).
+  await page.getByLabel("Ticker").fill(newTicker());
   await page.getByLabel("Name").fill(runName("Vamp Clear", ticker));
   await page.locator('input[type="file"]').setInputFiles(await uniqueCoinImage(page, `${ticker}C`));
   await expectVampClear(page);
