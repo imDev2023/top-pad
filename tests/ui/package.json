@@ -16,6 +16,7 @@
     "@top-pad/clients": "workspace:*",
     "@top-pad/contract": "workspace:*",
     "@top-pad/db": "workspace:*",
+    "@top-pad/indexer": "workspace:*",
     "@top-pad/tests-devnet": "workspace:*",
     "@top-pad/x-stand-in": "workspace:*",
     "@types/node": "^24.19.2",

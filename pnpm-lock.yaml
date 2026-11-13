@@ -472,6 +472,9 @@ importers:
       '@top-pad/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@top-pad/indexer':
+        specifier: workspace:*
+        version: link:../../packages/indexer
       '@top-pad/tests-devnet':
         specifier: workspace:*
         version: link:../devnet
