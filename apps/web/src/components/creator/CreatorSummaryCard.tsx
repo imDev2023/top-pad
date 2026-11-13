@@ -14,10 +14,19 @@ export function creatorName(summary: Pick<CreatorSummary, "x" | "wallet">, fallb
 export const graduationText = (summary: Pick<CreatorSummary, "coins" | "graduations" | "graduationRate">) =>
   summary.graduationRate === null ? "No coin yet" : `${summary.graduations} of ${summary.coins} (${Math.round(summary.graduationRate * 100)}%)`;
 
-/** The record's marks: verified creator for a good record, verified human with World ID (spec 7). */
-export function CreatorMarks({ summary }: { summary: Pick<CreatorSummary, "marks"> }) {
+/** The record's marks: a published Bar, verified creator for a good record, verified human with World ID (spec 6.5, 7). */
+export function CreatorMarks({ summary }: { summary: Pick<CreatorSummary, "marks" | "barred"> }) {
   return (
     <>
+      {summary.barred && (
+        <span
+          className="chip chip-stop flag"
+          title={`An operator confirmed a creator bundle in $${summary.barred.ticker}: Heat's launch key co-signs none of this record's launches.`}
+          data-testid="barred-mark"
+        >
+          Barred
+        </span>
+      )}
       {summary.marks.verifiedCreator && (
         <span className="chip chip-go flag" title="At least one graduated Heat coin, no Bar and no open bundling case." data-testid="verified-creator">
           Verified creator

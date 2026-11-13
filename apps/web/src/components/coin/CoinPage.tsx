@@ -1,9 +1,10 @@
 "use client";
 
 import type { Coin, LiveBatch, Trade } from "@top-pad/contract";
+import Link from "next/link";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { coinLiveUrl, getCoin, getCoinTrades } from "@/lib/api";
-import { ago, coinAmount, compactNumber, scaledFigure, shortAddress } from "@/lib/format";
+import { ago, coinAmount, compactNumber, dayOf, scaledFigure, shortAddress } from "@/lib/format";
 import { CreatorSummaryCard } from "../creator/CreatorSummaryCard";
 import { QuoteLabels } from "../quote/QuoteLabels";
 import { CandleChart, type ChartFeed } from "./CandleChart";
@@ -255,6 +256,18 @@ export function CoinPage({ initial }: { initial: Coin }) {
             live in the config.
           </span>
         </div>
+      )}
+
+      {coin.finding && (
+        <section className="verdict verdict-stop" aria-label="Confirmed creator bundle" data-testid="coin-finding">
+          <b>Confirmed creator bundle</b>
+          <span className="note">
+            An operator confirmed that wallets directly linked to the creator bundled this coin&apos;s launch, so Heat&apos;s launch key co-signs none of the
+            creator&apos;s launches; published {dayOf(coin.finding.publishedAt)}.{" "}
+            {coin.finding.appeal === "open" ? "The creator's appeal is waiting on an operator." : coin.finding.appeal === "denied" ? "The creator's appeal was denied." : "No appeal filed."}{" "}
+            {coin.record && <Link href={`/creator/${coin.record.id}`}>The evidence is on the creator&apos;s record.</Link>}
+          </span>
+        </section>
       )}
 
       {coin.heat && <RadarFlags mint={mint} ticker={coin.ticker} decimals={decimals} quote={coin.quote} version={radarVersion} />}

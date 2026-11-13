@@ -1,5 +1,7 @@
 import {
   ApiError,
+  BarAppeal,
+  BarReply,
   BundleRadar,
   ClaimOutcome,
   Coin,
@@ -9,6 +11,7 @@ import {
   CreatorRecord,
   CreatorRoleOutcome,
   CreatorSummary,
+  EnforcementCounts,
   FairOpen,
   FairOpenOutcome,
   HandoverOffers,
@@ -24,6 +27,7 @@ import {
   PreparedFairOpenTransaction,
   PreparedLaunch,
   PreparedSwap,
+  PrivateBars,
   SwapOutcome,
   SwapQuote,
   ImageVerdict,
@@ -36,6 +40,7 @@ import {
   WalletChangeMessage,
   WalletSignInMessage,
   type VampAppealForm,
+  type BarAppealRequest,
   type CandleSeconds,
   type ClaimRequest,
   type LaunchForm,
@@ -324,3 +329,34 @@ export const prepareCreatorRole = (mint: string, holder: string, to: string) => 
 
 /** A sent hand-over, settled by the API against the chain and indexed at once. */
 export const reportCreatorRole = (mint: string, signature: string) => call(CreatorRoleOutcome, `/coins/${encodeURIComponent(mint)}/creator-role/sent`, postJson({ signature }));
+
+/**
+ * The record's Bars as its own creator sees them (spec 6.5), private ones included; null for anyone else, whom the API
+ * answers 401 or 403 so nothing of a private finding reaches them.
+ */
+export async function getPrivateBars(key: string): Promise<PrivateBars | null> {
+  try {
+    return await call(PrivateBars, `/creators/${encodeURIComponent(key)}/bars`);
+  } catch (e) {
+    if (e instanceof ApiProblem && (e.status === 401 || e.status === 403 || e.status === 404)) return null;
+    throw e;
+  }
+}
+
+/** The barred creator's reply to the evidence, for the operator. */
+export const replyToBar = (bar: string, body: string) => call(BarReply, `/bars/${encodeURIComponent(bar)}/replies`, postJson({ body }));
+
+/** The barred creator's appeal (spec 6.5): one within 30 days, another only with new evidence. */
+export const appealBar = (bar: string, appeal: BarAppealRequest) =>
+  call(BarAppeal.pick({ id: true, status: true, filedAt: true, dueAt: true }), `/bars/${encodeURIComponent(bar)}/appeals`, postJson(appeal));
+
+/** The counts "How this is enforced" publishes, as the server renders it, or null when the API does not answer in time. */
+export async function loadEnforcementCounts(): Promise<EnforcementCounts | null> {
+  try {
+    const res = await fetch(`${API_URL}/enforcement`, { cache: "no-store", signal: AbortSignal.timeout(5_000) });
+    const parsed = EnforcementCounts.safeParse(await res.json());
+    return res.ok && parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}

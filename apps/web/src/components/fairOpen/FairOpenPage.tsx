@@ -50,6 +50,10 @@ const FAILURES = {
 
 /** The phase's headline: what the countdown counts to. */
 function headline(view: FairOpen, now: number) {
+  // Cancelled before its window (spec 6.5): it takes no deposits and fails at its open, so nothing is counted down to.
+  if (view.cancelledAt && (view.phase === "scheduled" || view.phase === "window" || view.phase === "due")) {
+    return { label: "This Fair Open was cancelled", value: "Cancelled", note: `It fails at ${clock(view.opensAt, now)}, and the creator's rent comes back.` };
+  }
   switch (view.phase) {
     case "scheduled":
       return { label: "Deposits open in", value: countdown(Date.parse(view.depositsOpenAt) - now), note: `at ${clock(view.depositsOpenAt, now)} · a 10-minute window` };
@@ -176,6 +180,16 @@ export function FairOpenPage({ initial }: { initial: FairOpen }) {
           </p>
         )}
       </header>
+
+      {view.cancelledAt && !open && (
+        <div className="verdict verdict-stop" role="status" data-testid="fair-open-cancelled">
+          <b>Heat cancelled this Fair Open before its window</b>
+          <span className="note">
+            It takes no deposits, and Heat&apos;s keeper will not open it: it fails at its open, and every rent the creator paid goes back to them. Its coin
+            stays sealed for good.
+          </span>
+        </div>
+      )}
 
       <div className={styles.layout}>
         <aside className={styles.side}>

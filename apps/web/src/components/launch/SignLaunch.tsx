@@ -2,6 +2,7 @@
 
 import { useSignTransaction } from "@solana/react";
 import type { UiWalletAccount } from "@wallet-standard/react";
+import Link from "next/link";
 import { useState } from "react";
 import type { LaunchRefusal, LaunchStatus, PreparedLaunch } from "@top-pad/contract";
 import { ApiProblem, getLaunch, prepareLaunch, submitLaunch } from "@/lib/api";
@@ -51,6 +52,8 @@ export function SignLaunch({
   const signTransaction = useSignTransaction(account, chain);
   const [phase, setPhase] = useState<Phase>("idle");
   const [problem, setProblem] = useState<string | null>(null);
+  // Refused because the creator is barred (spec 6.5): the record is where they see why and answer.
+  const [barred, setBarred] = useState(false);
   const [prepared, setPrepared] = useState<PreparedLaunch | null>(null);
   const busy = phase !== "idle" && phase !== "failed";
 
@@ -90,6 +93,7 @@ export function SignLaunch({
       setPhase("idle");
       if (e instanceof ApiProblem) {
         setProblem(e.message);
+        setBarred(e.refusal?.code === "barred");
         if (e.refusal?.code === "vamp_shield") onRefused(e.refusal);
       } else {
         setProblem(`Something went wrong: ${(e as Error).message}`);
@@ -127,6 +131,11 @@ export function SignLaunch({
         <div className="verdict verdict-stop" role="alert">
           <b>The launch did not go through</b>
           <span className="note">{problem}</span>
+          {barred && (
+            <span>
+              <Link href={`/creator/${account.address}`}>Your Creator record: the evidence, a reply box and the appeal form</Link>
+            </span>
+          )}
         </div>
       )}
     </div>

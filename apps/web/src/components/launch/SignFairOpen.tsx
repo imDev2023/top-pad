@@ -5,6 +5,7 @@
 // details link. A wallet that cannot sign a batch signs the schedule alone, and the creator signs the open at the open.
 import { useSignTransactions } from "@solana/react";
 import type { UiWalletAccount } from "@wallet-standard/react";
+import Link from "next/link";
 import { useState } from "react";
 import type { LaunchRefusal, LaunchStatus, PreparedLaunch } from "@top-pad/contract";
 import { ApiProblem, getLaunch, prepareLaunch, renewLaunch, submitLaunch } from "@/lib/api";
@@ -50,6 +51,8 @@ export function SignFairOpen({
   const signTransactions = useSignTransactions(account, chain);
   const [phase, setPhase] = useState<Phase>("idle");
   const [problem, setProblem] = useState<{ title: string; text: string } | null>(null);
+  // Refused because the creator is barred (spec 6.5): the record is where they see why and answer.
+  const [barred, setBarred] = useState(false);
   const [atOpen, setAtOpen] = useState(false);
   const [batchFailed, setBatchFailed] = useState(false);
   const [prepared, setPrepared] = useState<FairOpenPrepared | null>(null);
@@ -128,6 +131,7 @@ export function SignFairOpen({
       setPhase("idle");
       if (e instanceof ApiProblem) {
         setProblem({ title: "The schedule did not go through", text: e.message });
+        setBarred(e.refusal?.code === "barred");
         if (e.refusal && ["vamp_shield", "ticker_reserved", "teaser", "schedule"].includes(e.refusal.code)) onRefused(e.refusal);
       } else {
         setProblem({ title: "Something went wrong", text: (e as Error).message });
@@ -217,6 +221,11 @@ export function SignFairOpen({
         <div className="verdict verdict-stop" role="alert">
           <b>{problem.title}</b>
           <span className="note">{problem.text}</span>
+          {barred && (
+            <span>
+              <Link href={`/creator/${account.address}`}>Your Creator record: the evidence, a reply box and the appeal form</Link>
+            </span>
+          )}
           {batchFailed && !atOpen && (
             <span>
               <button

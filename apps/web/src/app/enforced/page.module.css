@@ -35,3 +35,46 @@
   margin: 0;
   padding-left: 20px;
 }
+
+/* The counts of bars, appeals and overturned findings (spec 6.5). */
+.counts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.counts div {
+  display: grid;
+  gap: 2px;
+  padding: 12px 14px;
+  background: var(--panel-2);
+}
+
+.counts div + div {
+  border-left: 1px solid var(--line);
+}
+
+.counts dt {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.counts dd {
+  margin: 0;
+  font-size: 1.6rem;
+  line-height: 1.1;
+}
+
+@media (max-width: 480px) {
+  .counts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .counts div + div {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+}

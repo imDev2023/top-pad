@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import type { CreatorEarnings, CreatorRecord, RecordCoin, RecordWallet, WalletChange } from "@top-pad/contract";
-import { ApiProblem, getCreatorRecord, getEarnings } from "@/lib/api";
+import type { CreatorEarnings, CreatorRecord, PrivateBar, RecordCoin, RecordWallet, WalletChange } from "@top-pad/contract";
+import { ApiProblem, getCreatorRecord, getEarnings, getPrivateBars } from "@/lib/api";
 import { coinAmount, dayOf, momentOf, quoteText, shortAddress } from "@/lib/format";
 import { useWallet } from "../WalletProvider";
 import { LooksLikeChip } from "../vampShield/LooksLike";
+import { PrivateBarPanel, PublicBars } from "./Bars";
 import { CreatorMarks, creatorName, graduationText } from "./CreatorSummaryCard";
 import { earned, EarningsPanel, QuoteAmounts } from "./EarningsPanel";
 import styles from "./Record.module.css";
@@ -20,7 +21,15 @@ import { CancelChange, HandoverForm } from "./WalletChanges";
 export function RecordPage({ initial }: { initial: CreatorRecord }) {
   const [record, setRecord] = useState(initial);
   const [problem, setProblem] = useState<string | null>(null);
+  // The record's Bars as its own creator sees them, private ones included: null for every other visitor (spec 6.5).
+  const [privateBars, setPrivateBars] = useState<PrivateBar[] | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   const { account, chain } = useWallet();
+  const loadPrivate = useCallback(async () => {
+    const found = await getPrivateBars(initial.summary.id).catch(() => null);
+    setPrivateBars(found?.bars.length ? found.bars : null);
+    setNow(Date.now());
+  }, [initial.summary.id]);
   const reload = useCallback(async () => {
     try {
       setRecord(await getCreatorRecord(initial.summary.id));
@@ -28,7 +37,13 @@ export function RecordPage({ initial }: { initial: CreatorRecord }) {
     } catch (e) {
       setProblem(e instanceof ApiProblem ? e.message : (e as Error).message);
     }
-  }, [initial.summary.id]);
+    await loadPrivate();
+  }, [initial.summary.id, loadPrivate]);
+  // Asked again when the wallet changes: signing in as the record is what opens its private view.
+  const connected = account?.address;
+  useEffect(() => {
+    void loadPrivate();
+  }, [loadPrivate, connected]);
 
   const { summary } = record;
   const name = creatorName(summary);
@@ -83,6 +98,12 @@ export function RecordPage({ initial }: { initial: CreatorRecord }) {
           <b>The record could not be read again</b>
           <span className="note">{problem}</span>
         </div>
+      )}
+
+      {privateBars ? (
+        privateBars.map((bar) => <PrivateBarPanel key={bar.id} bar={bar} now={now} onChanged={reload} />)
+      ) : (
+        <PublicBars bars={record.bars} />
       )}
 
       {pending && <PendingChange change={pending} current={current} onChanged={reload} />}
