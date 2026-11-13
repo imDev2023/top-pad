@@ -58,9 +58,13 @@ export function CalendarCard({ entry, now, live = false }: { entry: CalendarEntr
             {floor > 0 && <span className={styles.potFloor} style={{ left: `${floor * 100}%` }} title="The minimum raise" />}
           </div>
           <div className={styles.potFigures}>
-            <span>
-              <b className="num">{quoteText(entry.pot.total, quote)}</b> from {entry.pot.seats === 1 ? "1 person" : `${entry.pot.seats} people`}
-            </span>
+            {entry.pot.seats ? (
+              <span>
+                <b className="num">{quoteText(entry.pot.total, quote)}</b> from {entry.pot.seats === 1 ? "1 person" : `${entry.pot.seats} people`}
+              </span>
+            ) : (
+              <span>No deposits yet</span>
+            )}
             <span className="num">{quoteText(entry.potCap, quote)} cap</span>
           </div>
         </div>

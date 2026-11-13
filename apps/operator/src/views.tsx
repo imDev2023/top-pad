@@ -106,7 +106,7 @@ export const Layout: FC<PropsWithChildren<Shell & { title: string }>> = ({ title
               <nav class="nav" aria-label="Operator">
                 <a href="/" aria-current={current === "queue" ? "page" : undefined}>Queue</a>
                 <a href="/bars" aria-current={current === "bars" ? "page" : undefined}>Bars</a>
-                <a href="/bots" aria-current={current === "bots" ? "page" : undefined}>Known bots</a>
+                <a href="/bots" aria-current={current === "bots" ? "page" : undefined}>Bots</a>
                 <a href="/hubs" aria-current={current === "hubs" ? "page" : undefined}>Hubs</a>
                 <a href="/audit" aria-current={current === "audit" ? "page" : undefined}>Audit log</a>
               </nav>

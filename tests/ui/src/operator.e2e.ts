@@ -129,7 +129,7 @@ test("the operator works the queue, and every action is in the audit log", async
   await expect(page.getByText("Bridge router")).toHaveCount(0);
 
   // The known-bot list: why each wallet is on it, and one taken off for good.
-  await page.getByRole("link", { name: "Known bots" }).click();
+  await page.getByRole("link", { name: "Bots", exact: true }).click();
   await expect(page.getByText("Bought in the first 2 seconds of 3 launches")).toBeVisible();
   await expect(page.getByText("2 buys and sells inside one transaction")).toBeVisible();
   await snap(page, "operator-17-bots");
