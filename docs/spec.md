@@ -62,9 +62,9 @@ There is no transfer hook on Heat coins.
 
 ### 2.1 A Fair Open's life
 
-**1. Link X.**
-Every launch needs an X account linked through OAuth; the Creator record belongs to that account, and the handle goes into the coin's metadata ([Creator record](https://github.com/imDev2023/top-pad/issues/21)).
-The record's one Creator wallet signs the launch.
+**1. Sign in with the wallet.**
+Anyone launches with a wallet ([ADR 0008](adr/0008-anyone-launches-with-a-wallet-x-is-optional.md), owner, 2026-11-08): it signs a Sign In With Solana message, no transaction and no fee, and becomes the Creator wallet of its Creator record, the only wallet that signs the record's launches.
+Linking X through OAuth is optional: a linked account shows on the record and its handle goes into the coin's metadata ([Creator record](https://github.com/imDev2023/top-pad/issues/21)); a coin whose creator linked none names no X account.
 
 **2. Choose the launch mode.**
 Fair Open is preselected.
@@ -93,7 +93,7 @@ Fair Open is preselected.
 - As built ([#47](https://github.com/imDev2023/top-pad/issues/47), [#50](https://github.com/imDev2023/top-pad/issues/50)): the launch service signs both items when it prepares the launch, the metadata naming the image by its item id, and keeps the signed bytes in R2, private; the identity hash is SHA-256 over DBC's pool parameters as the creation transaction carries them (2.1 step 10), and the metadata URI holds the item's id, the hash of a signature nobody else can make, so nobody can find the coin by hashing guesses.
   Arweave gateways list a fresh item by its owner and its tags the moment Turbo takes it: on 2026-11-02 turbo-gateway.com's GraphQL listed an upload by Heat's `App-Name` tag, with its `Coin-Mint`, and by the keeper's owner address seconds after it went up, long before Turbo bundled it, so anyone polling one query would have seen every sealed coin 15 s before its open.
   So a Fair Open's two items are signed by a key made for that launch alone and dropped once it has signed, as the mint key is (10.3), and carry their content type only; an Instant launch's, uploaded as its coin is created, keep the keeper key and Heat's tags.
-  Before the open nothing about the coin leaves Heat: `GET /fair-opens/<launch>` gives the identity hash, the teaser and the terms, and the coin only once it has opened; the rung a creator signs at the open, which carries the coin, goes only to the X account that scheduled the launch, signed in (`POST /fair-opens/<launch>/open`), where naming the Creator wallet was once enough; and no log line or Workflow error names the coin, its mint or its items, Turbo's own error text included, which has the item's id taken out.
+  Before the open nothing about the coin leaves Heat: `GET /fair-opens/<launch>` gives the identity hash, the teaser and the terms, and the coin only once it has opened; the rung a creator signs at the open, which carries the coin, goes only to the creator signed in as the Creator wallet that scheduled the launch, or as its record by X (`POST /fair-opens/<launch>/open`; [ADR 0008](adr/0008-anyone-launches-with-a-wallet-x-is-optional.md)), where naming the Creator wallet was once enough; and no log line or Workflow error names the coin, its mint or its items, Turbo's own error text included, which has the item's id taken out.
   A pot that cannot open as it stands 15 s before its open uploads nothing, so a Fair Open that fails never reveals the coin it sealed; one that fills in its last seconds has its items uploaded by the open's step, before the rung.
   Three edges stay: the ticker reservation's refusal tells a second creator that some Fair Open holds that ticker's strict key (step 3); a pot that could open 15 s before its close but fails after withdrawals in those seconds, or a creator signing at the open who never signs, leaves its items on Arweave; and for its last 15 s a sealed coin can still be found by whoever reads every new item Turbo takes, looking for a coin's metadata that names Heat's site.
 
@@ -142,7 +142,7 @@ A sealed entry: a "?" tile, the time, the creator and their record summary, the 
 - A depositor can withdraw everything until the window closes.
 - Each depositor puts up about 0.0027 SOL of refundable rent beyond the deposit: 0.00123 SOL for the seat and 0.00149 SOL for the coin account the push creates (returned if they already have one).
   As built ([#45](https://github.com/imDev2023/top-pad/issues/45)): the seat is 178 bytes, keeping room for what the open and the pushes will record, so the rent is about 0.003 SOL, 0.00155 for the seat and 0.00149 for the coin account, at devnet's rent on 2026-10-30.
-- The creator may deposit like anyone else, under their own tier and cap (at least Scored, since they linked X); their share of the coins is locked (step 13).
+- The creator may deposit like anyone else, under their own tier and cap (Scored if their record linked X, else Unverified unless another tier source applies); their share of the coins is locked (step 13).
 
 **10. The open.**
 At the scheduled time our keeper broadcasts the largest rung at or below what the pot should spend; the nonce advancing makes every other rung invalid.
@@ -223,7 +223,7 @@ As built ([#49](https://github.com/imDev2023/top-pad/issues/49), 2026-11-01):
 
 ### 2.2 An Instant launch's life
 
-1. Link X, choose Instant launch, enter the coin; Vamp Shield runs as in a Fair Open.
+1. Sign in with the wallet (X optional), choose Instant launch, enter the coin; Vamp Shield runs as in a Fair Open.
 2. One transaction creates the coin and its DBC pool on the Instant config, which has the first-swap discount off.
    The creator signs as `creator` and pays the pool's rent; our launch key co-signs, and the same transaction registers the coin's record in the fee program.
    Our launch key co-signs only launches signed by the record's current Creator wallet that pass Vamp Shield.
@@ -591,7 +591,7 @@ As built ([#52](https://github.com/imDev2023/top-pad/issues/52), 2026-11-02):
   A refusal names the protected coin and how the copy was made ("mirrored", "rotated a quarter turn"); an image the vision service cannot check refuses the launch, since our launch key never co-signs an unchecked image.
 - **Labels**: a near ticker, name or image launches with "Looks like $X", kept with the launch (`launches.looks_like`) and shown on the coin page, where the flag opens the reason and links the protected coin, and on the creator's coin rows; the board's rows ([#57](https://github.com/imDev2023/top-pad/issues/57)) take the same field.
 - **The log** (`vamp_checks`): every refusal and label as a launch is prepared, and every image the launch flow checks with its five nearest Protected images' PDQ distances and SSCD similarities, whatever the outcome, which is what re-measuring the thresholds needs.
-- **Appeals**: a refusal links to `/appeal`, where the creator, signed in with X, names the original and says why; it lands in `vamp_appeals` for the operator queue ([#54](https://github.com/imDev2023/top-pad/issues/54)), at most 5 a day per creator.
+- **Appeals**: a refusal links to `/appeal`, where the creator, signed in with their wallet (or by X), names the original and says why; it lands in `vamp_appeals` for the operator queue ([#54](https://github.com/imDev2023/top-pad/issues/54)), at most 5 a day per creator, so per Creator wallet ([ADR 0008](adr/0008-anyone-launches-with-a-wallet-x-is-optional.md)).
 - **The protected set** (`apps/api/src/protectedSet.ts`), refreshed by the minute's Cron Trigger:
   - every minute, Jupiter's `toporganicscore/5m` and `toptrending/1h` (100 each), a coin with an organic score of 50 or more protected for 72 hours from its last sighting;
   - at minute 2 of each hour, Jupiter's verified list whole (a coin it drops lapses, unless the answer is under 80% of the set, which lapses nothing), its organic lists (`toporganicscore/24h` and `/1h`, `toptraded/24h`: organic score 50 or more, 1,000 holders, $250,000 of market cap, off any bonding curve), protected only once a coin has qualified for 12 hours and until 7 days after it last did; CoinGecko's top 1,000 once a day, keyless, each kept 48 hours after it was last listed; Heat's coins; and rows folded under an older `FOLD_VERSION` folded again;
@@ -631,6 +631,7 @@ As built ([#52](https://github.com/imDev2023/top-pad/issues/52), 2026-11-02):
   - A person links X once (OAuth), and each wallet of theirs signs one message naming that X account (`POST /verify/message`, then `POST /verify`): no transaction, no fee, taken for ten minutes, the wallet, the person, the handle and the cluster checked again on the server.
     `wallet_verifications` keeps the message and the signature as the proof; a wallet belongs to one person, so one verified for another X account, or another record's Creator wallet, is refused.
     The verified wallet is Scored in every Fair Open, signed in or not; a session alone no longer raises a wallet, since it proves nothing about the wallet.
+    A browser signed in with a wallet links X to that wallet's record, and its wallets verify for it the same way; one signed in with no X linked has nothing to verify for and is told to link X.
     The Verified tier keeps its 2 SOL cap in the rules, and nothing grants it until World ID and Civic come with [#95](https://github.com/imDev2023/top-pad/issues/95); a wallet-history attestation (Trusta's, on the Solana Attestation Service) is not built: its attestations live on mainnet only, so devnet has no issuer to read.
   - The linkage pipeline (`traceFunding` in `@top-pad/indexer`) follows a wallet's first funding, the first SOL anyone sent it by a plain transfer, up from funder to funder, through hop wallets and any other wallet, to its root: the top of the chain below a hub, or the wallet itself.
     A hub ties nobody together: Heat's own keys, `CLUSTERS.<cluster>.linkageHubs` (devnet's bank, which funds every test wallet), the operator's `linkage_hubs`, and any wallet with a full page of history (1,000 signatures), as an exchange's hot wallet or a faucet has, the method Bubblemaps and Arbitrum's airdrop use ([#5](https://github.com/imDev2023/top-pad/issues/5)).
@@ -639,6 +640,7 @@ As built ([#52](https://github.com/imDev2023/top-pad/issues/52), 2026-11-02):
   - A person is the verified X account of the wallet, of its root, or of a verified wallet with the same root (`x:<id>`, Scored, and the root is recorded at verification); else the root (`wallet:<root>`), Unverified.
     So wallets with one root share one pseudonym and one seat, and a farm under a verified wallet's root shares that person's seat.
   - Refused as tied to the creator's cluster: a wallet the Creator wallet's SOL reached, one whose SOL reached the Creator wallet, one with the Creator wallet's root, and one of the creator's own person; a hub never ties, so on devnet the bank may be the creator.
+  - As built ([#103](https://github.com/imDev2023/top-pad/issues/103), [ADR 0008](adr/0008-anyone-launches-with-a-wallet-x-is-optional.md)): a Creator wallet is Scored only when its record linked X; a Creator wallet whose record linked none is Unverified unless another tier source applies, and the creator's own cluster, refused through any wallet but the Creator wallet, is then the Creator wallet's funding root.
   - Every wallet refused or merged is told why at once, with the route its SOL took, and that it can still buy the coin once it opens; `admission_reviews` keeps each refusal and merge once per launch and wallet, with the funding chains behind it, for the operator queue ([#54](https://github.com/imDev2023/top-pad/issues/54)); a person's own second verified wallet is no case.
   - Only first funding is followed: the sweep graph, exchange time windows and co-activity ([#5](https://github.com/imDev2023/top-pad/issues/5)) are not built, and a farm funded through an exchange withdrawal each, or through a wallet padded past 1,000 signatures, is not merged.
 
@@ -677,12 +679,12 @@ Source: [Confirmed bundling](https://github.com/imDev2023/top-pad/issues/34).
 - **A floor of 1% of supply**: the linked wallets must have bought 1% or more between them, counted across the pot and the first hour of trading.
 - **A job opens the case, a person confirms it, a different person hears the appeal**: no bar is applied automatically; the case holds the evidence pack (the transactions, the Jito bundle ids and the transfers behind each link); on mainnet the appeal goes to a second operator; on devnet the owner fills both roles.
 - **Bars start on day one**; any other signal may count toward confirmation only once the Bundle Radar evaluation measures its precision at 99% or more (section 11.5).
-- **The bar applies at once; the finding stays private for 72 hours**: our launch key stops co-signing the creator's launches; any scheduled Fair Open not yet in its window is cancelled; the creator gets the evidence pack on their record page and by X direct message, and may reply.
+- **The bar applies at once; the finding stays private for 72 hours**: our launch key stops co-signing the creator's launches; any scheduled Fair Open not yet in its window is cancelled; the creator gets the evidence pack on their record page, and by X direct message when their record linked X, and may reply.
   After 72 hours the record shows "Barred: confirmed creator bundle in <coin>, <date>" with the evidence and appeal status, and the coin's page and Fairness card show "confirmed creator bundle".
 - **One appeal within 30 days, decided in 48 hours**; a second only with new evidence.
   Grounds: a link is wrong (a shared exchange or custodian, or a launch service bundling for its customers).
   An upheld appeal lifts the Bar and removes the finding from the public record; the audit log keeps it.
-- **A Bar never expires and only stops new launches**: it bars the X account, the Creator wallet and any World ID nullifier from launching; Creator Earnings keep flowing, the Creator lock keeps vesting, existing coins keep trading with the finding shown; a barred Creator may still trade and deposit in other creators' Fair Opens.
+- **A Bar never expires and only stops new launches**: it bars the Creator wallet, the record's linked X account if any, and any World ID nullifier from launching (since [ADR 0008](adr/0008-anyone-launches-with-a-wallet-x-is-optional.md) a Bar follows the Creator wallet, and a new wallet is free: a barred creator can come back under a new one with an empty record, which only Bundle Radar's funding links, a linked X account or a nullifier tie back); Creator Earnings keep flowing, the Creator lock keeps vesting, existing coins keep trading with the finding shown; a barred Creator may still trade and deposit in other creators' Fair Opens.
 - The "How this is enforced" page publishes the counts of bars, appeals and overturned findings.
 
 As built ([#53](https://github.com/imDev2023/top-pad/issues/53), 2026-11-02):
@@ -715,10 +717,11 @@ As built ([#54](https://github.com/imDev2023/top-pad/issues/54), 2026-11-09), in
 
 Sources: [Creator record](https://github.com/imDev2023/top-pad/issues/21), [Confirmed bundling](https://github.com/imDev2023/top-pad/issues/34), [Discovery and ranking](https://github.com/imDev2023/top-pad/issues/37).
 
-- **The Creator record belongs to an X account**, required for every launch; a wallet resets for free (3 in 4 creator wallets launch once), an audience does not.
+- **The Creator record belongs to its Creator wallet** ([ADR 0008](adr/0008-anyone-launches-with-a-wallet-x-is-optional.md), owner, 2026-11-08, replacing "the Creator record belongs to an X account, required for every launch"): the wallet that signs in starts it, and an X account may be linked to it, which shows on the record and in its coins' metadata.
+  What this costs: a wallet resets for free (3 in 4 creator wallets launch once) and an audience does not, so a Bar now follows the Creator wallet, and a barred creator can come back under a new wallet with an empty record; that record has no graduations, so no verified-creator mark and no featured slots, until it earns them.
 - **One Creator wallet at a time**: the only wallet that signs the record's launches, and the wallet terminals show as dev.
   It changes by a handover the old wallet signs, shown on the record.
-  A lost wallet rotates through the X account after a public cooldown of 7 days, which the current Creator wallet can cancel **(owner, 2026-10-27)**.
+  A lost wallet rotates through the X account after a public cooldown of 7 days, which the current Creator wallet can cancel **(owner, 2026-10-27)**; a record that linked no X has no way to rotate a lost wallet.
 - **An optional World ID Orb "verified human" mark**, checked on our server, with one action shared across Heat so each human has one nullifier, bound to their record; a Bar then follows the person.
 - **History stays with the launcher; earnings follow the creator role**: our indexer follows every `transfer_pool_creator`, made on our site or not; Creator Earnings go to whoever holds the role; the coin stays on the original Creator's record, marked "handed over to ..." on both records.
 - **The record shows only facts anyone can recompute**, with no composite score: launches by mode; graduations and the graduation rate; Creator lock status; sells from the Creator wallet; coins handed over; coins that never graduated and went quiet; Bundle Radar findings with their evidence; any Bar.
@@ -737,7 +740,7 @@ Source: [Discovery and ranking](https://github.com/imDev2023/top-pad/issues/37).
   The known-bot list holds wallets that bought in the first 2 seconds of 3 or more launches and wallets that made a buy and sell inside one transaction; an operator can remove a wallet; thresholds are tuned against the Bundle Radar evaluation set.
   Trending is recomputed every 15 s.
 - **Labels only mark; a confirmed bundle demotes**: "looks like X" and unconfirmed Bundle Radar labels show on a coin's row but never move it; a coin with a confirmed creator bundle leaves Trending and every featured slot, and stays in New and search with its banner.
-- **Three featured calendar slots a day, earned, never sold**: only good records qualify; among them, the highest graduation rate first, then the most recent graduation; first-time creators still get the full calendar entry and Live now.
+- **Three featured calendar slots a day, earned, never sold**: only good records qualify, and a record follows its Creator wallet ([ADR 0008](adr/0008-anyone-launches-with-a-wallet-x-is-optional.md)), so a creator who starts again under a new wallet starts with none; among them, the highest graduation rate first, then the most recent graduation; first-time creators still get the full calendar entry and Live now.
 - No profit leaderboard in this build (section 15).
 
 ## 9. Screens
@@ -775,8 +778,9 @@ The screens:
    Quick trade is built only for Heat coins; a pool made around Heat's flow gets none.
    As built ([#53](https://github.com/imDev2023/top-pad/issues/53)): Bundle Radar's flags sit in a strip under the coin's head, above the sniper tax and the chart: red for wallets linked to the creator, yellow for same-slot buys, or "Nothing labelled"; each opens its evidence below the strip, every buy, deposit and transfer linked on the explorer.
    Coin rows come with the board ([#57](https://github.com/imDev2023/top-pad/issues/57)), which shows the same flags from the same route.
-4. **Launch flow**: link X; Fair Open (preselected) or Instant launch; the coin with live Vamp Shield verdicts (clear, "looks like X", refused with an appeal link); schedule (time up to 7 days ahead, minimum raise, teaser, about 0.03 SOL refundable rent); sign; done.
+4. **Launch flow**: connect a wallet and sign in, "Link X" offered once as optional; Fair Open (preselected) or Instant launch; the coin with live Vamp Shield verdicts (clear, "looks like X", refused with an appeal link); schedule (time up to 7 days ahead, minimum raise, teaser, about 0.03 SOL refundable rent); sign; done.
    As built ([#47](https://github.com/imDev2023/top-pad/issues/47)): `/launch` walks a Fair Open through Link X, Launch mode, Coin, Schedule, Sign and Done; the schedule starts now or later (a local date and time, up to 7 days ahead), with the coin's open time beside it, the calendar entry previewed live, and refusals said as typed; signing is one button, "Sign your open in advance", with the 64 rungs behind a details link and the fallback beside them; Done says when the coin opens and, after the fallback, when to come back. The Fair Open's page shows the creator who signs at the open a panel that asks for that one signature once the window closes.
+   As built ([#103](https://github.com/imDev2023/top-pad/issues/103), [ADR 0008](adr/0008-anyone-launches-with-a-wallet-x-is-optional.md)): the first step is Connect wallet, which connects one and signs in with it, then shows the Creator wallet, its launches and, once, an optional "Link X"; the coin's card names the linked X handle or else the Creator wallet; `/appeal` and the at-open panel ask for the same sign-in when the browser is not signed in as the Creator wallet.
 5. **Creator record**: the facts in section 7, Creator wallet history, the verified-human and verified-creator marks, Creator Earnings from both sources with one claim, and for a barred Creator the banner, evidence pack and appeal history; the accused creator's private 72-hour view with a reply box.
    As built ([#44](https://github.com/imDev2023/top-pad/issues/44)): `/creator`, the Creator Earnings of the connected wallet, since earnings follow the creator role a wallet holds: what waits in each Heat coin whose role it holds, read from the chain to the lamport, a coin whose first minute is unclaimed saying so, and one claim of it all; the record's facts join it in [#55](https://github.com/imDev2023/top-pad/issues/55).
    A claim names five accounts of each pool, so one transaction holds two pools; a claim of more is as many transactions, signed in one wallet request.
@@ -893,7 +897,7 @@ Sources: [Stack](https://github.com/imDev2023/top-pad/issues/17), [Backend desig
 - **Admission server**: verifies personhood once (World ID server-side, Civic Uniqueness, Trusta-style attestations, X; no KYC), runs the linkage pipeline, and signs each deposit's admission.
   As built ([#45](https://github.com/imDev2023/top-pad/issues/45)): part of the API, which builds each deposit with its admission for the wallet to sign (`POST /fair-opens/<launch>/deposit`), by section 6.3's minimal rules.
   As built ([#48](https://github.com/imDev2023/top-pad/issues/48)): "Verify once" by X and a signed message, and the linkage pipeline over first funding, as section 6.3 says; it reads the chain through the API's `RPC_URL` with the funding scans' spacing, once per wallet, and from `wallet_fundings` after that.
-- **Launch service**: X OAuth, Vamp Shield checks, the ticker reservation, Arweave data items, the nonce account, collecting the ladder's signatures, and co-signing Instant launches.
+- **Launch service**: wallet sign-in (Sign In With Solana, `POST /auth/wallet/message` then `POST /auth/wallet`, each message taken once within ten minutes; [ADR 0008](adr/0008-anyone-launches-with-a-wallet-x-is-optional.md)), the optional X OAuth link, Vamp Shield checks, the ticker reservation, Arweave data items, the nonce account, collecting the ladder's signatures, and co-signing Instant launches.
 - **Vision service**: PDQ (all 8 orientations) and SSCD on CPU in one Python Container behind a Durable Object, asleep when idle; signatures in Postgres (PDQ `bit(256)` with a Hamming HNSW index, SSCD `vector(512)` with a cosine HNSW index).
   The protected set refreshes from Jupiter's trending endpoints every minute, its verified and organic lists hourly, CoinGecko's top 1,000 daily, and our own coins as they cross the protection bar.
   As built ([#52](https://github.com/imDev2023/top-pad/issues/52), 2026-11-02): `apps/vision`, a stdlib HTTP server on Python 3.14 with Pillow, pdqhash 0.2.8 (Meta's C++ PDQ, built from source) and ONNX Runtime, every package pinned by hash; `POST /signatures` signs an image's bytes, `POST /signatures/fetch` fetches up to 50 images itself (public addresses only) and signs them.
@@ -937,7 +941,7 @@ Sources: [Stack](https://github.com/imDev2023/top-pad/issues/17), [Backend desig
 
 ### 10.4 Data
 
-- Postgres is the only system of record: launches, seats, coins, pools, trades, candles, transfers (the funding graph), the co-signed list mirror, creators (X account, Creator wallet history, World ID nullifier), admissions, protected coins and their signatures, the known-bot list, cases, appeals, bars, the audit log, job runs and indexer cursors.
+- Postgres is the only system of record: launches, seats, coins, pools, trades, candles, transfers (the funding graph), the co-signed list mirror, creators (Creator wallet history, optional X account, World ID nullifier, wallet sign-ins waiting for their signature), admissions, protected coins and their signatures, the known-bot list, cases, appeals, bars, the audit log, job runs and indexer cursors.
 - R2 holds blobs: an Arweave image cache, Fairness card images, evidence pack and audit exports.
   As built ([#53](https://github.com/imDev2023/top-pad/issues/53)): the funding graph is `transfers`, every direct transfer to or from a Creator wallet in its coins' windows, with `funding_scans` saying how far each wallet's history is read; Jito's record is `jito_bundles`; reviews and cases are `bundle_reviews` and `bundle_cases`.
   As built ([#54](https://github.com/imDev2023/top-pad/issues/54)): the audit log is `audit_log`, the operator's decisions `launch_reviews`, `vamp_clearances` and `wallet_clearances`, and the audit exports `operator-audit/<day>.jsonl` in the API's bucket.
@@ -988,7 +992,7 @@ All on devnet, against Meteora's deployed programs, with no Meteora binaries any
 
 ### 11.3 The cohort
 
-- About 30 creators and 100 traders for 2 weeks, recruited from the owner's X following and memecoin Telegram groups; members link X as the launch flow requires and get 1 devnet SOL once from our tap.
+- About 30 creators and 100 traders for 2 weeks, recruited from the owner's X following and memecoin Telegram groups; members sign in with a wallet, link X if they choose ([ADR 0008](adr/0008-anyone-launches-with-a-wallet-x-is-optional.md)), and get 1 devnet SOL once from our tap.
 - It measures the share of creators who keep Fair Open (preselected) rather than switch to Instant launch; how many sealed Fair Opens reach their minimum raise, and depositors per Fair Open; creators who launch a second coin and depositors who join a second Fair Open, as weak evidence.
 - **Fair Open stays the default unless fewer than a third of cohort creators keep it, or fewer than half of sealed Fair Opens reach their minimum raise.**
 
@@ -1078,7 +1082,7 @@ As built ([#61](https://github.com/imDev2023/top-pad/issues/61), 2026-11-03), th
 5. **The cohort**: recruiting about 30 creators and 100 traders from the owner's X following and memecoin Telegram groups.
 6. **Heat's X app** (OAuth 2.0, a confidential client): deferred by the owner on 2026-10-29, before the devnet demo of [#41](https://github.com/imDev2023/top-pad/issues/41).
    Until it exists the devnet API links a stand-in for X (`tests/x-stand-in`, the Worker `top-pad-x-stand-in-devnet`), on whose authorize page a tester picks a handle of 16 to 30 characters, longer than X allows, so a test coin's metadata never names a real account.
-   It is needed before the cohort, whose members link X (section 11.3).
+   It is no longer needed before the cohort, since X is optional ([ADR 0008](adr/0008-anyone-launches-with-a-wallet-x-is-optional.md)); only if linking X should show real accounts.
 
 ## 14. Build order
 

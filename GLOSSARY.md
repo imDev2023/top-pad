@@ -84,7 +84,7 @@ The one wallet that signs a Creator's launches and that terminals show as the co
 _Avoid_: dev wallet, deployer
 
 **Creator record**:
-The public history of a Creator's launches on Heat, tied to their X account and built only from facts anyone can check.
+The public history of a Creator's launches on Heat, tied to their Creator wallet, with their X account if they linked one, and built only from facts anyone can check.
 _Avoid_: reputation score, trust score (it has no score), creator profile
 
 **Creator lock**:
