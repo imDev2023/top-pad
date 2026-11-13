@@ -567,8 +567,9 @@ async function openRungFor(c: Context<AppEnv>, rpc: Rpc) {
 
 /**
  * `POST /fair-opens/:launch/open`: the rung the pot covers, for the Creator wallet to sign at the open. The rung carries
- * the sealed coin's name, ticker, metadata URI and mint before the open lands, so it goes only to the X account that
- * scheduled the launch, signed in, and never to someone who merely names the Creator wallet, which the page shows.
+ * the sealed coin's name, ticker, metadata URI and mint before the open lands, so it goes only to the creator who
+ * scheduled the launch, signed in with its Creator wallet (or by its record's X account), and never to someone who
+ * merely names the Creator wallet, which the page shows.
  */
 export async function prepareOpenSignature(c: Context<AppEnv>) {
   const { cfg } = c.var;
@@ -580,9 +581,10 @@ export async function prepareOpenSignature(c: Context<AppEnv>) {
   const found = await openRungFor(c, rpc);
   if ("refusal" in found) return found.refusal;
   const { scheduled, rung } = found;
+  // Signed in as the Creator wallet that scheduled it, or as its record by X, and signing with that wallet.
   const session = await sessionCreator(c);
-  if (sender.data.wallet !== scheduled.wallet || session?.id !== scheduled.creatorId) {
-    return refuse(c, 403, { error: "Only the creator who scheduled this Fair Open signs its open: link the X account that scheduled it, with its Creator wallet.", code: "not_the_creator" });
+  if (sender.data.wallet !== scheduled.wallet || !session || (session.wallet !== scheduled.wallet && session.id !== scheduled.creatorId)) {
+    return refuse(c, 403, { error: "Only the creator who scheduled this Fair Open signs its open: sign in with the Creator wallet that scheduled it.", code: "not_the_creator" });
   }
   if (rung.creatorSignature) return refuse(c, 409, { error: "You have signed your open: our keeper is sending it.", code: "already_signed" });
   const body: PreparedFairOpenTransaction = { transaction: wireOf(rung, { keeper: heat.keys.keeper, creator: scheduled.wallet, mint: scheduled.mint }), admission: null };

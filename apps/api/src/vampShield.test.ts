@@ -9,6 +9,7 @@ import { createTestDatabase } from "@top-pad/db/testing";
 import { app } from "./index";
 import { protectHeatCoin, upsertListed } from "./protectedSet";
 import { atCosine, decode, Fakes, FakeVision, fakeSignatures, flipBits, MemoryBlobs, ORIGINS, seedQuoteSettings, testBindings, testContext, testKeypair } from "./test/fakes";
+import { signInWallet } from "./test/signIn";
 import type { Bindings } from "./env";
 import type { Signatures } from "./vision";
 
@@ -364,5 +365,15 @@ describe("an appeal against a refusal", () => {
     const listed = VampAppeals.parse(await (await request("/vamp-shield/appeals", { headers: { cookie } })).json());
     expect(listed.appeals).toHaveLength(5);
     expect(listed.appeals[4]!.id).toBe(appeal.id);
+  });
+
+  it("comes from a creator signed in with a wallet alone, the 5 a day counted per Creator wallet (ADR 0008)", async () => {
+    const body = { ticker: "B0NKW", name: "Bonk Wallet", imageSha256: null, original: null, message: "Mine." };
+    const wallet = (await testKeypair()).signer;
+    for (let i = 0; i < 5; i++) expect((await post("/vamp-shield/appeals", body, await signInWallet(request, wallet))).status).toBe(201);
+    // Signed in again, from another browser, it is the same creator, who has used the day's five.
+    expect((await post("/vamp-shield/appeals", body, await signInWallet(request, wallet))).status).toBe(429);
+    // Another wallet is another creator.
+    expect((await post("/vamp-shield/appeals", body, await signInWallet(request, (await testKeypair()).signer))).status).toBe(201);
   });
 });

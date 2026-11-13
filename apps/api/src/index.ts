@@ -10,7 +10,7 @@ import { Health, type LaunchRefusal, type Platform } from "@top-pad/contract";
 import { createDb, launches, probe, sessions, xAuthorizations, type Db } from "@top-pad/db";
 import { pruneCandles } from "@top-pad/indexer";
 import { notifyPending, runJob } from "@top-pad/jobs";
-import { finishXLink, logout, me, startXLink } from "./auth";
+import { finishXLink, logout, me, startXLink, walletSignIn, walletSignInMessage } from "./auth";
 import { verifyMessageRoute, verifyRoute } from "./verify";
 import { getCoinRadar, reviewBundles } from "./bundleRadar";
 import { getCoin, getCoinCandles, getCoinTrades } from "./coins";
@@ -114,6 +114,8 @@ app.post("*", async (c, next) => {
 for (const path of ["/auth/*", "/me", "/verify", "/verify/*", "/launches", "/launches/*", "/vamp-shield/*", "/coins/*", "/earnings/*", "/fair-opens/*"]) app.use(path, withDb);
 app.get("/auth/x/start", startXLink);
 app.get("/auth/x/callback", finishXLink);
+app.post("/auth/wallet/message", walletSignInMessage);
+app.post("/auth/wallet", walletSignIn);
 app.post("/auth/logout", logout);
 app.get("/me", me);
 app.post("/verify/message", verifyMessageRoute);

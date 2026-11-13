@@ -1,8 +1,9 @@
-// "Verify once" (spec 6.3): a person links X once (`auth.ts`), and each wallet of theirs proves it is theirs by signing a
-// message that names that X account, the session's own. The wallet is then Scored in every Fair Open, signed in or not,
+// "Verify once" (spec 6.3): a person links X once (`auth.ts`), signed in with a wallet or not, and each wallet of theirs
+// proves it is theirs by signing a message that names that X account, the session's own. The wallet is then Scored in every Fair Open, signed in or not,
 // and shares the person's one seat with their other wallets (`admission.ts`). The message carries the wallet, the person,
 // the cluster and when it was issued, and is taken for ten minutes, so a signature cannot be replayed for anyone else.
 // A wallet belongs to one person: one verified for another X account, or another record's Creator wallet, is refused.
+// A browser signed in with a wallet but no linked X has no X account to verify for, and is told to link one.
 import { getBase64Encoder, getPublicKeyFromAddress, verifySignature, type Address, type SignatureBytes } from "@solana/kit";
 import { and, eq, sql } from "drizzle-orm";
 import type { Context } from "hono";
@@ -48,11 +49,17 @@ function fieldsOf(message: string) {
 
 const signedOut = (c: Context<AppEnv>) => refuse(c, 401, { error: "Link X first: a wallet is verified for the X account linked in this browser.", code: "signed_out" });
 
+/** The signed-in record's linked X account, or null when the browser is signed out or its record has none. */
+async function linkedX(c: Context<AppEnv>) {
+  const session = await sessionCreator(c);
+  return session?.xHandle ? { id: session.id, xHandle: session.xHandle } : null;
+}
+
 /** `POST /verify/message`: the message the signed-in person's wallet signs. */
 export async function verifyMessageRoute(c: Context<AppEnv>) {
   const body = VerifyRequest.safeParse(await c.req.json().catch(() => null));
   if (!body.success) return refuse(c, 400, { error: "Say which wallet to verify.", code: "invalid" });
-  const session = await sessionCreator(c);
+  const session = await linkedX(c);
   if (!session) return signedOut(c);
   const message = verifyMessage({ wallet: body.data.wallet, handle: session.xHandle, person: session.id, cluster: c.var.cfg.cluster, issued: new Date() });
   return c.json({ message } satisfies VerifyMessage);
@@ -63,7 +70,7 @@ export async function verifyRoute(c: Context<AppEnv>) {
   const { cfg, db } = c.var;
   const body = VerifySigned.safeParse(await c.req.json().catch(() => null));
   if (!body.success) return refuse(c, 400, { error: "Send the wallet, the message it signed and the signature.", code: "invalid" });
-  const session = await sessionCreator(c);
+  const session = await linkedX(c);
   if (!session) return signedOut(c);
   const { wallet, message, signature } = body.data;
   const fields = fieldsOf(message);
@@ -83,7 +90,10 @@ export async function verifyRoute(c: Context<AppEnv>) {
     .from(creatorWallets)
     .where(and(eq(creatorWallets.wallet, wallet), sql`${creatorWallets.endedAt} is null`));
   const [existing] = await db.select().from(walletVerifications).where(eq(walletVerifications.wallet, wallet));
-  if ((record && record.creatorId !== session.id) || (existing && existing.creatorId !== session.id)) {
+  if (record && record.creatorId !== session.id) {
+    return refuse(c, 409, { error: "This wallet is another creator's Creator wallet: a wallet belongs to one person.", code: "taken" });
+  }
+  if (existing && existing.creatorId !== session.id) {
     return refuse(c, 409, { error: "This wallet is already verified for another X account: a wallet belongs to one person.", code: "taken" });
   }
   if (!existing) {

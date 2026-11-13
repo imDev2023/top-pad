@@ -87,7 +87,7 @@ export const EVIDENCE_PACK_VERSION = 1;
  * wallet directly linked to the Creator wallet with the transactions, Jito bundle ids and transfers behind its links.
  * Only linked wallets: a wallet that is only labelled is never in a case.
  */
-export function evidencePack(cfg: Config, radar: Radar, creator: { id: string; xHandle: string } | null, reviewedAt: Date) {
+export function evidencePack(cfg: Config, radar: Radar, creator: { id: string; xHandle: string | null } | null, reviewedAt: Date) {
   const view = radarView(cfg, radar, reviewedAt);
   return {
     version: EVIDENCE_PACK_VERSION,

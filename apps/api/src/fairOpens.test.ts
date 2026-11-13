@@ -18,6 +18,7 @@ import { admissionReviews, admissions, createDb, creators, creatorWallets, fairO
 import { createTestDatabase } from "@top-pad/db/testing";
 import { app } from "./index";
 import { decode, Fakes, fairOpenLaunch, fairOpenSeat, ORIGINS, testBindings, testContext, testKeypair } from "./test/fakes";
+import { signInWallet } from "./test/signIn";
 import type { Bindings } from "./env";
 
 // The admission key the cluster records is swapped for a test key: the real one lives only in Secrets Store (spec 10.3).
@@ -368,6 +369,24 @@ describe("a deposit", () => {
     // The Creator wallet itself deposits, Scored by its record's X account, signed in or not.
     const own = await prepared(await post(`/fair-opens/${launch}/deposit`, { wallet: creatorWallet, amount: `${STEP}` }));
     expect(own.body.admission).toEqual({ tier: "scored", cap: "500000000" });
+  });
+
+  it("knows a Creator wallet whose record linked no X as Unverified, and Scored once the record links X (ADR 0008)", async () => {
+    const signer = await generateKeyPairSigner();
+    const cookie = await signInWallet(request, signer);
+    const { launch } = await launchOnChain({ ago: 60n, creator: signer.address });
+    expect((await view(launch, signer.address, cookie)).you!.admission).toMatchObject({ admitted: true, tier: "unverified", via: "none", handle: null });
+    const own = await prepared(await post(`/fair-opens/${launch}/deposit`, { wallet: signer.address, amount: `${STEP}` }));
+    expect(own.body.admission).toEqual({ tier: "unverified", cap: "100000000" });
+
+    // Linking X in the same browser joins it to the record: the Creator wallet is Scored by it, signed in or not.
+    fakes.xUser = { id: "7011", username: "wallet_then_x", name: "Wallet Then X" };
+    const start = await request("/auth/x/start");
+    const state = new URL(start.headers.get("location")!).searchParams.get("state")!;
+    const back = await request(`/auth/x/callback?state=${state}&code=c`, { headers: { cookie: `heat_x_state=${state}; ${cookie}` } });
+    expect(back.headers.get("location")).toContain("x=linked");
+    const scored = { admitted: true, tier: "scored", cap: "500000000", via: "creator_wallet", handle: "wallet_then_x", linked: null };
+    expect((await view(launch, signer.address)).you!.admission).toEqual(scored);
   });
 
   it("refuses an amount off the step, over the cap, or outside the window", async () => {

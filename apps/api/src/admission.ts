@@ -1,6 +1,6 @@
 // The admission server (spec 6.3, 10.2). A person verifies once on Heat (`verify.ts`): a wallet that signed for a linked
-// X account, or the Creator wallet of a record, is Scored in every Fair Open; the Verified tier's providers come with #95;
-// any other wallet is Unverified. The linkage pipeline (`@top-pad/indexer`'s `traceFunding`) ties a person's other
+// X account, or the Creator wallet of a record with a linked X account, is Scored in every Fair Open; the Verified tier's
+// providers come with #95; any other wallet is Unverified, a Creator wallet whose record linked no X included (ADR 0008). The linkage pipeline (`@top-pad/indexer`'s `traceFunding`) ties a person's other
 // wallets to them by where their SOL came from, through hop wallets, so they share one seat; and a wallet tied to the
 // creator's cluster, other than the Creator wallet itself, is refused. Each deposit carries its admission: our signature
 // over the launch, the wallet, the person's pseudonym, the tier, the cap and an expiry, which the Fair Open program
@@ -119,20 +119,26 @@ export type Person = {
 
 type XAccount = { xUserId: string; handle: string; via: "x" | "creator_wallet" };
 
-/** The X account a wallet was verified for: as a record's Creator wallet, or by signing for it once. */
+/** A record's linked X account, when it has one: a record that linked none gives no tier. */
+const linked = <T extends { xUserId: string | null; handle: string | null }>(row: T | undefined) =>
+  row?.xUserId && row.handle ? { ...row, xUserId: row.xUserId, handle: row.handle } : null;
+
+/** The X account a wallet was verified for: as the Creator wallet of a record that linked X, or by signing for it once. */
 async function xAccountOf(db: Db, wallet: string): Promise<XAccount | null> {
   const [byRecord] = await db
     .select({ xUserId: creators.xUserId, handle: creators.xHandle })
     .from(creatorWallets)
     .innerJoin(creators, eq(creators.id, creatorWallets.creatorId))
-    .where(and(eq(creatorWallets.wallet, wallet), sql`${creatorWallets.endedAt} is null`));
-  if (byRecord) return { ...byRecord, via: "creator_wallet" };
+    .where(and(eq(creatorWallets.wallet, wallet), sql`${creatorWallets.endedAt} is null`, isNotNull(creators.xUserId)));
+  const own = linked(byRecord);
+  if (own) return { ...own, via: "creator_wallet" };
   const [verified] = await db
     .select({ xUserId: creators.xUserId, handle: creators.xHandle })
     .from(walletVerifications)
     .innerJoin(creators, eq(creators.id, walletVerifications.creatorId))
-    .where(eq(walletVerifications.wallet, wallet));
-  return verified ? { ...verified, via: "x" } : null;
+    .where(and(eq(walletVerifications.wallet, wallet), isNotNull(creators.xUserId)));
+  const signed = linked(verified);
+  return signed ? { ...signed, via: "x" } : null;
 }
 
 /** The X account of a verified wallet whose SOL came from `root`, if there is one: wallets with one root are one person. */
@@ -141,10 +147,10 @@ async function xAccountByRoot(db: Db, root: string, except: string) {
     .select({ xUserId: creators.xUserId, handle: creators.xHandle, wallet: walletVerifications.wallet })
     .from(walletVerifications)
     .innerJoin(creators, eq(creators.id, walletVerifications.creatorId))
-    .where(and(eq(walletVerifications.root, root), isNotNull(walletVerifications.root), ne(walletVerifications.wallet, except)))
+    .where(and(eq(walletVerifications.root, root), isNotNull(walletVerifications.root), ne(walletVerifications.wallet, except), isNotNull(creators.xUserId)))
     .orderBy(walletVerifications.createdAt)
     .limit(1);
-  return row ?? null;
+  return linked(row);
 }
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;

@@ -24,6 +24,7 @@ import { createTestDatabase } from "@top-pad/db/testing";
 import { candidateKeys, FOLD_VERSION } from "@top-pad/vamp-shield";
 import { app } from "./index";
 import { decode, Fakes, MemoryBlobs, ORIGINS, seedQuoteSettings, splMintAccount, testBindings, testContext, testKeypair } from "./test/fakes";
+import { signInWallet } from "./test/signIn";
 import type { Bindings } from "./env";
 
 // The keeper key the cluster records is swapped for a test key: the real one lives only in Secrets Store (spec 10.3).
@@ -236,6 +237,25 @@ describe("an Instant launch", () => {
     expect(me).toMatchObject({ creatorWallet: wallet.address, launches: 1 });
   });
 
+  it("is launched by a wallet signed in with no X account linked, whose coin's metadata names no X (ADR 0008)", async () => {
+    const wallet = (await testKeypair()).signer;
+    const cookie = await signInWallet(request, wallet);
+    const launch = await prepared(await prepare(cookie, { name: "Plain", ticker: "PLAIN", wallet: wallet.address }));
+    const document = JSON.parse(new TextDecoder().decode((await parseDataItem(blobs.objects.get(`launches/${launch.id}/metadata`)!)).data));
+    expect(document).toMatchObject({ name: "Plain", symbol: "PLAIN" });
+    expect(document).not.toHaveProperty("twitter");
+    expect(document).not.toHaveProperty("extensions");
+
+    const status = LaunchStatus.parse(await (await submit(cookie, launch.id, await signAsWallet(launch, wallet))).json());
+    expect(status).toMatchObject({ status: "landed", mint: launch.mint });
+    // The wallet was the record's Creator wallet from its sign-in: the launch binds nothing more.
+    expect(await db.select({ via: creatorWallets.via }).from(creatorWallets).where(eq(creatorWallets.wallet, wallet.address))).toEqual([{ via: "sign_in" }]);
+    expect(Me.parse(await (await request("/me", { headers: { cookie } })).json())).toMatchObject({ x: null, wallet: wallet.address, creatorWallet: wallet.address, launches: 1 });
+    // Another wallet signed in as a record of its own cannot launch from this one.
+    const other = await signInWallet(request, (await testKeypair()).signer);
+    expect(await refusal(await prepare(other, { ticker: "PLAINER", wallet: wallet.address }))).toMatchObject({ status: 403, code: "not_the_creator_wallet" });
+  });
+
   it("is refused for a wallet other than the record's Creator wallet, the reason shown", async () => {
     const cookie = await linkX({ id: "2003", username: "otter" });
     const first = (await testKeypair()).signer;
@@ -327,9 +347,9 @@ describe("an Instant launch", () => {
     expect(blobs.objects.size).toBe(0);
   });
 
-  it("needs a linked X account, and a request from the web app", async () => {
+  it("needs a browser signed in, and a request from the web app", async () => {
     const wallet = (await testKeypair()).signer.address;
-    expect(await refusal(await prepare("heat_session=none", { wallet }))).toMatchObject({ status: 401, code: "not_linked" });
+    expect(await refusal(await prepare("heat_session=none", { wallet }))).toMatchObject({ status: 401, code: "signed_out" });
     const cookie = await linkX({ id: "2011", username: "elsewhere" });
     expect((await prepare(cookie, { wallet }, {})).status).toBe(403);
   });

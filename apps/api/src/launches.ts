@@ -66,7 +66,7 @@ export const bytesEqual = (a: Uint8Array, b: Uint8Array) => a.length === b.lengt
 /** `POST /launches`: an Instant launch's creation transaction, or a Fair Open's schedule and ladder, for the Creator wallet to sign. */
 export async function prepareLaunch(c: Context<AppEnv>) {
   const creator = await sessionCreator(c);
-  if (!creator) return refuse(c, 401, { error: "Link your X account first: every launch needs one.", code: "not_linked" });
+  if (!creator) return refuse(c, 401, { error: "Sign in with your wallet first.", code: "signed_out" });
   const body = await c.req.parseBody();
   if (body.mode === "fair_open") return prepareFairOpen(c, creator, body);
   return prepareInstant(c, creator, body);
@@ -116,7 +116,7 @@ export async function launchProblem(db: Db, creatorId: string, wallet: string): 
       .from(creatorWallets)
       .where(and(eq(creatorWallets.wallet, wallet), isNull(creatorWallets.endedAt)));
     if (held && held.creatorId !== creatorId) {
-      return { status: 409, refusal: { error: "This wallet is another X account's Creator wallet. Connect a wallet of your own.", code: "wallet_taken" } };
+      return { status: 409, refusal: { error: "This wallet is another creator's Creator wallet. Connect a wallet of your own.", code: "wallet_taken" } };
     }
   }
   const [{ pending } = { pending: 0 }] = await db
@@ -272,7 +272,7 @@ export async function bindCreatorWallet(tx: DbOrTransaction, creatorId: string, 
       .select({ id: creatorWallets.id })
       .from(creatorWallets)
       .where(and(eq(creatorWallets.wallet, wallet), isNull(creatorWallets.endedAt)));
-    if (taken.length > 0) throw new Refused(409, "wallet_taken", "This wallet is another X account's Creator wallet.");
+    if (taken.length > 0) throw new Refused(409, "wallet_taken", "This wallet is another creator's Creator wallet.");
     await tx.insert(creatorWallets).values({ creatorId, wallet, via: "first_launch", proof: signature });
   }
 }
@@ -281,7 +281,7 @@ export async function bindCreatorWallet(tx: DbOrTransaction, creatorId: string, 
 export async function submitLaunch(c: Context<AppEnv>) {
   const { cfg, db } = c.var;
   const creator = await sessionCreator(c);
-  if (!creator) return refuse(c, 401, { error: "Link your X account first: every launch needs one.", code: "not_linked" });
+  if (!creator) return refuse(c, 401, { error: "Sign in with your wallet first.", code: "signed_out" });
   const launch = await ownLaunch(db, c.req.param("id")!, creator.id);
   if (!launch) return refuse(c, 404, { error: "There is no such launch of yours.", code: "not_found" });
   const rpc = createSolanaRpc(cfg.rpcUrl);
@@ -387,7 +387,7 @@ export async function submitLaunch(c: Context<AppEnv>) {
 export async function getLaunch(c: Context<AppEnv>) {
   const { cfg, db } = c.var;
   const creator = await sessionCreator(c);
-  if (!creator) return refuse(c, 401, { error: "Link your X account first.", code: "not_linked" });
+  if (!creator) return refuse(c, 401, { error: "Sign in with your wallet first.", code: "signed_out" });
   const launch = await ownLaunch(db, c.req.param("id")!, creator.id);
   if (!launch) return refuse(c, 404, { error: "There is no such launch of yours.", code: "not_found" });
   return c.json(await settle(db, createSolanaRpc(cfg.rpcUrl), cfg, launch, onLanded(c)));

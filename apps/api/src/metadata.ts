@@ -22,21 +22,23 @@ export function sniffImageType(b: Uint8Array): ImageType | null {
   return null;
 }
 
-export type Coin = { name: string; ticker: string; mint: string; xHandle: string };
+/** A coin as its metadata names it; `xHandle` is the creator's linked X account, null when they linked none (ADR 0008). */
+export type Coin = { name: string; ticker: string; mint: string; xHandle: string | null };
 
 /**
- * The Metaplex off-chain document, the very bytes Arweave holds. The creator's X profile goes in `twitter`, where
- * terminals look for a coin's X link, so traders see who made it wherever the coin shows (spec 2.1 step 1).
+ * The Metaplex off-chain document, the very bytes Arweave holds. A creator who linked X has their X profile in
+ * `twitter`, where terminals look for a coin's X link, so traders see who made it wherever the coin shows (spec 2.1 step
+ * 1); a creator who linked none has no `twitter` at all, never an empty one.
  */
 export function metadataDocument(coin: Coin, image: { url: string; type: ImageType }, site: string) {
-  const x = `https://x.com/${coin.xHandle}`;
+  const x = coin.xHandle ? `https://x.com/${coin.xHandle}` : null;
   return {
     name: coin.name,
     symbol: coin.ticker,
     image: image.url,
-    twitter: x,
+    ...(x ? { twitter: x } : {}),
     createdOn: site,
-    extensions: { twitter: x },
+    ...(x ? { extensions: { twitter: x } } : {}),
     properties: { category: "image", files: [{ uri: image.url, type: image.type }] },
   };
 }

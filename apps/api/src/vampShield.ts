@@ -412,7 +412,7 @@ const IMAGE_CHECKS_PER_10_MINUTES = 30;
 export async function checkImageRoute(c: Context<AppEnv>) {
   const { cfg, db } = c.var;
   const creator = await sessionCreator(c);
-  if (!creator) return refuse(c, 401, { error: "Link your X account first: images are checked for a launch.", code: "not_linked" });
+  if (!creator) return refuse(c, 401, { error: "Sign in with your wallet first: images are checked for a launch.", code: "signed_out" });
   const [{ recent } = { recent: 0 }] = await db
     .select({ recent: sql<number>`count(*)::int` })
     .from(vampChecks)
@@ -448,7 +448,7 @@ export async function checkImageRoute(c: Context<AppEnv>) {
  */
 export async function imageVerdictRoute(c: Context<AppEnv>) {
   const creator = await sessionCreator(c);
-  if (!creator) return refuse(c, 401, { error: "Link your X account first.", code: "not_linked" });
+  if (!creator) return refuse(c, 401, { error: "Sign in with your wallet first.", code: "signed_out" });
   const sha256 = c.req.param("sha256")!;
   if (!/^[0-9a-f]{64}$/.test(sha256)) return c.json({ error: "That is not an image's SHA-256." }, 400);
   const [row] = await c.var.db
@@ -568,7 +568,7 @@ const toAppeal = (r: typeof vampAppeals.$inferSelect): VampAppeal => ({
 export async function appealRoute(c: Context<AppEnv>) {
   const { cfg, db } = c.var;
   const creator = await sessionCreator(c);
-  if (!creator) return refuse(c, 401, { error: "Link your X account first: an appeal comes from the creator who was refused.", code: "not_linked" });
+  if (!creator) return refuse(c, 401, { error: "Sign in with your wallet first: an appeal comes from the creator who was refused.", code: "signed_out" });
   const body = VampAppealForm.safeParse(await c.req.json().catch(() => null));
   if (!body.success) return c.json({ error: "Say why the refusal is wrong, in at most 2,000 characters." }, 400);
   const [{ recent } = { recent: 0 }] = await db
@@ -600,7 +600,7 @@ export async function appealRoute(c: Context<AppEnv>) {
 /** `GET /vamp-shield/appeals`: the signed-in creator's appeals, newest first. */
 export async function listAppealsRoute(c: Context<AppEnv>) {
   const creator = await sessionCreator(c);
-  if (!creator) return refuse(c, 401, { error: "Link your X account first.", code: "not_linked" });
+  if (!creator) return refuse(c, 401, { error: "Sign in with your wallet first.", code: "signed_out" });
   const rows = await c.var.db.select().from(vampAppeals).where(eq(vampAppeals.creatorId, creator.id)).orderBy(desc(vampAppeals.createdAt)).limit(50);
   return c.json({ appeals: rows.map(toAppeal) });
 }

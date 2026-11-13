@@ -83,7 +83,7 @@ export const MAX_AHEAD_SECONDS = 7 * 24 * 60 * 60;
 /** How long before now a window's start may be asked for: "now", from a form filled a moment ago. */
 const START_SLACK_SECONDS = 120;
 
-type Creator = { id: string; xHandle: string };
+type Creator = { id: string; xHandle: string | null };
 type Form = Awaited<ReturnType<Context<AppEnv>["req"]["parseBody"]>>;
 type Rpc = ReturnType<typeof createSolanaRpc>;
 
@@ -363,7 +363,7 @@ async function signatureOn(signed: Transaction, message: Uint8Array, signer: str
 export async function renewFairOpen(c: Context<AppEnv>) {
   const { cfg, db } = c.var;
   const creator = await sessionCreator(c);
-  if (!creator) return refuse(c, 401, { error: "Link your X account first.", code: "not_linked" });
+  if (!creator) return refuse(c, 401, { error: "Sign in with your wallet first.", code: "signed_out" });
   const row = await ownLaunch(db, c.req.param("id")!, creator.id);
   if (!row || row.mode !== "fair_open") return refuse(c, 404, { error: "There is no such Fair Open of yours.", code: "not_found" });
   if (row.status !== "prepared") return refuse(c, 409, { error: "This Fair Open has been submitted already.", code: "invalid" });

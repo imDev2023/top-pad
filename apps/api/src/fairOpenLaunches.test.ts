@@ -34,6 +34,7 @@ import { parseDataItem } from "@top-pad/arweave";
 import { candidateKeys, FOLD_VERSION } from "@top-pad/vamp-shield";
 import { app } from "./index";
 import { decode, Fakes, fairOpenLaunch, lookupTableAccount, MemoryBlobs, ORIGINS, seedQuoteSettings, testBindings, testContext, testKeypair } from "./test/fakes";
+import { signInWallet } from "./test/signIn";
 import type { Bindings } from "./env";
 
 // The keeper and admission keys the cluster records are swapped for test keys: the real ones live only in Secrets Store.
@@ -339,9 +340,9 @@ describe("scheduling a Fair Open", { timeout: 30_000 }, () => {
 
 describe("signing the open at the open", { timeout: 30_000 }, () => {
   /** A scheduled Fair Open signed at the open, with its launch account on chain `ago` seconds into its window. */
-  async function scheduledAtOpen(ago: bigint, asks: [number, Tier][]) {
-    const cookie = await linkX({ id: `${4100 + Math.floor(Math.random() * 800)}`, username: "late_signer" });
+  async function scheduledAtOpen(ago: bigint, asks: [number, Tier][], by: "x" | "wallet" = "x") {
     const wallet = (await testKeypair()).signer;
+    const cookie = by === "wallet" ? await signInWallet(request, wallet) : await linkX({ id: `${4100 + Math.floor(Math.random() * 800)}`, username: "late_signer" });
     const ticker = `L${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
     const launch = await prepared(await prepare(cookie, { ticker, wallet: wallet.address }));
     await submit(cookie, launch, wallet, { atOpen: true });
@@ -368,6 +369,23 @@ describe("signing the open at the open", { timeout: 30_000 }, () => {
     for (const signer of Object.keys(sent[0]!.signatures)) expect(await valid(sent[0]!, signer)).toBe(true);
     expect(FairOpen.parse(await (await request(`/fair-opens/${launch.launch}`)).json()).ladder).toBe("at_open_signed");
     expect(FairOpenRefusal.parse(await (await json(`/fair-opens/${launch.launch}/open`, { wallet: wallet.address }, cookie)).json()).code).toBe("already_signed");
+  });
+
+  it("hands the rung to the Creator wallet signed in with no X account, and to nobody else signed in with a wallet (ADR 0008)", async () => {
+    const { launch, wallet, ticker } = await scheduledAtOpen(605n, [[60, Tier.Verified]], "wallet");
+    // Signed in again from the browser at the open, as the creator coming back to sign does.
+    const cookie = await signInWallet(request, wallet);
+    const prepared = PreparedFairOpenTransaction.parse(await (await json(`/fair-opens/${launch.launch}/open`, { wallet: wallet.address }, cookie)).json());
+    const outcome = FairOpenOutcome.parse(await (await json(`/fair-opens/${launch.launch}/open/submit`, { transaction: await signed(prepared.transaction, wallet) })).json());
+    expect(outcome.status).toBe("landed");
+
+    const later = await scheduledAtOpen(605n, [[60, Tier.Verified]], "wallet");
+    const someone = await signInWallet(request, (await testKeypair()).signer);
+    const res = await json(`/fair-opens/${later.launch.launch}/open`, { wallet: later.wallet.address }, someone);
+    const text = await res.text();
+    expect(res.status).toBe(403);
+    expect(text).not.toContain(later.ticker);
+    expect(text).not.toContain(ticker);
   });
 
   it("refuses before the window closes, and refuses anyone but the creator who scheduled it, signed in", async () => {
