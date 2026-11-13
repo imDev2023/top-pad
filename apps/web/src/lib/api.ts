@@ -2,6 +2,7 @@ import {
   ApiError,
   BarAppeal,
   BarReply,
+  Board,
   BundleRadar,
   ClaimOutcome,
   Coin,
@@ -22,6 +23,7 @@ import {
   Me,
   Platform,
   QuoteList,
+  SearchResults,
   PreparedClaim,
   PreparedCreatorRole,
   PreparedFairOpenTransaction,
@@ -350,3 +352,23 @@ export async function loadEnforcementCounts(): Promise<EnforcementCounts | null>
     return null;
   }
 }
+
+/** The Discover board as the server renders it (spec 8), or null when the API does not answer in time. */
+export async function loadBoard(): Promise<Board | null> {
+  try {
+    const res = await fetch(`${API_URL}/board`, { cache: "no-store", signal: AbortSignal.timeout(8_000) });
+    const parsed = Board.safeParse(await res.json());
+    return res.ok && parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The Discover board, from the browser. */
+export const getBoard = () => call(Board, "/board");
+
+/** Heat coins whose name, ticker or mint matches. */
+export const searchCoins = (query: string) => call(SearchResults, `/search?q=${encodeURIComponent(query)}`);
+
+/** The board's live room: Trending every 15 s, and the coins and calendar changes that make the board read again. */
+export const boardLiveUrl = () => `${API_URL.replace(/^http/, "ws")}/live/board`;
