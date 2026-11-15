@@ -13,6 +13,7 @@ import {
   CreatorRoleOutcome,
   CreatorSummary,
   EnforcementCounts,
+  FairnessCard,
   FairOpen,
   FairOpenOutcome,
   HandoverOffers,
@@ -210,6 +211,21 @@ export function getCoinTrades(mint: string, query: { after?: string; before?: st
 
 /** What Bundle Radar labels on a coin, with the evidence behind each label. */
 export const getCoinRadar = (mint: string) => call(BundleRadar, `/coins/${encodeURIComponent(mint)}/radar`);
+
+/** A coin's Fairness card (spec 9), from the browser. */
+export const getFairness = (mint: string) => call(FairnessCard, `/coins/${encodeURIComponent(mint)}/fairness`);
+
+/** A coin's Fairness card as the server renders the page and its link card's tags; null when there is none or the API is down. */
+export async function loadFairness(mint: string): Promise<FairnessCard | null> {
+  try {
+    const res = await fetch(`${API_URL}/coins/${encodeURIComponent(mint)}/fairness`, { cache: "no-store", signal: AbortSignal.timeout(8_000) });
+    if (!res.ok) return null;
+    const parsed = FairnessCard.safeParse(await res.json());
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
 
 export const getCoinCandles = (mint: string, seconds: CandleSeconds) => call(CoinCandles, `/coins/${encodeURIComponent(mint)}/candles?seconds=${seconds}`);
 

@@ -1,29 +1,25 @@
 "use client";
 
 import type { BundleRadar, QuoteInfo, RadarBuy, RadarTransfer, RadarWallet } from "@top-pad/contract";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useState } from "react";
 import { getCoinRadar } from "@/lib/api";
 import { coinAmount, ordinal, quoteSmall, quoteText, shareOf, shortAddress, sol, span } from "@/lib/format";
-import styles from "./Radar.module.css";
+import styles from "./Flags.module.css";
 
 const WRAPPED_SOL = "So11111111111111111111111111111111111111112";
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
-type Flag = "linked" | "early";
+/** Bundle Radar's two flags: red for wallets linked to the creator, yellow for same-slot buys. */
+export type RadarFlag = "linked" | "early";
 
 /**
- * Bundle Radar's flags on a coin (spec 6.4, 9): red for wallets directly linked to the Creator wallet that bought, yellow
- * for buys in the creation slot with no such link, each flag opening its evidence, every transaction linked. They are
- * labels, Heat's judgement with the evidence shown, and never move a coin in Heat's listings (spec 8). Read again
- * whenever the coin's room says its labels may have changed.
+ * A coin's Bundle Radar (spec 6.4), read again whenever the coin's room says its labels may have changed: `version`
+ * counts those changes.
  */
-export function RadarFlags({ mint, ticker, decimals, quote, version }: { mint: string; ticker: string; decimals: number; quote: QuoteInfo; version: number }) {
+export function useRadar(mint: string, version: number) {
   const [radar, setRadar] = useState<BundleRadar | null>(null);
   const [failed, setFailed] = useState(false);
-  const [open, setOpen] = useState<Flag | null>(null);
-  const detailId = useId();
-
   useEffect(() => {
     let stopped = false;
     // A burst of buys asks once.
@@ -43,99 +39,113 @@ export function RadarFlags({ mint, ticker, decimals, quote, version }: { mint: s
       clearTimeout(timer);
     };
   }, [mint, version]);
-
   const linked = radar?.wallets.filter((w) => w.linked) ?? [];
   const early = radar?.wallets.filter((w) => !w.linked) ?? [];
   const earlyBuys = early.reduce((n, w) => n + w.buys.filter((b) => b.labels.includes("same_slot")).length, 0);
-  const shown = open === "linked" && linked.length ? "linked" : open === "early" && early.length ? "early" : null;
-  const toggle = (flag: Flag) => setOpen((o) => (o === flag ? null : flag));
+  return { radar, failed, linked, early, earlyBuys };
+}
+export type RadarState = ReturnType<typeof useRadar>;
 
+/** Which flag's evidence shows: the one asked for, if the radar still has it. */
+export const shownRadarFlag = (state: RadarState, open: RadarFlag | null): RadarFlag | null =>
+  open === "linked" && state.linked.length ? "linked" : open === "early" && state.early.length ? "early" : null;
+
+/**
+ * Bundle Radar's flags (spec 6.4, 9): red for wallets directly linked to the Creator wallet that bought, yellow for buys
+ * in the creation slot with no such link, each opening its evidence; or "Nothing labelled". They are labels, Heat's
+ * judgement with the evidence shown, and never move a coin in Heat's listings (spec 8).
+ */
+export function RadarFlagButtons({ state, open, onToggle, controls }: { state: RadarState; open: RadarFlag | null; onToggle: (flag: RadarFlag) => void; controls: string }) {
+  const { radar, failed, linked, early, earlyBuys } = state;
+  const shown = shownRadarFlag(state, open);
   return (
-    <section id="radar" className={styles.radar} aria-label="Bundle Radar" data-testid="radar">
-      <div className={styles.strip}>
-        <span className="eyebrow">Bundle Radar</span>
-        {!radar ? (
-          <span className={`chip chip-neutral ${styles.flagChip}`}>{failed ? "Labels unavailable" : "Reading the chain…"}</span>
-        ) : !linked.length && !early.length ? (
-          <span className={`chip chip-neutral ${styles.flagChip}`} data-testid="radar-clear">
-            Nothing labelled
+    <span id="radar" className={styles.group} role="group" aria-label="Bundle Radar" data-testid="radar">
+      {!radar ? (
+        <span className={`chip chip-neutral ${styles.flagChip}`}>{failed ? "Bundle Radar unavailable" : "Bundle Radar reading the chain…"}</span>
+      ) : !linked.length && !early.length ? (
+        <span className={`chip chip-neutral flag ${styles.flagChip}`} data-testid="radar-clear">
+          Nothing labelled
+        </span>
+      ) : null}
+      {linked.length > 0 && (
+        <button
+          type="button"
+          className={`chip chip-stop flag ${styles.flagChip} ${styles.flagButton}`}
+          aria-expanded={shown === "linked"}
+          aria-controls={controls}
+          onClick={() => onToggle("linked")}
+          data-testid="radar-linked"
+        >
+          <span>
+            {plural(linked.length, "wallet", "wallets")} linked to the creator ·{" "}
+            <span className={styles.flagFigure}>{shareOf(radar!.linked.coins, radar!.supply)}</span> of supply
           </span>
-        ) : null}
-        {linked.length > 0 && (
-          <button
-            type="button"
-            className={`chip chip-stop flag ${styles.flagChip} ${styles.flagButton}`}
-            aria-expanded={shown === "linked"}
-            aria-controls={detailId}
-            onClick={() => toggle("linked")}
-            data-testid="radar-linked"
-          >
-            <span>
-              {plural(linked.length, "wallet", "wallets")} linked to the creator{" "}
-              <span className={styles.flagFigure}>· {shareOf(radar!.linked.coins, radar!.supply)} of supply</span>
-            </span>
-            <i className={styles.caret} aria-hidden="true" />
-          </button>
-        )}
-        {early.length > 0 && (
-          <button
-            type="button"
-            className={`chip chip-caution flag ${styles.flagChip} ${styles.flagButton}`}
-            aria-expanded={shown === "early"}
-            aria-controls={detailId}
-            onClick={() => toggle("early")}
-            data-testid="radar-same-slot"
-          >
-            <span>{plural(earlyBuys, "same-slot buy", "same-slot buys")}</span>
-            <i className={styles.caret} aria-hidden="true" />
-          </button>
-        )}
-      </div>
+          <i className={styles.caret} aria-hidden="true" />
+        </button>
+      )}
+      {early.length > 0 && (
+        <button
+          type="button"
+          className={`chip chip-caution flag ${styles.flagChip} ${styles.flagButton}`}
+          aria-expanded={shown === "early"}
+          aria-controls={controls}
+          onClick={() => onToggle("early")}
+          data-testid="radar-same-slot"
+        >
+          <span>{plural(earlyBuys, "same-slot buy", "same-slot buys")}</span>
+          <i className={styles.caret} aria-hidden="true" />
+        </button>
+      )}
+    </span>
+  );
+}
 
-      <div id={detailId} hidden={!shown}>
-        {shown === "linked" && radar && (
-          <div className={`panel ${styles.detail} ${styles.detailStop}`} data-testid="radar-linked-detail">
-            <div className={styles.detailHead}>
-              <h2>Linked to the Creator wallet</h2>
-              <a className="mono note" href={radar.creatorExplorer} target="_blank" rel="noreferrer" title={radar.creatorWallet}>
-                {shortAddress(radar.creatorWallet)}
-              </a>
-            </div>
-            <p className={styles.lead}>
-              Each wallet here has a direct link to the Creator wallet: funds passed between them in the 7 days before the open or
-              after it, the Creator wallet signed or paid for its buy, or its buy was one of the four transactions right after the
-              coin&apos;s creation. Between them they bought <b>{shareOf(radar.linked.coins, radar.supply)}</b> of supply in the
-              first hour{radar.wallets.some((w) => w.linked && BigInt(w.potCoins) > 0n) ? " and the pot" : ""}.
-            </p>
-            <ul className={styles.wallets}>
-              {linked.map((w) => (
-                <WalletRow key={w.wallet} wallet={w} radar={radar} ticker={ticker} decimals={decimals} quote={quote} />
-              ))}
-            </ul>
-            <p className="note">Labels are Heat&apos;s judgement, with the evidence linked. They never move a coin in Heat&apos;s listings.</p>
-          </div>
-        )}
-        {shown === "early" && radar && (
-          <div className={`panel ${styles.detail} ${styles.detailCaution}`} data-testid="radar-same-slot-detail">
-            <div className={styles.detailHead}>
-              <h2>Bought in the creation slot</h2>
-              <a className="mono note" href={radar.creation.explorer} target="_blank" rel="noreferrer">
-                Slot {radar.creation.slot.toLocaleString("en-US")}
-              </a>
-            </div>
-            <p className={styles.lead}>
-              These buys landed in the same slot as the coin&apos;s creation, paying the 99% sniper tax. Buying early is no link to the
-              creator on its own, so this is a label only.
-            </p>
-            <ul className={styles.wallets}>
-              {early.map((w) => (
-                <WalletRow key={w.wallet} wallet={w} radar={radar} ticker={ticker} decimals={decimals} quote={quote} />
-              ))}
-            </ul>
-          </div>
-        )}
+/** The evidence behind the flag that is open, every buy, deposit and transfer linked on the explorer. */
+export function RadarEvidence({ state, flag, ticker, decimals, quote }: { state: RadarState; flag: RadarFlag; ticker: string; decimals: number; quote: QuoteInfo }) {
+  const { radar, linked, early } = state;
+  if (!radar) return null;
+  if (flag === "linked") {
+    return (
+      <div className={`panel ${styles.detail} ${styles.detailStop}`} data-testid="radar-linked-detail">
+        <div className={styles.detailHead}>
+          <h2>Linked to the Creator wallet</h2>
+          <a className="mono note" href={radar.creatorExplorer} target="_blank" rel="noreferrer" title={radar.creatorWallet}>
+            {shortAddress(radar.creatorWallet)}
+          </a>
+        </div>
+        <p className={styles.lead}>
+          Each wallet here has a direct link to the Creator wallet: funds passed between them in the 7 days before the open or
+          after it, the Creator wallet signed or paid for its buy, or its buy was one of the four transactions right after the
+          coin&apos;s creation. Between them they bought <b>{shareOf(radar.linked.coins, radar.supply)}</b> of supply in the
+          first hour{radar.wallets.some((w) => w.linked && BigInt(w.potCoins) > 0n) ? " and the pot" : ""}.
+        </p>
+        <ul className={styles.wallets}>
+          {linked.map((w) => (
+            <WalletRow key={w.wallet} wallet={w} radar={radar} ticker={ticker} decimals={decimals} quote={quote} />
+          ))}
+        </ul>
+        <p className="note">Labels are Heat&apos;s judgement, with the evidence linked. They never move a coin in Heat&apos;s listings.</p>
       </div>
-    </section>
+    );
+  }
+  return (
+    <div className={`panel ${styles.detail} ${styles.detailCaution}`} data-testid="radar-same-slot-detail">
+      <div className={styles.detailHead}>
+        <h2>Bought in the creation slot</h2>
+        <a className="mono note" href={radar.creation.explorer} target="_blank" rel="noreferrer">
+          Slot {radar.creation.slot.toLocaleString("en-US")}
+        </a>
+      </div>
+      <p className={styles.lead}>
+        These buys landed in the same slot as the coin&apos;s creation, paying the 99% sniper tax. Buying early is no link to the
+        creator on its own, so this is a label only.
+      </p>
+      <ul className={styles.wallets}>
+        {early.map((w) => (
+          <WalletRow key={w.wallet} wallet={w} radar={radar} ticker={ticker} decimals={decimals} quote={quote} />
+        ))}
+      </ul>
+    </div>
   );
 }
 

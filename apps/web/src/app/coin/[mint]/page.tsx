@@ -3,12 +3,14 @@ import { notFound } from "next/navigation";
 import { cache } from "react";
 import { CoinNotYet } from "@/components/coin/CoinNotYet";
 import { CoinPage } from "@/components/coin/CoinPage";
-import { loadCoin } from "@/lib/api";
+import { countsInOrder } from "@top-pad/contract";
+import { loadCoin, loadFairness } from "@/lib/api";
 
 type Props = { params: Promise<{ mint: string }> };
 
-// The title and the page ask once between them.
+// The title, the link card's tags and the page ask once between them.
 const coinAt = cache(loadCoin);
+const fairnessAt = cache(loadFairness);
 
 /** Base58, 32 to 44 characters: what could be a coin's address at all. */
 const ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
@@ -16,8 +18,25 @@ const ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { mint } = await params;
   if (!ADDRESS.test(mint)) return { title: "Nothing at this address" };
-  const coin = await coinAt(mint);
-  return { title: typeof coin === "object" ? `$${coin.ticker} · ${coin.name}` : coin === "missing" ? "Looking for a coin" : "Coin" };
+  const [coin, card] = await Promise.all([coinAt(mint), fairnessAt(mint)]);
+  if (typeof coin !== "object") return { title: coin === "missing" ? "Looking for a coin" : "Coin" };
+  const title = `$${coin.ticker} · ${coin.name}`;
+  if (!card) return { title };
+  // The Fairness card is the coin's link card on X (spec 9): its image, 2:1, and its counts and first rows as words.
+  const counts = countsInOrder(card.counts)
+    .map(({ flag, count }) => `${count} ${flag}`)
+    .join(", ");
+  const description = `Fairness card: ${counts}. ${card.rows
+    .slice(0, 3)
+    .map((r) => r.value)
+    .join(". ")}.`;
+  const image = { url: card.image, width: 1200, height: 600, alt: `The Fairness card of $${coin.ticker}: ${counts}` };
+  return {
+    title,
+    description,
+    openGraph: { type: "website", title, description, images: [image] },
+    twitter: { card: "summary_large_image", title, description, images: [image] },
+  };
 }
 
 /**
@@ -27,7 +46,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 export default async function Page({ params }: Props) {
   const { mint } = await params;
   if (!ADDRESS.test(mint)) notFound();
-  const coin = await coinAt(mint);
+  const [coin, fairness] = await Promise.all([coinAt(mint), fairnessAt(mint)]);
   return (
     <div className="page">
       {coin === "missing" ? (
@@ -38,7 +57,7 @@ export default async function Page({ params }: Props) {
           <span className="note">The coin could not be loaded just now. Reload the page in a moment.</span>
         </div>
       ) : (
-        <CoinPage initial={coin} />
+        <CoinPage initial={coin} fairness={fairness} />
       )}
     </div>
   );

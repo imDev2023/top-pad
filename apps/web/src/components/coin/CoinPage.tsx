@@ -1,6 +1,6 @@
 "use client";
 
-import type { Coin, LiveBatch, Trade } from "@top-pad/contract";
+import type { Coin, FairnessCard, LiveBatch, Trade } from "@top-pad/contract";
 import Link from "next/link";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { coinLiveUrl, getCoin, getCoinTrades } from "@/lib/api";
@@ -8,11 +8,11 @@ import { ago, coinAmount, compactNumber, dayOf, scaledFigure, shortAddress } fro
 import { CreatorSummaryCard } from "../creator/CreatorSummaryCard";
 import { QuoteLabels } from "../quote/QuoteLabels";
 import { CandleChart, type ChartFeed } from "./CandleChart";
+import { FairnessStrip } from "./Fairness";
 import styles from "./Coin.module.css";
 import { GraduationPanel } from "./GraduationPanel";
 import { QuickTrade } from "./QuickTrade";
 import { LooksLikeFlag, LooksLikePanel } from "../vampShield/LooksLike";
-import { RadarFlags } from "./RadarFlags";
 import { TaxBand } from "./TaxBand";
 import { TradeList } from "./TradeList";
 import { useLiveRoom } from "./useLiveRoom";
@@ -26,7 +26,7 @@ const newer = (a: string, b: string | null) => b === null || BigInt(a) > BigInt(
  * A coin's page (spec 9, screen 3): its market, the sniper tax while it runs, its chart, its way to Graduation and its
  * trades, all live. A pool on Heat's configs that our launch key never co-signed says so in red (spec 2.4).
  */
-export function CoinPage({ initial }: { initial: Coin }) {
+export function CoinPage({ initial, fairness }: { initial: Coin; fairness: FairnessCard | null }) {
   const mint = initial.mint;
   const [coin, setCoin] = useState(initial);
   const [offsetMs, setOffsetMs] = useState(0);
@@ -34,6 +34,8 @@ export function CoinPage({ initial }: { initial: Coin }) {
   const [fresh, setFresh] = useState<ReadonlySet<string>>(new Set());
   // Bundle Radar's labels, read again on each change the coin's room reports.
   const [radarVersion, setRadarVersion] = useState(0);
+  // The Fairness card, read again on each change the coin's room reports that a row states.
+  const [fairnessVersion, setFairnessVersion] = useState(0);
   const [looksLikeOpen, setLooksLikeOpen] = useState(false);
   const looksLikeId = useId();
   // Trades this page sent, shown the moment they confirmed, until the indexer reports them (spec 10.2).
@@ -140,6 +142,7 @@ export function CoinPage({ initial }: { initial: Coin }) {
       merge(landed, { live: true });
       chart.current?.add(landed);
       if (batch.events.some((e) => e.type === "radar" && e.mint === mint)) setRadarVersion((v) => v + 1);
+      if (batch.events.some((e) => (e.type === "radar" || e.type === "graduation" || e.type === "window_claim") && e.mint === mint)) setFairnessVersion((v) => v + 1);
       // A Graduation moving on: the coin again, for its new pool and how it stands.
       if (batch.events.some((e) => e.type === "graduation" && e.mint === mint)) {
         void getCoin(mint)
@@ -270,7 +273,17 @@ export function CoinPage({ initial }: { initial: Coin }) {
         </section>
       )}
 
-      {coin.heat && <RadarFlags mint={mint} ticker={coin.ticker} decimals={decimals} quote={coin.quote} version={radarVersion} />}
+      {coin.heat && (
+        <FairnessStrip
+          mint={mint}
+          ticker={coin.ticker}
+          decimals={decimals}
+          quote={coin.quote}
+          initial={fairness}
+          version={fairnessVersion}
+          radarVersion={radarVersion}
+        />
+      )}
 
       <TaxBand coin={coin} now={now + offsetMs} />
 

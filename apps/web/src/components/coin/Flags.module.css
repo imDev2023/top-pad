@@ -1,19 +1,110 @@
 /*
- * Bundle Radar's flags on a coin's page (spec 6.4, 9): a strip of marshal's flags above the chart, red for wallets linked
- * to the creator and yellow for same-slot buys, each opening its evidence below the strip.
+ * The Fairness card's flags on a coin's page (spec 9, layout B): a strip of race marshal's flags above the chart, one a
+ * row of the card, Bundle Radar's among them; each opens below the strip, and the whole card opens one tap away.
  */
-.radar {
+.fairness {
   display: grid;
   gap: 10px;
   min-width: 0;
+}
+
+.stripHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+
+.cardToggle {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  min-height: 36px;
+  padding: 5px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.cardToggle:hover,
+.cardToggle[aria-expanded="true"] {
+  border-color: var(--line-strong);
+}
+
+.cardToggleRed,
+.cardToggleRed:hover,
+.cardToggleRed[aria-expanded="true"] {
+  border-color: var(--stop);
+}
+
+.cardToggle:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.cardToggle:disabled {
+  cursor: default;
+}
+
+.cardToggle[aria-expanded="true"] .caret {
+  transform: rotate(180deg);
+}
+
+.counts {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .strip {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 10px;
+  gap: 8px;
   min-height: 30px;
+}
+
+/* Bundle Radar's flags sit in the strip as its own. */
+.group {
+  display: contents;
+}
+
+.checkered {
+  flex: none;
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
+  background-size: 5.5px 5.5px;
+}
+
+.pip {
+  flex: none;
+  width: 11px;
+  height: 12px;
+  background: currentColor;
+  clip-path: polygon(0 0, 18% 0, 18% 100%, 0 100%, 0 0, 100% 15%, 72% 45%, 100% 75%, 18% 70%, 18% 0);
+}
+
+.pip_green {
+  color: var(--go);
+}
+
+.pip_yellow {
+  color: var(--caution);
+}
+
+.pip_red {
+  color: var(--stop);
+}
+
+.pip_neutral {
+  color: var(--muted);
 }
 
 .flagChip {
@@ -75,6 +166,111 @@
 
 .detailCaution {
   border-left-color: var(--caution);
+}
+
+.detail_green {
+  border-left-color: var(--go);
+}
+
+.detail_checkered {
+  border-left-color: var(--fg);
+}
+
+.detail_yellow {
+  border-left-color: var(--caution);
+}
+
+.detail_red {
+  border-left-color: var(--stop);
+}
+
+.detail_neutral {
+  border-left-color: var(--line-strong);
+}
+
+/* A row of the card, in the strip's detail and in the whole card */
+.rowHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rowValue {
+  margin: 0;
+  font-size: 0.98rem;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--fg);
+}
+
+.rowValueRed {
+  color: var(--stop);
+}
+
+.rowLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  font-size: 0.86rem;
+}
+
+/* The whole card: its counts first, its border red with any red flag */
+.card {
+  display: grid;
+  gap: 4px;
+  padding: 16px 20px 18px;
+}
+
+.cardRed {
+  border-color: var(--stop);
+  box-shadow: inset 0 0 0 1px var(--stop);
+}
+
+.cardHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding-bottom: 10px;
+}
+
+.cardHead h2 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.cardRows {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 28px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cardRow {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+
+.cardFoot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.share {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .detailHead {
@@ -151,9 +347,24 @@
   flex: none;
 }
 
+@media (max-width: 760px) {
+  .cardRows {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 @media (max-width: 560px) {
+  /* Every flag stays in view on a phone, a few to a line, the strip's point being that none hides. */
+  .strip {
+    gap: 6px;
+  }
+
   .detail {
     padding: 12px 14px 14px;
+  }
+
+  .card {
+    padding: 14px 14px 16px;
   }
 
   .evidence {
