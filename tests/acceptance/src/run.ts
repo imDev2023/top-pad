@@ -58,7 +58,8 @@ const bankSol = async () => Number((await rpc.getBalance(bank.address, { commitm
 const runName = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
 const dir = join(root, "tests", "acceptance", "runs", runName);
 mkdirSync(dir, { recursive: true });
-const startSlot = await rpc.getSlot({ commitment: "confirmed" }).send();
+// A number, so the results file can hold it; slots stay far below 2^53.
+const startSlot = Number(await rpc.getSlot({ commitment: "confirmed" }).send());
 const startedAt = new Date();
 console.log(`run ${runName}: logs in ${dir}; from slot ${startSlot}`);
 
