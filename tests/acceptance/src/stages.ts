@@ -74,9 +74,11 @@ export const STAGES: Stage[] = [
     name: "fair-open-open",
     proves: "11.2: a full Fair Open (the open, the lock escrow's cliff and recipient, the pushes, the Tax Share, closed seats) and a partial fill",
     cwd: "tests/devnet",
-    command: vitest("src/fair-open-open.test.ts"),
+    // Its three launches one at a time: run side by side, their polling outran the public endpoint's per-IP budget,
+    // which answered 429 for minutes on end (2026-11-15).
+    command: [...vitest("src/fair-open-open.test.ts"), "--maxConcurrency=1"],
     peakSol: 4,
-    minutes: 12,
+    minutes: 20,
   },
   {
     name: "graduation-8.5",
