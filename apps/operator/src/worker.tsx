@@ -14,7 +14,7 @@ import { addHub, decideAdmission, decideAppeal, decideCase, decideLaunch, opened
 import { asOperator } from "./db";
 import type { AppEnv, Bindings } from "./env";
 import { exportAudit } from "./exportAudit";
-import { admissionItem, barDetail, barRows, caseByMint, launchItem, queue, type CaseItem, type LaunchKey } from "./queue";
+import { admissionItem, barDetail, barRows, caseByMint, launchItem, publicCounts, queue, type CaseItem, type LaunchKey } from "./queue";
 import { AdmissionPage, AuditPage, BarPage, BarsPage, BotsPage, CasePage, Denied, EvidencePage, Flash, HubsPage, ICON, LaunchPage, Missing, QueuePage, THEME_COOKIE, type CaseDecision, type Shell } from "./views";
 
 export const app = new Hono<AppEnv>();
@@ -233,8 +233,9 @@ app.get("/cases/:mint/evidence", async (c) => {
 });
 
 app.get("/bars", async (c) => {
-  const rows = await asOperator(c.var.db, barRows);
-  return c.html(<BarsPage {...shell(c, "bars")} bars={rows} now={new Date()} flash={await flashOf(c)} />);
+  const now = new Date();
+  const [rows, counts] = await asOperator(c.var.db, (tx) => Promise.all([barRows(tx), publicCounts(tx, now)]));
+  return c.html(<BarsPage {...shell(c, "bars")} bars={rows} counts={counts} enforced={`${c.env.WEB_APP}/enforced#bars`} now={now} flash={await flashOf(c)} />);
 });
 
 const oneOperator = (c: Context<AppEnv>) => c.env.APPEALS_BY_CONFIRMER === "allowed";

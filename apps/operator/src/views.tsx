@@ -5,7 +5,7 @@ import type { Child, FC, PropsWithChildren } from "hono/jsx";
 import { raw } from "hono/html";
 import { APPEAL_WINDOW_MS, type ProtectedMatch } from "@top-pad/contract";
 import type { Operator } from "./env";
-import { AIM_HOURS, ageOf, creatorName, type AdmissionItem, type AppealItem, type BarDetail, type BarRow, type CaseItem, type LaunchItem, type LaunchKey, type QueueItem, type Refusing } from "./queue";
+import { AIM_HOURS, ageOf, creatorName, type AdmissionItem, type AppealItem, type BarDetail, type BarRow, type CaseItem, type LaunchItem, type LaunchKey, type PublicCounts, type QueueItem, type Refusing } from "./queue";
 import { STYLES } from "./styles";
 
 const FONTS = "https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Saira+Condensed:wght@600;700&display=swap";
@@ -810,7 +810,7 @@ export const GROUNDS: Record<AppealItem["grounds"], string> = {
 const barState = (b: { liftedAt: Date | null; publishAt: Date }, now: Date): [string, string] =>
   b.liftedAt ? ["chip-go", "Lifted on appeal"] : b.publishAt.getTime() > now.getTime() ? ["chip-caution", "Private window"] : ["chip-stop", "Published"];
 
-export const BarsPage: FC<Shell & { bars: BarRow[]; now: Date; flash: Child }> = ({ bars, now, flash, ...shell }) => (
+export const BarsPage: FC<Shell & { bars: BarRow[]; counts: PublicCounts; enforced: string; now: Date; flash: Child }> = ({ bars, counts, enforced, now, flash, ...shell }) => (
   <Layout {...shell} title="Bars" current="bars">
     <div class="stack-lg">
       <div class="stack">
@@ -818,6 +818,26 @@ export const BarsPage: FC<Shell & { bars: BarRow[]; now: Date; flash: Child }> =
         <p class="lead">Every confirmed creator bundle. A Bar applies the moment its case is confirmed, stays private to the creator for 72 hours, then is published; it never expires, and only an upheld appeal lifts it.</p>
       </div>
       {flash}
+      <section class="stack" aria-labelledby="public-counts">
+        <h2 id="public-counts" class="eyebrow">
+          What <a href={enforced}>How this is enforced</a> publishes
+        </h2>
+        <div class="tallies tallies-3">
+          <div class="panel tally">
+            <span class="eyebrow">Creators barred</span>
+            <span class="n" data-testid="public-count-bars">{counts.bars}</span>
+          </div>
+          <div class="panel tally">
+            <span class="eyebrow">Appeals filed</span>
+            <span class="n" data-testid="public-count-appeals">{counts.appeals}</span>
+          </div>
+          <div class="panel tally">
+            <span class="eyebrow">Findings overturned</span>
+            <span class="n" data-testid="public-count-overturned">{counts.overturned}</span>
+          </div>
+        </div>
+        <p class="note">Bars past their private 72 hours or lifted, and the appeals filed against them; a Bar still private is in no count.</p>
+      </section>
       {bars.length === 0 ? (
         <div class="panel empty">No case has been confirmed yet.</div>
       ) : (

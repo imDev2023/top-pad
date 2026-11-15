@@ -139,6 +139,7 @@ textarea.input { min-height: 84px; resize: vertical; }
 
 /* The queue's tallies. */
 .tallies { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+.tallies-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .tally { padding: 12px 14px; display: grid; gap: 2px; }
 .tally .n { font-family: var(--font-mono); font-size: 1.6rem; font-weight: 500; line-height: 1.1; }
 .tally.over .n { color: var(--stop); }

@@ -420,7 +420,11 @@ describe("Bars", () => {
     const barPage = await page(`/bars/${bar!.id}`);
     expect(barPage.html).toContain("Private window");
     expect(barPage.html).toContain("Owed: the API&#39;s five-minute cron sends it");
-    expect((await page("/bars")).html).toContain("$FROG · Frog Bundle");
+    const barsPage = (await page("/bars")).html;
+    expect(barsPage).toContain("$FROG · Frog Bundle");
+    // A Bar in its private 72 hours is in none of the counts "How this is enforced" publishes.
+    expect(barsPage).toMatch(/data-testid="public-count-bars">0</);
+    expect(barsPage).toContain('href="https://heat.test/enforced#bars"');
   });
 
   it("dismisses a case: no Bar, nothing cancelled, nothing sent", async () => {
@@ -463,7 +467,12 @@ describe("Bars", () => {
     expect(row!.detail).toMatchObject({ sameOperator: false, confirmedBy: "operator@heat.test", finding: { mint: MINT, creatorWallet, wallets: [{ wallet: wallet(6), labels: ["same_slot", "creator_funded"] }] } });
     expect((await page("/")).html).not.toContain('data-kind="appeal"');
     expect((await page(`/bars/${bar!.id}`)).html).toContain("Lifted on appeal");
-    expect((await page("/bars")).html).toContain("1 reply, 1 appeal.");
+    const barsPage = (await page("/bars")).html;
+    expect(barsPage).toContain("1 reply, 1 appeal.");
+    // Lifted, it counts though still within its 72 hours: one Bar, its one appeal, one finding overturned.
+    expect(barsPage).toMatch(/data-testid="public-count-bars">1</);
+    expect(barsPage).toMatch(/data-testid="public-count-appeals">1</);
+    expect(barsPage).toMatch(/data-testid="public-count-overturned">1</);
   });
 
   it("lets the confirming operator decide the appeal where one operator fills both roles, and says so in the audit log", async () => {

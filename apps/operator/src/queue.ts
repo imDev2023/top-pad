@@ -1,7 +1,7 @@
 // The operator queue (spec 6.6): one list of everything waiting on a person, refused launches with their appeals,
 // refused or merged admissions, bundling cases and barred creators' appeals, each with its age against the 48-hour aim.
 // Read as `heat_operator`.
-import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { ProtectedMatch } from "@top-pad/contract";
 import { admissionReviews, barAppeals, barReplies, bars, bundleCases, creators, creatorWallets, launches, launchReviews, vampAppeals, xMessages, type DbOrTransaction } from "@top-pad/db";
@@ -334,6 +334,24 @@ export type BarRow = {
   appeals: number;
   openAppeal: boolean;
 };
+
+/**
+ * What "How this is enforced" publishes (spec 6.5, 9 screen 6), counted here from the Bars themselves: Bars past their
+ * private 72 hours or lifted, the appeals filed against those, and those lifted on appeal.
+ */
+export type PublicCounts = { bars: number; appeals: number; overturned: number };
+
+export async function publicCounts(tx: DbOrTransaction, now = new Date()): Promise<PublicCounts> {
+  const [row] = await tx
+    .select({
+      bars: sql<number>`count(*)::int`,
+      overturned: sql<number>`count(*) filter (where "bars"."lifted_at" is not null)::int`,
+      appeals: sql<number>`coalesce(sum((select count(*) from bar_appeals a where a.bar_id = "bars"."id")), 0)::int`,
+    })
+    .from(bars)
+    .where(or(lte(bars.publishAt, now), isNotNull(bars.liftedAt)));
+  return { bars: row?.bars ?? 0, appeals: row?.appeals ?? 0, overturned: row?.overturned ?? 0 };
+}
 
 /** Every Bar, newest first, with how many replies and appeals each drew. */
 export async function barRows(tx: DbOrTransaction): Promise<BarRow[]> {
