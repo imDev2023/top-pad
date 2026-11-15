@@ -11,6 +11,10 @@
   },
   "dependencies": {
     "@cloudflare/containers": "0.3.7",
+    "@fontsource/ibm-plex-mono": "5.3.0",
+    "@fontsource/ibm-plex-sans": "5.3.0",
+    "@fontsource/saira-condensed": "5.3.0",
+    "@resvg/resvg-wasm": "2.6.2",
     "@solana/kit": "^8.5.0",
     "@top-pad/arweave": "workspace:*",
     "@top-pad/chain": "workspace:*",
@@ -23,7 +27,8 @@
     "@top-pad/quotes": "workspace:*",
     "@top-pad/vamp-shield": "workspace:*",
     "drizzle-orm": "^0.45.4",
-    "hono": "^4.13.14"
+    "hono": "^4.13.14",
+    "satori": "0.32.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261027.1",

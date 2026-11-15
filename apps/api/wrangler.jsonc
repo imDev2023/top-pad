@@ -7,6 +7,8 @@
   // which fails with error 1042 unless fetch() routes as if from the public internet.
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "observability": { "enabled": true },
+  // The Fairness card image's fonts (src/cardAssets.ts), bundled as bytes; its WebAssembly compiles by wrangler's default rule.
+  "rules": [{ "type": "Data", "globs": ["**/*.woff"], "fallthrough": true }],
   // Every five minutes: the indexer woken if a deploy stopped it, the keeper's float against its floor, the quotes' band, housekeeping,
   // then any open alert to the operator. Every minute: Vamp Shield's protected set (spec 6.2), and at minute 2 of each
   // hour its hourly lists and the images not yet signed.
