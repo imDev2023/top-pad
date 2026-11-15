@@ -143,8 +143,10 @@ describe.skipIf(!keys)("the failure simulation on devnet", () => {
           const signature = await refund(s.launch, w);
           const back = (await lamports(w.address)) - before[i]!;
           const owed = seats[i]!.seat.deposit + seats[i]!.seat.coinRent + seats[i]!.lamports;
-          console.log(`depositor ${i} withdrew ${back + FEE} lamports alone (${signature}): deposit ${seats[i]!.seat.deposit}, both rents ${seats[i]!.seat.coinRent + seats[i]!.lamports}`);
-          expect(back).toBe(owed - FEE - (i === 0 ? FEE : 0n));
+          // Depositor 0 also paid for marking the launch failed.
+          const fees = FEE + (i === 0 ? FEE : 0n);
+          console.log(`depositor ${i} withdrew ${back + fees} lamports alone (${signature}): deposit ${seats[i]!.seat.deposit}, both rents ${seats[i]!.seat.coinRent + seats[i]!.lamports}`);
+          expect(back).toBe(owed - fees);
           expect(await seatOf(s.launch, w.address)).toBeNull();
         }
         expect((await fetchLaunch(rpc, s.launch)).data.seats).toBe(0);
