@@ -12,6 +12,7 @@ export * from "./health";
 export * from "./jobs";
 export * from "./launch";
 export * from "./live";
+export * from "./position";
 export * from "./quote";
 export * from "./radar";
 export * from "./trade";

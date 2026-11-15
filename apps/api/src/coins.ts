@@ -2,7 +2,9 @@
 // went, its trades newest first (or since an order key, for a page catching up after its live connection dropped), and
 // its candles of one length.
 import { and, asc, desc, eq, gt, gte, lt, lte } from "drizzle-orm";
+import { address, createSolanaRpc } from "@solana/kit";
 import type { Context } from "hono";
+import { getPoolDecoder } from "@top-pad/clients/damm-v2";
 import { COIN_DECIMALS, COIN_SUPPLY, FEE_DENOMINATOR, marketCapOfSqrtPrice, priceOfSqrtPrice, SNIPER_TAX } from "@top-pad/chain";
 import { Address, CandleSeconds, type Coin, type CoinCandles, type CoinTrades, type Trade, type WindowClaim } from "@top-pad/contract";
 import { candles, coins, creators, fairOpens, graduations, launches, pools, trades, windowClaims, type Db } from "@top-pad/db";
@@ -11,6 +13,7 @@ import { holderCount } from "@top-pad/indexer";
 import { quoteInfoOf, quoteOf } from "./quotes";
 import { creatorLockOf, taxShareOf } from "./afterOpen";
 import { coinFinding } from "./bars";
+import { cached } from "./board";
 import { recordAt, summaryOf } from "./creatorRecord";
 import { explorerUrl, type Config } from "./env";
 import type { AppEnv } from "./http";
@@ -19,6 +22,9 @@ import { storedLabels } from "./vampShield";
 /** How long a holder count stands before a page asks for it again (spec 10.4 lets public figures be a minute stale). */
 const HOLDERS_FRESH_MS = 60_000;
 const HOLDERS_TIMEOUT_MS = 2_500;
+/** Whether Meteora paused a graduated pool stands this long, and is read within this long or said unknown. */
+const PAUSED_FRESH_MS = 60_000;
+const PAUSED_TIMEOUT_MS = 2_500;
 const TRADES_PAGE = 50;
 const TRADES_MAX = 200;
 /** A page catching up gets at most this many trades; one further behind loads its trades afresh. */
@@ -72,7 +78,7 @@ async function fairOpenOf(cfg: Config, db: Db, mint: string): Promise<Coin["fair
 }
 
 /** A coin's Graduation as its page shows it, from its pool's row and its Graduation's; null while its curve runs. */
-function graduationOf(cfg: Config, pool: typeof pools.$inferSelect, g: typeof graduations.$inferSelect | null): Coin["graduation"] {
+function graduationOf(cfg: Config, pool: typeof pools.$inferSelect, g: typeof graduations.$inferSelect | null, paused: boolean | null): Coin["graduation"] {
   if (!g && !pool.curveCompletedAt && pool.quoteReserve < pool.graduationTarget) return null;
   const surplus =
     pool.surplusCreatorAmount !== null && pool.surplusTreasuryAmount !== null
@@ -92,10 +98,31 @@ function graduationOf(cfg: Config, pool: typeof pools.$inferSelect, g: typeof gr
             heat: { position: g.heatPosition, explorer: explorerUrl(cfg, "address", g.heatPosition) },
           },
           leftoverBurnt: g.leftoverBurnt?.toString() ?? null,
+          paused,
           explorer: { migration: explorerUrl(cfg, "tx", g.signature), pool: explorerUrl(cfg, "address", g.pool) },
         }
       : null,
   };
+}
+
+/**
+ * Whether Meteora has paused a graduated pool (DAMM v2's `pool_status` other than 0), kept a minute in KV since every
+ * viewer of the coin asks every 30 s; null when the chain did not answer, which is not kept.
+ */
+async function pausedOf(c: Context<AppEnv>, pool: string): Promise<boolean | null> {
+  const read = async () => {
+    const { value } = await createSolanaRpc(c.var.cfg.rpcUrl)
+      .getAccountInfo(address(pool), { encoding: "base64" })
+      .send({ abortSignal: AbortSignal.timeout(PAUSED_TIMEOUT_MS) });
+    if (!value) throw new Error(`graduated pool ${pool} is missing on chain`);
+    return getPoolDecoder().decode(Uint8Array.from(atob(value.data[0]), (ch) => ch.charCodeAt(0))).poolStatus !== 0;
+  };
+  try {
+    return await cached(c, `paused:v1:${pool}`, PAUSED_FRESH_MS, read);
+  } catch (e) {
+    console.warn("reading whether a graduated pool is paused failed", pool, e);
+    return null;
+  }
 }
 
 /** `GET /coins/:mint`. */
@@ -163,7 +190,7 @@ export async function getCoin(c: Context<AppEnv>) {
     },
     windowClaim: row.windowClaim ? windowClaimView(cfg, row.windowClaim) : null,
     fairOpen: await fairOpenOf(cfg, db, mint),
-    graduation: graduationOf(cfg, pool, row.graduation),
+    graduation: graduationOf(cfg, pool, row.graduation, row.graduation ? await pausedOf(c, row.graduation.pool) : null),
     looksLike: storedLabels(row.looksLike),
     explorer: { mint: explorerUrl(cfg, "address", mint), pool: explorerUrl(cfg, "address", pool.pool) },
     servedAt: new Date().toISOString(),

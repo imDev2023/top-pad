@@ -144,5 +144,42 @@ export const EnforcementCounts = z.object({
 });
 export type EnforcementCounts = z.infer<typeof EnforcementCounts>;
 
+/** An address a promise rests on, with where to check it. */
+export const CheckedAddress = z.object({ address: Address, explorer: z.string().url() });
+export type CheckedAddress = z.infer<typeof CheckedAddress>;
+
+/**
+ * One of Heat's two programs and who can upgrade it now, read from its program data account on chain: `authority` null
+ * with `upgradeable` false for a program nobody can change any more; `read` false when the chain did not answer.
+ */
+export const EnforcedProgram = CheckedAddress.extend({
+  name: z.enum(["fee", "fair_open"]),
+  read: z.boolean(),
+  upgradeable: z.boolean().nullable(),
+  authority: CheckedAddress.nullable(),
+});
+export type EnforcedProgram = z.infer<typeof EnforcedProgram>;
+
+/**
+ * `GET /enforcement` (spec 9, screen 6): the counts, and the keys "How this is enforced" names as who could still change
+ * each promise; `chain` null where Heat runs nothing.
+ */
+export const Enforcement = EnforcementCounts.extend({
+  chain: z
+    .object({
+      cluster: z.string(),
+      programs: z.array(EnforcedProgram),
+      /** Receives Heat's Platform Fee: a plain key on devnet, a Squads multisig on mainnet (spec 4). */
+      treasury: CheckedAddress,
+      /** Co-signs every Heat launch: only coins it co-signed are Heat's (spec 2.4). */
+      launchKey: CheckedAddress,
+      dbc: CheckedAddress,
+      dammV2: CheckedAddress,
+      jupiterLock: CheckedAddress,
+    })
+    .nullable(),
+});
+export type Enforcement = z.infer<typeof Enforcement>;
+
 /** When a Bar's finding is published: 72 hours after the confirmation. */
 export const publishAtOf = (confirmedAt: Date) => new Date(confirmedAt.getTime() + PRIVATE_WINDOW_MS);

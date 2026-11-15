@@ -72,6 +72,11 @@ export const Graduation = z.object({
       }),
       /** The coins DBC left over and the fee program burnt, in raw units; null until burnt. */
       leftoverBurnt: RawAmount.nullable(),
+      /**
+       * Whether Meteora's operators have paused the pool's trading (spec 9: they can, and withdrawals still work), read
+       * from the pool on chain at most a minute ago; null when the chain did not answer.
+       */
+      paused: z.boolean().nullable(),
       explorer: z.object({ migration: z.string().url(), pool: z.string().url() }),
     })
     .nullable(),

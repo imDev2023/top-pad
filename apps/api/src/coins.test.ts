@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { getBase58Encoder } from "@solana/kit";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { CLUSTERS } from "@top-pad/chain";
+import { getPoolDecoder, getPoolEncoder, getPoolSize } from "@top-pad/clients/damm-v2";
 import { Coin, CoinCandles, CoinTrades } from "@top-pad/contract";
 import { createDb, graduations, pools, type Db } from "@top-pad/db";
 import { createTestDatabase } from "@top-pad/db/testing";
@@ -95,6 +96,43 @@ describe("a coin's page", () => {
     expect(coin.market.holders).toBe(4);
   });
 
+  it("says when Meteora has paused a graduated pool, as DAMM v2's pool account says (spec 9)", async () => {
+    const pool = "8uVNbDoBJRQBjLaCzaoVBspKGVxyJTBcXHCwVzK1hHnK";
+    await db.update(pools).set({ holders: 1, holdersCountedAt: new Date() });
+    await db.insert(graduations).values({
+      mint: MINT,
+      curvePool: POOL,
+      pool,
+      config: CLUSTERS.devnet!.configs!.instant,
+      signature: "WGUuif2coNGXtkstV3wQPkJ3dVSA1a8Q5MYV6zkeFy9EFDWSQCef5MRjheFvWVFb7tZwNXAHLcXRC7NXBgytU9L",
+      slot: 2,
+      graduatedAt: new Date(1_793_300_010_000),
+      sqrtPrice: "120258058333485015",
+      creatorPosition: "5p6cnsZgtiCdNt6f883wmmBLwtKKjhsGaYpnFi8Fqwa3",
+      creatorPositionNftMint: "EqSFT6TmVY1fY8k79J6DoEjY7kKZT5vRXMr6c26j8yxi",
+      creatorPositionOwner: "923oSKVPTAdwojxpNBjMsbLwUg8bKTPMEp3LGWn7EDus",
+      creatorLiquidity: "1",
+      heatPosition: "5mH7gGn38uVnCwdHmVMCKrttcX6Zs913VWjDAp2FNYDv",
+      heatPositionNftMint: "4t6T34BF62mjCX21AZUWNxjvjA2zVtmTniWHArzeZje4",
+      heatLiquidity: "1",
+    });
+    // A DAMM v2 pool account whose status is 1, disabled: Meteora's pause.
+    const blank = getPoolDecoder().decode(new Uint8Array(getPoolSize()));
+    const paused = getPoolEncoder().encode({ ...blank, poolStatus: 1 });
+    const asked: string[] = [];
+    vi.stubGlobal("fetch", async (input: string, init: RequestInit) => {
+      const { id, method, params } = JSON.parse(String(init.body));
+      expect(method).toBe("getAccountInfo");
+      asked.push(params[0]);
+      const value = { data: [btoa(String.fromCharCode(...paused)), "base64"], executable: false, lamports: 1, owner: "cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG", rentEpoch: 0, space: paused.length };
+      return Response.json({ jsonrpc: "2.0", id, result: { context: { slot: 1 }, value } });
+    });
+    const coin = Coin.parse(await (await request(`/coins/${MINT}`)).json());
+    expect(asked).toEqual([pool]);
+    expect(coin.graduation!.graduated!.paused).toBe(true);
+    await db.delete(graduations);
+  });
+
   it("says when its curve completed, and once it has graduated, its DAMM v2 pool, its fee and its locked positions (#51)", async () => {
     await db.update(pools).set({ curveCompletedAt: new Date(1_793_300_000_000), quoteReserve: 8_500_000_000n, holders: 1, holdersCountedAt: new Date() });
     const completed = Coin.parse(await (await request(`/coins/${MINT}`)).json());
@@ -134,6 +172,8 @@ describe("a coin's page", () => {
       },
     });
     expect(coin.graduation!.graduated!.explorer.migration).toMatch(/\/tx\/WGUuif2c/);
+    // The holder count's RPC knows no pool account, so whether Meteora paused it is unknown, never guessed.
+    expect(coin.graduation!.graduated!.paused).toBeNull();
     await db.delete(graduations);
     await db.update(pools).set({ curveCompletedAt: null, quoteReserve: 100_000n, sqrtPrice: "35525545851457242", surplusCreatorAmount: null, surplusTreasuryAmount: null, surplusSignature: null });
   });

@@ -295,11 +295,6 @@ export async function enforcementCounts(db: Db, now = new Date()): Promise<Enfor
   return { bars: row?.bars ?? 0, appeals: row?.appeals ?? 0, overturned: row?.overturned ?? 0, servedAt: now.toISOString() };
 }
 
-/** `GET /enforcement`. */
-export async function getEnforcement(c: Context<AppEnv>) {
-  c.header("cache-control", "public, max-age=60");
-  return c.json(await enforcementCounts(c.var.db));
-}
 
 /** How many messages one run sends at most, and how often one is tried before it is left for the operator. */
 const NOTICES_PER_RUN = 20;

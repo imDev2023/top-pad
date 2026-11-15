@@ -124,6 +124,23 @@ export function quoteAmount(raw: bigint | string, quote: QuoteUnit, max = 4) {
 /** The same with its symbol: "0.0999 USDC". */
 export const quoteText = (raw: bigint | string, quote: QuoteUnit, max = 4) => `${quoteAmount(raw, quote, max)}\u{a0}${quote.symbol}`;
 
+/**
+ * Raw units of a quote for a P&L figure, through its multiplier: four decimals from 1 up, four significant digits below
+ * (never a subscript, which the card image's fonts cannot draw), and its sign when asked, a minus sign (U+2212) for a
+ * loss and a plus for a gain: "+0.0123 SOL", "\u{2212}1.5 USDC".
+ */
+export function pnlText(raw: bigint | string, quote: QuoteUnit, o: { signed?: boolean } = {}) {
+  const n = BigInt(raw);
+  const value = quoteValue(n < 0n ? -n : n, quote);
+  const digits = value >= 1 ? { maximumFractionDigits: Math.min(4, quote.decimals) } : { maximumSignificantDigits: 4 };
+  const body = value === 0 ? "0" : value.toLocaleString("en-US", digits);
+  const sign = !o.signed || n === 0n ? "" : n < 0n ? "\u{2212}" : "+";
+  return `${sign}${body}\u{a0}${quote.symbol}`;
+}
+
+/** A P&L percentage with its sign: "+12.5%", "\u{2212}3.04%". */
+export const pnlPercentText = (percent: number) => `${percent > 0 ? "+" : percent < 0 ? "\u{2212}" : ""}${Math.abs(percent).toLocaleString("en-US", { maximumFractionDigits: 2 })}%`;
+
 /** Raw units of a quote for a figure that can be tiny, such as a fee: 0.000025 rather than 0. */
 export const quoteSmall = (raw: bigint | string, quote: QuoteUnit, significant = 4) => compactNumber(quoteValue(raw, quote), significant);
 

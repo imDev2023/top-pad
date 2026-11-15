@@ -16,8 +16,10 @@ import { getBoard, getCoinRecords, getCoinRecordSnapshot, keeperKeyOf, search, s
 import { getCoinRadar, reviewBundles } from "./bundleRadar";
 import { getCoin, getCoinCandles, getCoinTrades } from "./coins";
 import { getCardImage, getFairness } from "./fairness";
+import { getPosition, getPositionImage } from "./positions";
 import { getEarnings, prepareClaim, reportClaim } from "./earnings";
-import { appealBar, getEnforcement, replyToBar, sendBarNotices } from "./bars";
+import { appealBar, replyToBar, sendBarNotices } from "./bars";
+import { getEnforcement } from "./enforcement";
 import { getCreatorRecord, getCurrentRecord, getPrivateBars } from "./creatorRecord";
 import { prepareCreatorRole, reportCreatorRole } from "./creatorRole";
 import {
@@ -157,6 +159,8 @@ app.get("/coins/:mint/radar", getCoinRadar);
 app.get("/coins/:mint/fairness", getFairness);
 app.get("/coins/:mint/card.png", getCardImage);
 app.get("/coins/:mint/holdings/:wallet", getHoldings);
+app.get("/coins/:mint/positions/:wallet", getPosition);
+app.get("/coins/:mint/positions/:wallet/card.png", getPositionImage);
 app.post("/coins/:mint/quote", quote);
 app.post("/coins/:mint/swap", prepareSwap);
 app.post("/coins/:mint/trades", reportTrade);

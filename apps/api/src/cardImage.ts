@@ -16,7 +16,7 @@ export type CardAssets = {
 };
 
 /** Heat's dark theme, the image's (spec 9: dark-first on asphalt grey), as `globals.css` defines it. */
-const C = {
+export const C = {
   bg: "#14171a",
   panel: "#1b1f23",
   panel2: "#23282d",
@@ -35,15 +35,16 @@ const IMAGE_TIMEOUT_MS = 3_000;
 /** Pictures resvg draws; anything else gets the initials. */
 const DRAWN_TYPES = new Set(["image/png", "image/jpeg", "image/gif"]);
 
-type El = { type: string; props: Record<string, unknown> };
-const el = (type: string, style: Record<string, unknown>, children?: unknown, props: Record<string, unknown> = {}): El => ({
+export type El = { type: string; props: Record<string, unknown> };
+export const el = (type: string, style: Record<string, unknown>, children?: unknown, props: Record<string, unknown> = {}): El => ({
   type,
   props: { ...props, style, children },
 });
-const box = (style: Record<string, unknown>, ...children: unknown[]) => el("div", { display: "flex", ...style }, children);
+export const box = (style: Record<string, unknown>, ...children: unknown[]) =>
+  el("div", { display: "flex", ...style }, children.filter((child) => child !== null && child !== undefined && child !== false));
 
 /** A race marshal's flag on its pole, as the site's `.flag` draws it; checkered at Graduation. */
-function flagIcon(flag: FairnessFlag, size: number): El {
+export function flagIcon(flag: FairnessFlag, size: number): El {
   const pole = el("rect", {}, undefined, { x: 0, y: 0, width: 3, height: 26, rx: 1, fill: flag === "checkered" ? C.fg : FLAG_COLOR[flag] });
   if (flag !== "checkered") {
     return el("svg", { flex: "none" }, [pole, el("path", {}, undefined, { d: "M3 1H22L18.2 7.5L22 14H3Z", fill: FLAG_COLOR[flag] })], {
@@ -62,7 +63,7 @@ function flagIcon(flag: FairnessFlag, size: number): El {
 }
 
 /** The coin's picture as a data URL, or null for one that is slow, missing or of a kind the drawing cannot embed. */
-async function pictureOf(uri: string | null): Promise<string | null> {
+export async function pictureOf(uri: string | null): Promise<string | null> {
   if (!uri) return null;
   try {
     const res = await fetch(uri, { signal: AbortSignal.timeout(IMAGE_TIMEOUT_MS) });
@@ -191,8 +192,14 @@ export function cardLayout(card: FairnessCard, o: { cluster: string; web: string
 
 /** The card as a PNG of `CARD_WIDTH` by `CARD_HEIGHT`. */
 export async function renderCardImage(card: FairnessCard, o: { cluster: string; web: string; assets?: () => Promise<CardAssets> }): Promise<Uint8Array> {
-  const [assets, picture] = await Promise.all([start(o.assets ?? workerAssets), pictureOf(card.imageUri)]);
-  const svg = await satori(cardLayout(card, { cluster: o.cluster, web: o.web, picture }) as never, {
+  const picture = await pictureOf(card.imageUri);
+  return drawPng(cardLayout(card, { cluster: o.cluster, web: o.web, picture }), o.assets);
+}
+
+/** A layout of `CARD_WIDTH` by `CARD_HEIGHT` drawn as a PNG: the Fairness card's and the P&L card's alike. */
+export async function drawPng(layout: El, assetsOf?: () => Promise<CardAssets>): Promise<Uint8Array> {
+  const assets = await start(assetsOf ?? workerAssets);
+  const svg = await satori(layout as never, {
     width: CARD_WIDTH,
     height: CARD_HEIGHT,
     fonts: assets.fonts.map((f) => ({ ...f, style: "normal" as const })),
