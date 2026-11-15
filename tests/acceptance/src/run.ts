@@ -10,7 +10,9 @@
 //
 // It needs what its stages need: DATABASE_URL (the devnet database) and HELIUS_API_KEY from the main checkout's
 // environment, which `direnv exec` gives, and Heat's devnet keys in ~/.config/top-pad/devnet. Real devnet SOL: about 5 a
-// run from Heat's bank, about 10 of it lent at once at the 8.5 SOL Graduation; about four and a half hours.
+// run from Heat's bank, about 10 of it lent at once at the 8.5 SOL Graduation, and some from the keeper key, which pays
+// the launch key's fees and the deployed keeper's sends: a stage starts only while the keeper holds 0.5 SOL. About four
+// and a half hours.
 import { spawn, type ChildProcess } from "node:child_process";
 import { createWriteStream, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createConnection } from "node:net";
@@ -18,6 +20,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createKeyPairSignerFromBytes } from "@solana/kit";
+import { CLUSTERS } from "@top-pad/chain";
 import { STAGES, type Stage } from "./stages";
 import { readRpc } from "./rpc";
 
@@ -54,6 +57,12 @@ for (const name of ["DATABASE_URL", "HELIUS_API_KEY"]) {
 const rpc = readRpc();
 const bank = await createKeyPairSignerFromBytes(Uint8Array.from(JSON.parse(readFileSync(join(homedir(), ".config/top-pad/devnet/bank.json"), "utf8")) as number[]));
 const bankSol = async () => Number((await rpc.getBalance(bank.address, { commitment: "confirmed" }).send()).value) / 1e9;
+// The keeper key pays too: the launch key's fees in the tests, and the deployed keeper's migrations, nonces and claims. A
+// run took it from about 2 SOL to nothing on 2026-11-15, and every keeper send after that failed for rent.
+const keeper = CLUSTERS.devnet!.keys!.keeper;
+const keeperSol = async () => Number((await rpc.getBalance(keeper, { commitment: "confirmed" }).send()).value) / 1e9;
+/** The most a stage has taken from the keeper key, with room: a stage starts only with this much there. */
+const KEEPER_NEEDS = 0.5;
 
 const runName = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
 const dir = join(root, "tests", "acceptance", "runs", runName);
@@ -63,9 +72,21 @@ const startSlot = Number(await rpc.getSlot({ commitment: "confirmed" }).send());
 const startedAt = new Date();
 console.log(`run ${runName}: logs in ${dir}; from slot ${startSlot}`);
 
-type Result = { name: string; proves: string; status: "passed" | "failed" | "not run"; why?: string; minutes: number; bankBefore: number; bankAfter: number; log: string };
+type Result = {
+  name: string;
+  proves: string;
+  status: "passed" | "failed" | "not run";
+  why?: string;
+  minutes: number;
+  bankBefore: number;
+  bankAfter: number;
+  keeperBefore: number;
+  keeperAfter: number;
+  log: string;
+};
 const results: Result[] = [];
 const bankAtStart = await bankSol();
+const keeperAtStart = await keeperSol();
 
 const portOpen = (port: number) =>
   new Promise<boolean>((done) => {
@@ -117,13 +138,17 @@ for (const stage of stages) {
   const logFile = join(dir, `${stage.name}.log`);
   const log = createWriteStream(logFile);
   const bankBefore = await bankSol();
+  const keeperBefore = await keeperSol();
   const started = Date.now();
-  const result: Result = { name: stage.name, proves: stage.proves, status: "not run", minutes: 0, bankBefore, bankAfter: bankBefore, log: logFile };
+  const result: Result = { name: stage.name, proves: stage.proves, status: "not run", minutes: 0, bankBefore, bankAfter: bankBefore, keeperBefore, keeperAfter: keeperBefore, log: logFile };
   results.push(result);
-  console.log(`\n=== ${stage.name} (bank ${bankBefore.toFixed(3)} SOL): ${stage.proves}`);
-  // A stage that would leave the bank short stops there, not halfway through with its wallets holding the SOL.
-  if (bankBefore < stage.peakSol + 1) {
-    result.why = `the bank held ${bankBefore.toFixed(3)} SOL, short of the ${stage.peakSol + 1} this stage needs at once`;
+  console.log(`\n=== ${stage.name} (bank ${bankBefore.toFixed(3)} SOL, keeper ${keeperBefore.toFixed(3)} SOL): ${stage.proves}`);
+  // A stage that would leave the bank or the keeper short stops there, not halfway through with its wallets holding the SOL.
+  if (bankBefore < stage.peakSol + 1 || keeperBefore < KEEPER_NEEDS) {
+    result.why =
+      bankBefore < stage.peakSol + 1
+        ? `the bank held ${bankBefore.toFixed(3)} SOL, short of the ${stage.peakSol + 1} this stage needs at once`
+        : `the keeper key held ${keeperBefore.toFixed(3)} SOL, short of ${KEEPER_NEEDS}: top it up from the bank`;
     console.log(`not run: ${result.why}`);
     log.end();
     continue;
@@ -142,25 +167,31 @@ for (const stage of stages) {
   }
   result.minutes = Math.round((Date.now() - started) / 6_000) / 10;
   result.bankAfter = await bankSol();
-  console.log(`=== ${stage.name}: ${result.status}${result.why ? ` (${result.why})` : ""}, ${result.minutes} min, bank ${result.bankAfter.toFixed(3)} SOL`);
+  result.keeperAfter = await keeperSol();
+  console.log(
+    `=== ${stage.name}: ${result.status}${result.why ? ` (${result.why})` : ""}, ${result.minutes} min, bank ${result.bankAfter.toFixed(3)} SOL, keeper ${result.keeperAfter.toFixed(3)} SOL`,
+  );
   log.end();
   writeFileSync(join(dir, "results.json"), JSON.stringify({ run: runName, startSlot, startedAt, bankAtStart, results }, null, 2));
 }
 
 const bankAtEnd = await bankSol();
+const keeperAtEnd = await keeperSol();
 const passed = results.filter((r) => r.status === "passed").length;
 const lines = [
   `# Acceptance run ${runName}`,
   "",
   `From slot ${startSlot}, started ${startedAt.toISOString()}, ended ${new Date().toISOString()}.`,
-  `${passed} of ${results.length} stages passed; the bank held ${bankAtStart.toFixed(3)} SOL before and ${bankAtEnd.toFixed(3)} after (airdrops landing meanwhile count too).`,
+  `${passed} of ${results.length} stages passed; the bank held ${bankAtStart.toFixed(3)} SOL before and ${bankAtEnd.toFixed(3)} after (airdrops landing meanwhile count too), the keeper key ${keeperAtStart.toFixed(3)} and ${keeperAtEnd.toFixed(3)}.`,
   "",
-  "| Stage | Result | Minutes | Bank change (SOL) | Proves |",
-  "| - | - | -: | -: | - |",
-  ...results.map((r) => `| ${r.name} | ${r.status}${r.why ? `: ${r.why}` : ""} | ${r.minutes} | ${(r.bankAfter - r.bankBefore).toFixed(3)} | ${r.proves} |`),
+  "| Stage | Result | Minutes | Bank change (SOL) | Keeper change (SOL) | Proves |",
+  "| - | - | -: | -: | -: | - |",
+  ...results.map(
+    (r) => `| ${r.name} | ${r.status}${r.why ? `: ${r.why}` : ""} | ${r.minutes} | ${(r.bankAfter - r.bankBefore).toFixed(3)} | ${(r.keeperAfter - r.keeperBefore).toFixed(3)} | ${r.proves} |`,
+  ),
   "",
 ];
-writeFileSync(join(dir, "results.json"), JSON.stringify({ run: runName, startSlot, startedAt, endedAt: new Date(), bankAtStart, bankAtEnd, results }, null, 2));
+writeFileSync(join(dir, "results.json"), JSON.stringify({ run: runName, startSlot, startedAt, endedAt: new Date(), bankAtStart, bankAtEnd, keeperAtStart, keeperAtEnd, results }, null, 2));
 writeFileSync(join(dir, "results.md"), lines.join("\n"));
 console.log(`\n${lines.join("\n")}`);
 process.exit(passed === results.length ? 0 : 1);
