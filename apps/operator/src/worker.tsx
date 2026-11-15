@@ -15,7 +15,8 @@ import { asOperator } from "./db";
 import type { AppEnv, Bindings } from "./env";
 import { exportAudit } from "./exportAudit";
 import { admissionItem, barDetail, barRows, caseByMint, launchItem, publicCounts, queue, type CaseItem, type LaunchKey } from "./queue";
-import { AdmissionPage, AuditPage, BarPage, BarsPage, BotsPage, CasePage, Denied, EvidencePage, Flash, HubsPage, ICON, LaunchPage, Missing, QueuePage, THEME_COOKIE, type CaseDecision, type Shell } from "./views";
+import { cohortMeasures, defaultMode, tapView } from "./cohort";
+import { AdmissionPage, AuditPage, BarPage, BarsPage, BotsPage, CasePage, CohortPage, Denied, EvidencePage, Flash, HubsPage, ICON, LaunchPage, Missing, QueuePage, THEME_COOKIE, type CaseDecision, type Shell } from "./views";
 
 export const app = new Hono<AppEnv>();
 
@@ -302,6 +303,12 @@ app.post("/bots/:wallet/remove", async (c) => {
     if (e instanceof Refused) return botsPage(c, <Flash tone="stop">{e.message}</Flash>, 409);
     throw e;
   }
+});
+
+// The cohort's measures and the default-mode rule (spec 11.3, #63), and the cohort tap (spec 10.2): read only.
+app.get("/cohort", async (c) => {
+  const { measures, tap } = await asOperator(c.var.db, async (tx) => ({ measures: await cohortMeasures(tx), tap: await tapView(tx) }));
+  return c.html(<CohortPage {...shell(c, "cohort")} measures={measures} rule={defaultMode(measures)} tap={tap} />);
 });
 
 app.get("/audit", async (c) => {

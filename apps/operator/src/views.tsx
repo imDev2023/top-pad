@@ -1,11 +1,12 @@
 // The operator app's pages, rendered on the server: the queue, each item's page with its decision, a case's evidence
-// pack, the Bars with their replies and appeals, the hubs and the audit log. Plain forms and links, so every action is one request the audit log can name; the
+// pack, the Bars with their replies and appeals, the hubs, the cohort's measures and the audit log. Plain forms and links, so every action is one request the audit log can name; the
 // only script is the theme toggle.
 import type { Child, FC, PropsWithChildren } from "hono/jsx";
 import { raw } from "hono/html";
 import { APPEAL_WINDOW_MS, type ProtectedMatch } from "@top-pad/contract";
 import type { Operator } from "./env";
 import { AIM_HOURS, ageOf, creatorName, type AdmissionItem, type AppealItem, type BarDetail, type BarRow, type CaseItem, type LaunchItem, type LaunchKey, type PublicCounts, type QueueItem, type Refusing } from "./queue";
+import type { CohortMeasures, DefaultMode, FairOpenOutcome, Share, TapView } from "./cohort";
 import { STYLES } from "./styles";
 
 const FONTS = "https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Saira+Condensed:wght@600;700&display=swap";
@@ -14,7 +15,7 @@ const FONTS = "https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;5
 export const THEME_COOKIE = "heat_theme";
 export type Theme = "light" | "dark";
 
-export type Shell = { nonce: string; operator: Operator | null; cluster: string; theme: Theme | null; current?: "queue" | "bars" | "bots" | "hubs" | "audit" };
+export type Shell = { nonce: string; operator: Operator | null; cluster: string; theme: Theme | null; current?: "queue" | "bars" | "bots" | "hubs" | "cohort" | "audit" };
 
 // Formatting.
 
@@ -108,6 +109,7 @@ export const Layout: FC<PropsWithChildren<Shell & { title: string }>> = ({ title
                 <a href="/bars" aria-current={current === "bars" ? "page" : undefined}>Bars</a>
                 <a href="/bots" aria-current={current === "bots" ? "page" : undefined}>Bots</a>
                 <a href="/hubs" aria-current={current === "hubs" ? "page" : undefined}>Hubs</a>
+                <a href="/cohort" aria-current={current === "cohort" ? "page" : undefined}>Cohort</a>
                 <a href="/audit" aria-current={current === "audit" ? "page" : undefined}>Audit log</a>
               </nav>
             )}
@@ -1097,6 +1099,181 @@ export const HubsPage: FC<Shell & { hubs: HubRow[]; flash: Child }> = ({ hubs, f
     </div>
   </Layout>
 );
+
+// The cohort's measures and the default-mode rule (spec 11.3, #63), and the cohort tap (spec 10.2).
+
+const percent = (s: Share) => (s.of === 0 ? "-" : `${Math.round((100 * s.count) / s.of)}%`);
+const ofText = (s: Share, what: string) => (s.of === 0 ? `none yet of ${what}` : `${s.count} of ${s.of} ${what}`);
+const OUTCOMES: Record<FairOpenOutcome, [string, string]> = {
+  reached: ["chip-go", "Reached its minimum raise"],
+  missed: ["chip-stop", "Missed its minimum raise"],
+  waiting: ["chip-neutral", "Before its open"],
+  late: ["chip-caution", "Failed late, not counted"],
+  cancelled: ["chip-caution", "Cancelled by a Bar, not counted"],
+};
+const one = (n: number) => (Number.isInteger(n) ? `${n}` : n.toFixed(1));
+
+export const CohortPage: FC<Shell & { measures: CohortMeasures; rule: DefaultMode; tap: TapView }> = ({ measures: m, rule, tap, ...shell }) => {
+  const instant = rule.mode === "instant";
+  const [kept, reached] = rule.clauses;
+  const clauseLine = (c: DefaultMode["clauses"][number], what: string) =>
+    !c.judged ? `${what}: nothing to count yet, so it cannot apply.` : `${what}: ${c.share.count} of ${c.share.of}, ${c.below ? "fewer" : "not fewer"} than ${c.threshold}.`;
+  return (
+    <Layout {...shell} title="Cohort" current="cohort">
+      <div class="stack-lg">
+        <div class="stack">
+          <h1>Cohort</h1>
+          <p class="lead">What the devnet cohort measures, counted over its members only: the records that joined from the cohort page. Fair Open stays the default unless fewer than a third of cohort creators keep it, or fewer than half of sealed Fair Opens reach their minimum raise.</p>
+        </div>
+        <div class={`verdict ${instant ? "verdict-caution" : "verdict-go"}`} data-testid="default-mode">
+          <b>{instant ? "Instant launch would become the default" : "Fair Open stays the default"}</b>
+          <span>{clauseLine(kept!, "Creators who kept Fair Open")}</span>
+          <span>{clauseLine(reached!, "Sealed Fair Opens that reached their minimum raise")}</span>
+        </div>
+        <section class="stack" aria-labelledby="measures">
+          <h2 id="measures" class="eyebrow">
+            The measures, {m.members === 1 ? "1 member" : `${m.members} members`}, {m.membersWithX} with X linked
+          </h2>
+          <div class="tallies tallies-4">
+            <div class="panel tally" data-testid="measure-kept">
+              <span class="eyebrow">Kept Fair Open</span>
+              <span class="n">{percent(m.keptFairOpen)}</span>
+              <span class="of">{ofText(m.keptFairOpen, "creators")}</span>
+            </div>
+            <div class="panel tally" data-testid="measure-reached">
+              <span class="eyebrow">Reached minimum raise</span>
+              <span class="n">{percent(m.reachedMinRaise)}</span>
+              <span class="of">{ofText(m.reachedMinRaise, "sealed Fair Opens")}</span>
+            </div>
+            <div class="panel tally" data-testid="measure-depositors">
+              <span class="eyebrow">Depositors per Fair Open</span>
+              <span class="n">{m.depositorsPerFairOpen.mean === null ? "-" : one(m.depositorsPerFairOpen.mean)}</span>
+              <span class="of">{m.depositorsPerFairOpen.median === null ? "none decided yet" : `mean; median ${one(m.depositorsPerFairOpen.median)}`}</span>
+            </div>
+            <div class="panel tally" data-testid="measure-second">
+              <span class="eyebrow">Came back</span>
+              <span class="n">{percent(m.secondCoin)}</span>
+              <span class="of">
+                {ofText(m.secondCoin, "creators")} launched a second coin; {ofText(m.secondFairOpen, "depositors")} joined a second Fair Open
+              </span>
+            </div>
+          </div>
+          <p class="note">A creator keeps Fair Open when their first landed launch is one. Depositors are people, as admission counts them, whose seat held a deposit when the window closed, the creator&apos;s own aside. A Fair Open that failed late or that a Bar cancelled says nothing of demand and is not counted. Coming back is weak evidence.</p>
+        </section>
+        <section class="stack" aria-labelledby="fair-opens">
+          <h3 id="fair-opens">{m.fairOpens.length === 1 ? "1 Fair Open" : `${m.fairOpens.length} Fair Opens`} scheduled by members</h3>
+          {m.fairOpens.length === 0 ? (
+            <div class="panel empty">No member has scheduled a Fair Open yet.</div>
+          ) : (
+            <div class="panel pad">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>Coin</th>
+                    <th>Opens</th>
+                    <th>Outcome</th>
+                    <th>Depositors</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {m.fairOpens.map((f) => (
+                    <tr>
+                      <td data-label="Coin">
+                        <b>${f.ticker}</b>
+                        <div class="note">{f.handle ? `@${f.handle}` : `Creator wallet ${short(f.creator)}`}</div>
+                      </td>
+                      <td data-label="Opens">{when(f.opensAt)}</td>
+                      <td data-label="Outcome">
+                        <span class={`chip ${OUTCOMES[f.outcome][0]}`}>{OUTCOMES[f.outcome][1]}</span>
+                      </td>
+                      <td data-label="Depositors" class="num">
+                        {f.depositors ?? "-"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+        <section class="stack" aria-labelledby="tap">
+          <h3 id="tap">The cohort tap</h3>
+          {tap.alert && (
+            <div class="verdict verdict-stop" data-testid="tap-alert">
+              <b>Low balance since {when(tap.alert.raisedAt)}</b>
+              <span>{tap.alert.message}</span>
+            </div>
+          )}
+          <div class="panel pad">
+            <dl class="facts">
+              <dt>Gives</dt>
+              <dd>1 devnet SOL, once, to each member whose record linked X, sent to their Creator wallet.</dd>
+              <dt>Float</dt>
+              <dd>
+                {tap.float ? (
+                  <>
+                    <span class="num">{units(tap.float.lamports, 9)}</span> SOL, floor <span class="num">{units(tap.float.floor, 9)}</span> SOL: {tap.float.claimsLeft === 1 ? "1 more member" : `${tap.float.claimsLeft} more members`} can be paid
+                    <div class="note">Read by the cron {when(tap.float.at)}</div>
+                  </>
+                ) : (
+                  "Not read yet: the cron reads it every five minutes."
+                )}
+              </dd>
+              {tap.address && (
+                <>
+                  <dt>Tap key</dt>
+                  <dd>
+                    <a class="mono break" href={explorer(shell.cluster, "address", tap.address)} rel="noreferrer" target="_blank">
+                      {tap.address}
+                    </a>
+                  </dd>
+                </>
+              )}
+              <dt>Paid</dt>
+              <dd data-testid="tap-paid">
+                <span class="num">{tap.sent}</span> {tap.sent === 1 ? "member" : "members"}, <span class="num">{units(tap.lamports, 9)}</span> SOL
+                {tap.sending > 0 && <div class="note">{tap.sending} more on the way</div>}
+              </dd>
+            </dl>
+          </div>
+          {tap.recent.length > 0 && (
+            <div class="panel pad">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>Member</th>
+                    <th>Paid</th>
+                    <th>Transfer</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tap.recent.map((t) => (
+                    <tr>
+                      <td data-label="Member">
+                        <b>@{t.handle}</b>
+                        <div class="note mono">{short(t.wallet)}</div>
+                      </td>
+                      <td data-label="Paid">
+                        <span class="num">{units(t.lamports, 9)}</span> SOL
+                        <div class="note">{when(t.at)}</div>
+                      </td>
+                      <td data-label="Transfer">
+                        <a class="mono" href={explorer(shell.cluster, "tx", t.signature)} rel="noreferrer" target="_blank">
+                          {short(t.signature)}
+                        </a>
+                        {t.status === "sending" && <div class="note">on the way</div>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      </div>
+    </Layout>
+  );
+};
 
 // The known-bot list.
 
