@@ -426,7 +426,7 @@ function CoinRow({ coin }: { coin: RecordCoin }) {
           <dd className={styles.radar}>
             {coin.radar.linked > 0 && <span className="chip chip-stop flag">{coin.radar.linked} linked to the creator</span>}
             {coin.radar.labelled > 0 && <span className="chip chip-caution flag">{coin.radar.labelled} same-slot</span>}
-            {coin.radar.linked === 0 && coin.radar.labelled === 0 && <span className="chip chip-go flag">Nothing labelled</span>}
+            {coin.radar.linked === 0 && coin.radar.labelled === 0 && <span className="chip chip-neutral flag">Nothing labelled</span>}
             <Link href={`/coin/${coin.mint}#radar`} className="note">
               Evidence
             </Link>

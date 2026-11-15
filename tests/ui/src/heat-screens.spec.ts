@@ -22,7 +22,7 @@ import { coinAmount, pnlPercentText, pnlText } from "@top-pad/contract/format";
 import { coins, fairOpens, graduations, pools, coinRadar, trades, bars } from "@top-pad/db";
 import { decodeTransaction } from "@top-pad/indexer";
 import { coinBalance, fundedWallets, landed, rpc, sweep } from "@top-pad/tests-devnet/devnet";
-import { and, desc, eq, gt, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
+import { and, desc, eq, gt, isNotNull, isNull, lte, sql } from "drizzle-orm";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -310,7 +310,8 @@ test("every screen of spec 9 on real devnet data, on a phone and a desktop, in b
       .where(sql`cardinality(${coinRadar.linkedWallets}) > 0`)
       .orderBy(desc(coins.createdAt))
       .limit(1);
-    const [barred] = await db.select({ creatorId: bars.creatorId }).from(bars).where(or(lte(bars.publishAt, new Date()), isNotNull(bars.liftedAt))).orderBy(desc(bars.confirmedAt)).limit(1);
+    // A Bar in force and published, if devnet has one: a lifted one shows nothing on the record.
+    const [barred] = await db.select({ creatorId: bars.creatorId }).from(bars).where(and(lte(bars.publishAt, new Date()), isNull(bars.liftedAt))).orderBy(desc(bars.confirmedAt)).limit(1);
     // A Creator record with coins: the latest coin's that has one (a Fair Open a script scheduled has none).
     const [record] = await db.select({ creatorId: coins.creatorId }).from(coins).where(isNotNull(coins.creatorId)).orderBy(desc(coins.createdAt)).limit(1);
     const [traded] = await db

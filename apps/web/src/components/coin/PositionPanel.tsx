@@ -97,7 +97,7 @@ export function PositionPanel({ mint, lastTradeKey }: { mint: string; lastTradeK
           <dd className={`num ${toneOf(p.realized)}`} data-testid="position-realized">
             {pnlText(p.realized, p.quote, { signed: true })}
           </dd>
-          <dd className="note">open {pnlText(p.unrealized, p.quote, { signed: true })}</dd>
+          <dd className="note">on coins held {pnlText(p.unrealized, p.quote, { signed: true })}</dd>
         </div>
       </dl>
       <button
