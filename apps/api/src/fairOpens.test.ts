@@ -504,6 +504,35 @@ describe("the linkage pipeline at admission", () => {
     expect((w5.evidence as { wallet: { chain: unknown[] } }).wallet.chain).toHaveLength(4);
   });
 
+  it("names the wallet holding a person's seat when two of their wallets were admitted before either deposited (#60)", async () => {
+    const { launch } = await launchOnChain();
+    const source = random();
+    const [first, second, third] = [random(), random(), random()];
+    for (const wallet of [first, second, third]) fakes.fund(source, wallet);
+    const short = (wallet: string) => `${wallet.slice(0, 4)}…${wallet.slice(-4)}`;
+
+    // A farm's race: the first two are admitted before either deposits, the second taking the person's admission over.
+    const a = await prepared(await post(`/fair-opens/${launch}/deposit`, { wallet: first, amount: `${STEP}` }));
+    const b = await prepared(await post(`/fair-opens/${launch}/deposit`, { wallet: second, amount: `${STEP}` }));
+    const person = personIn(a.message);
+    expect(personIn(b.message)).toEqual(person);
+    // The first deposit lands: the chain gives the seat to the first wallet, whatever admission the person holds now.
+    fakes.accounts.set(await seatAddress(launch, person), fairOpenSeat({ launch, wallet: first, person: new Uint8Array(person), tier: Tier.Unverified, deposit: STEP }));
+
+    // Every other wallet of the person is refused, told the seat is the first wallet's; the first may still top up.
+    const holds = `${short(first)} holds this Fair Open's seat: one person, one seat, one wallet.`;
+    for (const wallet of [second, third]) {
+      const refused = await refusal(await post(`/fair-opens/${launch}/deposit`, { wallet, amount: `${STEP}` }));
+      expect(refused).toMatchObject({ status: 403, code: "not_admitted" });
+      expect(refused.error).toContain(`Heat counts this wallet as one person with ${short(first)}: both got their SOL from ${short(source)}`);
+      expect(refused.error).toContain(holds);
+      expect((await view(launch, wallet)).you!.admission).toMatchObject({ admitted: false, reason: refused.error });
+    }
+    const topUp = await prepared(await post(`/fair-opens/${launch}/deposit`, { wallet: first, amount: `${STEP}` }));
+    expect(personIn(topUp.message)).toEqual(person);
+    expect((await view(launch, first)).you!.admission).toMatchObject({ admitted: true });
+  });
+
   it("refuses a wallet the Creator wallet funded, and says why, while the creator deposits", async () => {
     const creator = random();
     const { launch } = await launchOnChain({ ago: 60n, creator });

@@ -278,27 +278,40 @@ async function seatHeld(db: Db, linkage: Linkage, wallet: Address, person: Perso
   };
 }
 
+/** Who holds a seat on chain: its wallet, or null when there is no seat at that address. */
+export type SeatHolder = (seat: Address) => Promise<Address | null>;
+
+/**
+ * The wallet holding the person's seat in a launch, when it is another wallet: the seat of the admission another wallet
+ * of theirs has, or of the one this wallet was given before. Two wallets of one person can each be admitted before either
+ * deposits (the second admission takes the person's over), and then the first to deposit holds the seat, whichever
+ * wallet the person's admission names now: the chain decides, so the seat's own wallet is read from it.
+ */
+async function seatHeldBy(db: Db, launch: AdmittingLaunch, wallet: Address, person: Person, seatHolder: SeatHolder): Promise<Address | null> {
+  const other = await elsewhere(db, launch, wallet, person);
+  const [own] = await db.select().from(admissions).where(and(eq(admissions.launch, launch.launch), eq(admissions.wallet, wallet)));
+  for (const row of [other, own]) {
+    if (!row) continue;
+    const holder = await seatHolder(await seatOf(launch.launch, unhex(row.pseudonym)));
+    if (holder && holder !== wallet) return holder;
+  }
+  return null;
+}
+
 /**
  * Why a person may not deposit in a launch from this wallet, if they may not, kept for the operator queue; and, when it
  * may, why the pipeline merged it into another wallet's person, if it did.
  */
-export async function refusalOf(
-  db: Db,
-  linkage: Linkage,
-  launch: AdmittingLaunch,
-  wallet: Address,
-  person: Person,
-  seatExists: (seat: Address) => Promise<boolean>,
-): Promise<string | null> {
+export async function refusalOf(db: Db, linkage: Linkage, launch: AdmittingLaunch, wallet: Address, person: Person, seatHolder: SeatHolder): Promise<string | null> {
   if (await cancelledLaunch(db, launch.launch)) return CANCELLED;
-  const refused = (await creatorTie(db, linkage, launch, wallet, person)) ?? (await heldElsewhere(db, linkage, launch, wallet, person, seatExists));
+  const refused = (await creatorTie(db, linkage, launch, wallet, person)) ?? (await heldElsewhere(db, linkage, launch, wallet, person, seatHolder));
   if (refused) await record(db, launch, wallet, person, refused);
   return refused?.reason ?? null;
 }
 
-async function heldElsewhere(db: Db, linkage: Linkage, launch: AdmittingLaunch, wallet: Address, person: Person, seatExists: (seat: Address) => Promise<boolean>) {
-  const other = await elsewhere(db, launch, wallet, person);
-  return other && (await seatExists(await seatOf(launch.launch, unhex(other.pseudonym)))) ? seatHeld(db, linkage, wallet, person, other.wallet) : null;
+async function heldElsewhere(db: Db, linkage: Linkage, launch: AdmittingLaunch, wallet: Address, person: Person, seatHolder: SeatHolder) {
+  const holder = await seatHeldBy(db, launch, wallet, person, seatHolder);
+  return holder ? seatHeld(db, linkage, wallet, person, holder) : null;
 }
 
 export type Admitted = { admission: Admission; signature: Uint8Array; seat: Address; tier: DepositorTier };
@@ -316,7 +329,7 @@ export async function admit(
   wallet: Address,
   person: Person,
   now: bigint,
-  seatExists: (seat: Address) => Promise<boolean>,
+  seatHolder: SeatHolder,
 ): Promise<Admitted> {
   // A launch a Bar cancelled takes no deposits (spec 6.5); nobody is to blame, so nothing goes to the operator's queue.
   if (await cancelledLaunch(db, launch.launch)) throw new AdmissionRefused(CANCELLED);
@@ -326,11 +339,11 @@ export async function admit(
   };
   const tie = await creatorTie(db, linkage, launch, wallet, person);
   if (tie) throw await refuse(tie);
+  const holder = await seatHeldBy(db, launch, wallet, person, seatHolder);
+  if (holder) throw await refuse(await seatHeld(db, linkage, wallet, person, holder));
+  // No seat yet, or this wallet holds it: the person's admission moves to this wallet.
   const other = await elsewhere(db, launch, wallet, person);
-  if (other) {
-    if (await seatExists(await seatOf(launch.launch, unhex(other.pseudonym)))) throw await refuse(await seatHeld(db, linkage, wallet, person, other.wallet));
-    await db.delete(admissions).where(and(eq(admissions.launch, launch.launch), eq(admissions.wallet, other.wallet)));
-  }
+  if (other) await db.delete(admissions).where(and(eq(admissions.launch, launch.launch), eq(admissions.wallet, other.wallet)));
   if (person.linked) await record(db, launch, wallet, person, { kind: "merged", reason: person.linked, evidence: { wallet: person.trace } });
   const fresh = hex(await pseudonymOf(key, launch.launch, person.cluster));
   // One statement, so two admissions racing for the same wallet settle in the database: a wallet keeps the pseudonym of

@@ -67,7 +67,7 @@ import {
 } from "@top-pad/contract";
 import { coins, creators, fairOpenRungs, fairOpens, launches, pools, type Db } from "@top-pad/db";
 import { FundingUnreadable, rpcFundingSource } from "@top-pad/indexer";
-import { admit, AdmissionRefused, linkageOf, loadAdmissionKey, personOf, refusalOf, tierName, UNREADABLE } from "./admission";
+import { admit, AdmissionRefused, linkageOf, loadAdmissionKey, personOf, refusalOf, tierName, UNREADABLE, type SeatHolder } from "./admission";
 import { closedSeatOf, creatorLockOf, deliveredSeats, taxShareOf } from "./afterOpen";
 import { sessionCreator } from "./auth";
 import { explorerUrl, fairOpenLaunchSetup, fairOpenSetup } from "./env";
@@ -194,7 +194,7 @@ export async function getFairOpen(c: Context<AppEnv>) {
   let you: FairOpen["you"] = null;
   if (wallet) {
     const linkage = await linkageOf(db, heat, rpcFundingSource(cfg.rpcUrl));
-    const seatExists = async (seat: KitAddress) => (await fetchEncodedAccount(rpc, seat, limited())).exists;
+    const seatHolder = seatHolderOn(rpc);
     const admitting = { launch: address as KitAddress, creator: terms.creator, step: terms.step, depositsOpenAt: terms.depositsOpenAt };
     const admissionOf = async (): Promise<FairOpenAdmission> => {
       let person;
@@ -204,7 +204,7 @@ export async function getFairOpen(c: Context<AppEnv>) {
         if (e instanceof FundingUnreadable) return { admitted: false, reason: UNREADABLE };
         throw e;
       }
-      const refusal = await refusalOf(db, linkage, admitting, wallet as KitAddress, person, seatExists);
+      const refusal = await refusalOf(db, linkage, admitting, wallet as KitAddress, person, seatHolder);
       if (refusal) return { admitted: false, reason: refusal };
       const tier = Tier[person.tier === "scored" ? "Scored" : person.tier === "verified" ? "Verified" : "Unverified"];
       return { admitted: true, tier: person.tier, cap: `${tierCap(tier, terms.step)}`, via: person.via, handle: person.handle, linked: person.linked };
@@ -365,6 +365,14 @@ function stepAmount(raw: string, step: bigint) {
   return amount > 0n && amount % step === 0n ? amount : null;
 }
 
+/** Who holds a seat, read from the chain: the seat's wallet, or null when there is no seat at that address. */
+const seatHolderOn =
+  (rpc: Rpc): SeatHolder =>
+  async (seat) => {
+    const account = await fetchEncodedAccount(rpc, seat, limited());
+    return account.exists ? getSeatDecoder().decode(account.data).wallet : null;
+  };
+
 /** `POST /fair-opens/:launch/deposit`: the deposit, with the wallet's admission, for the wallet to sign and send. */
 export async function prepareDeposit(c: Context<AppEnv>) {
   const { cfg, db } = c.var;
@@ -387,12 +395,12 @@ export async function prepareDeposit(c: Context<AppEnv>) {
   const wallet = move.data.wallet as KitAddress;
   const linkage = await linkageOf(db, cfg.heat!, rpcFundingSource(cfg.rpcUrl));
   const key = await loadAdmissionKey(setup.admissionKey, setup.admission);
-  const seatExists = async (seat: KitAddress) => (await fetchEncodedAccount(rpc, seat, limited())).exists;
+  const seatHolder = seatHolderOn(rpc);
   let admitted;
   try {
     const admitting = { launch: address, creator: launch.creator, step: launch.step, depositsOpenAt: launch.depositsOpenAt };
     const person = await personOf(db, linkage, wallet, admitting);
-    admitted = await admit(db, key, linkage, admitting, wallet, person, at, seatExists);
+    admitted = await admit(db, key, linkage, admitting, wallet, person, at, seatHolder);
   } catch (e) {
     if (e instanceof AdmissionRefused) return refuse(c, 403, { error: e.message, code: "not_admitted" });
     if (e instanceof FundingUnreadable) return refuse(c, 503, { error: UNREADABLE, code: "unavailable" });
