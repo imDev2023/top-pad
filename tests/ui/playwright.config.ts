@@ -26,6 +26,7 @@ function localServers() {
         `--var "RPC_URL:${rpcUrl}"`,
         '--var "KEEPER_KEY:$(cat "$HOME/.config/top-pad/devnet/keeper.json")"',
         '--var "ADMISSION_KEY:$(cat "$HOME/.config/top-pad/devnet/admission.json")"',
+        '--var "TAP_KEY:$(cat "$HOME/.config/top-pad/devnet/tap.json")"',
       ].join(" "),
       cwd: "../../apps/api",
       url: "http://localhost:8801/platform",
