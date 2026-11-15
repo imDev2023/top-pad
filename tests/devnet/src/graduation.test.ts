@@ -5,7 +5,7 @@
 // as an xStock's will be. The window claim runs at 60 s, the coin is bought until its curve completes, and `graduate.ts`
 // takes it through Graduation and checks every step. The coins are sold back at the end and every token quote swept back
 // to the bank. It spends about 0.07 devnet SOL from Heat's devnet bank (with `GRADUATION=real`, SOL's Instant config
-// itself and about 2 SOL); in USDC it moves about 3.5 USDC from the bank and returns all but about 0.6, a fifth of the
+// itself, the deployed keeper graduating the coin, and about 2 SOL, with about 9.2 SOL lent to the trader); in USDC it moves about 3.5 USDC from the bank and returns all but about 0.6, a fifth of the
 // target locked forever in the graduated pool and the fees. It signs with the keeper key, which, like the bank, only this
 // Mac holds (~/.config/top-pad/devnet, never CI); without them it is skipped.
 import { existsSync, readFileSync } from "node:fs";
@@ -38,6 +38,8 @@ if (real && !inSol(rehearsal.quote)) throw new Error("GRADUATION=real graduates 
 const config = real ? devnet.configs!.instant : rehearsal.instant;
 const { quote } = rehearsal;
 const treasury = devnet.keys!.treasury;
+/** The fee program's refusal of a second window claim. */
+const WINDOW_ALREADY_CLAIMED = 6010;
 /** The Tax window: the test buys after it, at the 1.25% curve fee. */
 const TAX_WINDOW_SECONDS = 60n;
 
@@ -72,9 +74,14 @@ describe.skipIf(!existsSync(keeperFile) || !existsSync(bankFile))(`Graduation on
         console.log(`launched ${mint.address} in ${rehearsal.symbol} on ${real ? "the Instant config" : "the rehearsal config"} ${config}, pool ${pool}`);
         const opened = (await fetchVirtualPool(rpc, pool)).data.poolState.activationPoint;
         while ((await chainTime()) < opened + TAX_WINDOW_SECONDS) await sleep(1_000);
-        // The window claim, as the keeper sends it at 60 s, so the creator's claim later may run.
+        // The window claim, as the keeper sends it at 60 s, so the creator's claim later may run. On Heat's own config the
+        // deployed keeper keeps the coin too, and whichever claim lands first runs; the other is refused.
         const curve = claimablePool(pool, (await fetchVirtualPool(rpc, pool)).data.poolState, quote);
-        await send(keeper, await windowClaimInstructions({ pool: curve, heat: true, treasury, payer: keeper, computeUnitPrice: 0n }));
+        await send(keeper, await windowClaimInstructions({ pool: curve, heat: true, treasury, payer: keeper, computeUnitPrice: 0n })).catch(
+          (e: { cause?: { context?: { code?: number } } }) => {
+            if (!real || e.cause?.context?.code !== WINDOW_ALREADY_CLAIMED) throw e;
+          },
+        );
 
         // The buy that completes the curve, a partial fill as quick buy sends it, with Heat's referral account.
         const referral = await referralAccountOf(treasury, quote.mint, quote.tokenProgram);
@@ -94,7 +101,7 @@ describe.skipIf(!existsSync(keeperFile) || !existsSync(bankFile))(`Graduation on
             referralAccount: referral,
           }),
         );
-        await graduateAndCheck({ config, pool, mint: mint.address, quote, creator, trader, keeper, referral }, (s) => (sellBack = s));
+        await graduateAndCheck({ config, pool, mint: mint.address, quote, creator, trader, keeper, referral }, (s) => (sellBack = s), { byDeployedKeeper: real });
       } finally {
         await sellBack?.().catch((e: Error) => console.error(`selling back failed: ${e.message}`));
         if (inSol(quote)) await sweep(trader, creator);

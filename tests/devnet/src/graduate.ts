@@ -6,6 +6,10 @@
 // quoted, the fee steps down as the price rises, Heat's LP fees reach the treasury, and the creator claims their curve
 // earnings and their LP fees in one transaction. Every account of the quote is the quote's under its own token program.
 // `graduation.test.ts` brings an Instant launch here and `fair-open-graduation.test.ts` a Fair Open's coin.
+// On a rehearsal config, which nothing of Heat's watches, the run sends the migration, the surplus split and the burn
+// with the keeper key itself. On one of Heat's own configs (`GRADUATION=real`) the deployed keeper's Graduation Workflow
+// sends all three as it would for anyone's coin, and the run waits for them and checks each from the chain (spec 11.2:
+// graduation at 8.5 SOL by our keeper); sending them itself would only race it.
 import {
   getAddressDecoder,
   getBase58Encoder,
@@ -119,11 +123,49 @@ export type CompleteCurve = {
   referral: Address;
 };
 
+type KeeperSent = { migration: string; surplus: string; burn: string; positionNfts: Address[] };
+
+/**
+ * The deployed keeper's Graduation of a coin, read from its pool's history once each step has landed: the migration
+ * (DBC's `migration_damm_v2`), the surplus split and the leftover's burn (the fee program's), each paid for by the keeper
+ * key. It waits up to 5 minutes; the keeper took about 2 s on devnet (#51), and the cron's sweep restarts a missed one.
+ */
+async function sentByKeeper(pool: Address, keeper: Address): Promise<KeeperSent> {
+  const wanted: Record<"migration" | "surplus" | "burn", RegExp> = { migration: /^Program log: Instruction: MigrationDammV2$/, surplus: /^Program log: Instruction: ClaimSurplus$/, burn: /^Program log: Instruction: BurnLeftover$/ };
+  const found: Partial<KeeperSent> = {};
+  let positionNfts: Address[] = [];
+  const read = new Set<string>();
+  const deadline = Date.now() + 300_000;
+  while (Date.now() < deadline) {
+    const history = await rpc.getSignaturesForAddress(pool, { limit: 25, commitment: "confirmed" }).send();
+    for (const { signature, err } of history) {
+      if (err || read.has(signature)) continue;
+      read.add(signature);
+      const raw = await landed(signature);
+      if (raw.transaction.message.accountKeys[0] !== keeper) continue;
+      const logs = raw.meta?.logMessages ?? [];
+      for (const [step, pattern] of Object.entries(wanted) as [keyof typeof wanted, RegExp][]) {
+        if (!logs.some((line) => pattern.test(line))) continue;
+        found[step] = signature;
+        // The migration's other two signers are the keys of the two position NFTs it mints.
+        const { accountKeys, header } = raw.transaction.message;
+        if (step === "migration") positionNfts = accountKeys.slice(1, header?.numRequiredSignatures ?? 3) as Address[];
+      }
+    }
+    if (found.migration && found.surplus && found.burn) {
+      expect(positionNfts).toHaveLength(2);
+      return { migration: found.migration, surplus: found.surplus, burn: found.burn, positionNfts };
+    }
+    await new Promise((r) => setTimeout(r, 3_000));
+  }
+  throw new Error(`the deployed keeper did not graduate ${pool} within 5 minutes: ${JSON.stringify(found)}`);
+}
+
 /**
  * Graduates a coin whose curve has just completed and checks every step, as the head of this file says. `onGraduated`
  * is called with the graduated pool's selling back of what the trader still holds, for the caller's `finally`.
  */
-export async function graduateAndCheck(c: CompleteCurve, onGraduated: (sellBack: () => Promise<unknown>) => void) {
+export async function graduateAndCheck(c: CompleteCurve, onGraduated: (sellBack: () => Promise<unknown>) => void, { byDeployedKeeper = false } = {}) {
   const { config, pool, mint, quote, creator, trader, keeper, referral } = c;
   const quoteMint = quote.mint;
   const treasury = devnet.keys!.treasury;
@@ -133,22 +175,39 @@ export async function graduateAndCheck(c: CompleteCurve, onGraduated: (sellBack:
 
   const complete = (await fetchVirtualPool(rpc, pool)).data.poolState;
   expect(complete.quoteReserve).toBeGreaterThanOrEqual(target);
-  expect(complete.migrationProgress).toBe(MIGRATION_PROGRESS.lockedVesting);
-  // The curve takes no more trades.
-  expect(await simulatedError(trader, await swapOn("buy", target / 25n))).not.toBeNull();
+  if (complete.isMigrated === 0) {
+    expect(complete.migrationProgress).toBe(MIGRATION_PROGRESS.lockedVesting);
+    // The curve takes no more trades.
+    expect(await simulatedError(trader, await swapOn("buy", target / 25n))).not.toBeNull();
+  } else {
+    // Only the deployed keeper can have been this quick, between the completing buy and this read.
+    expect(byDeployedKeeper).toBe(true);
+    console.log("the deployed keeper had migrated the coin before the run read its complete curve");
+  }
 
-  // The keeper migrates it.
-  const [firstNft, secondNft] = await Promise.all([generateKeyPairSigner(), generateKeyPairSigner()]);
+  // The keeper migrates it: the deployed one on Heat's own configs, this run with the keeper key on a rehearsal config.
   const graduatingPool = graduating(pool, complete, quote);
-  const migration = await send(
-    keeper,
-    await migrationInstructions({ pool: graduatingPool, payer: keeper, firstPositionNft: firstNft, secondPositionNft: secondNft, computeUnitPrice: 0n }),
-  );
+  let migration: string;
+  let keeperSent: KeeperSent | null = null;
+  let positionNfts: Address[];
+  if (byDeployedKeeper) {
+    keeperSent = await sentByKeeper(pool, keeper.address);
+    migration = keeperSent.migration;
+    positionNfts = keeperSent.positionNfts;
+  } else {
+    const [firstNft, secondNft] = await Promise.all([generateKeyPairSigner(), generateKeyPairSigner()]);
+    positionNfts = [firstNft.address, secondNft.address];
+    migration = await send(
+      keeper,
+      await migrationInstructions({ pool: graduatingPool, payer: keeper, firstPositionNft: firstNft, secondPositionNft: secondNft, computeUnitPrice: 0n }),
+    );
+  }
   const migrated = (await fetchVirtualPool(rpc, pool)).data.poolState;
   expect(migrated.migrationProgress).toBe(MIGRATION_PROGRESS.createdPool);
   expect(migrated.isMigrated).toBe(1);
   const migrationUnits = ((await landed(migration)).meta as { computeUnitsConsumed?: number }).computeUnitsConsumed ?? 0;
   expect(migrationUnits).toBeLessThanOrEqual(MIGRATION_COMPUTE_UNITS);
+  if (keeperSent) console.log(`the deployed keeper migrated the coin (${migration}), split its surplus (${keeperSent.surplus}) and burnt its leftover (${keeperSent.burn})`);
 
   // The graduated pool, where Graduation says it is, with the market-cap fee schedule (spec 3.4).
   const dammPool = await graduatedPoolAddress(mint, quoteMint);
@@ -182,8 +241,8 @@ export async function graduateAndCheck(c: CompleteCurve, onGraduated: (sellBack:
 
   // Both positions permanently locked, one the creator's and one the fee claimer's.
   const positions = await Promise.all(
-    [firstNft, secondNft].map(async (nft) => {
-      const { position, nftAccount } = await positionAddresses(nft.address);
+    positionNfts.map(async (nft) => {
+      const { position, nftAccount } = await positionAddresses(nft);
       const state = (await fetchPosition(rpc, position)).data;
       const holder = (await tokenAccount(nftAccount))!;
       return { position, nftAccount, state, owner: holder.owner, held: holder.amount };
@@ -239,17 +298,30 @@ export async function graduateAndCheck(c: CompleteCurve, onGraduated: (sellBack:
 
   // The surplus, split by the fee program (spec 4), and the leftover, burnt.
   const surplus = surplusOf(migrated.quoteReserve, target);
-  const surplusSignature = await send(keeper, await surplusClaimInstructions({ pool: graduatingPool, creator: creator.address, treasury, surplus, payer: keeper, computeUnitPrice: 0n }));
+  const surplusSignature =
+    keeperSent?.surplus ?? (await send(keeper, await surplusClaimInstructions({ pool: graduatingPool, creator: creator.address, treasury, surplus, payer: keeper, computeUnitPrice: 0n })));
   const [split] = await events(surplusSignature, FEE_PROGRAM_ADDRESS, SURPLUS_CLAIMED_EVENT_DISCRIMINATOR, parseSurplusClaimedEvent);
   expect({ creator: split!.creatorAmount, treasury: split!.treasuryAmount }).toEqual(surplus);
   expect(split!.creator).toBe(creator.address);
-  const supplyBefore = await supply(mint);
-  const leftoverInVault = (await tokenAccount(complete.baseVault))!.amount - migrated.protocolBaseFee - migrated.partnerBaseFee - migrated.creatorBaseFee - migrated.protocolMigrationBaseFeeAmount;
-  const burnSignature = await send(keeper, await burnLeftoverInstructions({ pool: graduatingPool, payer: keeper, computeUnitPrice: 0n }));
-  const [burnt] = await events(burnSignature, FEE_PROGRAM_ADDRESS, LEFTOVER_BURNT_EVENT_DISCRIMINATOR, parseLeftoverBurntEvent);
-  expect(burnt!.withdrawn).toBe(leftoverInVault);
-  expect(burnt!.burnt).toBe(leftoverInVault);
-  expect(await supply(mint)).toBe(supplyBefore - burnt!.burnt);
+  // What the curve's coin vault keeps once the leftover is gone: the fees DBC still owes in the coin.
+  const owedInCoin = migrated.protocolBaseFee + migrated.partnerBaseFee + migrated.creatorBaseFee + migrated.protocolMigrationBaseFeeAmount;
+  let burnSignature: string;
+  let burnt: ReturnType<typeof parseLeftoverBurntEvent> | undefined;
+  if (keeperSent) {
+    // The deployed keeper burnt it: what it withdrew is everything the vault held but those fees.
+    burnSignature = keeperSent.burn;
+    [burnt] = await events(burnSignature, FEE_PROGRAM_ADDRESS, LEFTOVER_BURNT_EVENT_DISCRIMINATOR, parseLeftoverBurntEvent);
+    expect(burnt!.burnt).toBe(burnt!.withdrawn);
+    expect((await tokenAccount(complete.baseVault))!.amount).toBe(owedInCoin);
+  } else {
+    const supplyBefore = await supply(mint);
+    const leftoverInVault = (await tokenAccount(complete.baseVault))!.amount - owedInCoin;
+    burnSignature = await send(keeper, await burnLeftoverInstructions({ pool: graduatingPool, payer: keeper, computeUnitPrice: 0n }));
+    [burnt] = await events(burnSignature, FEE_PROGRAM_ADDRESS, LEFTOVER_BURNT_EVENT_DISCRIMINATOR, parseLeftoverBurntEvent);
+    expect(burnt!.withdrawn).toBe(leftoverInVault);
+    expect(burnt!.burnt).toBe(leftoverInVault);
+    expect(await supply(mint)).toBe(supplyBefore - burnt!.burnt);
+  }
   expect((await tokenAccount(await coinAccountOf(FEE_CLAIMER_ADDRESS, mint)))!.amount).toBe(0n);
 
   // Trades on the graduated pool, each exactly as quoted; a buy large enough to lift the fee off its top step. Sizes
