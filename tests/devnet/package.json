@@ -5,7 +5,8 @@
   "exports": {
     "./bundle": "./src/bundle.ts",
     "./devnet": "./src/devnet.ts",
-    "./fair-open": "./src/fairOpen.ts"
+    "./fair-open": "./src/fairOpen.ts",
+    "./simulation": "./src/simulation.ts"
   },
   "scripts": {
     "test": "vitest run",
