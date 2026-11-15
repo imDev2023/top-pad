@@ -67,6 +67,7 @@ import { fetchCoinRecord, findCoinRecordPda, LaunchMode } from "@top-pad/clients
 import { fetchVestingEscrow } from "@top-pad/clients/jupiter-lock";
 import { decodeTransaction } from "@top-pad/indexer";
 import { describe, expect, it } from "vitest";
+import { spray } from "./bundle";
 import { bank, chainTime, coinBalance, devnet, fund, fundedWallets, landed, programCompute, rpc, send, simulatedWireError, swap, sweep } from "./devnet";
 import {
   admitted,
@@ -218,12 +219,11 @@ describe.skipIf(!keys).concurrent("a Fair Open's open on devnet", () => {
         await untilChainTime(before.opensAt);
         const keeperAddress = (await keeper()).address;
         const keeperBefore = await lamports(keeperAddress);
-        const snipes = await sniperBuys(sniper, mint.address, 10, SOL / 1_000n);
+        const snipes = await sniperBuys(sniper, mint.address, 20, SOL / 1_000n);
         await sendWire(signed.transaction);
-        for (const snipe of snipes) {
-          await sendWire(snipe.wire).catch(() => undefined);
-          await sleep(80);
-        }
+        // Sprayed straight at the endpoint, 80 ms apart: through the shared client a copy refused with a 429 waited its turn
+        // and landed seconds late, past the creation slot (0 of 10 in #62's acceptance run).
+        await spray(snipes.map((snipe) => [{ wire: snipe.wire, signature: snipe.signature, buyers: [sniper.address] }]), 80);
         const opening = signatureOf(signed.transaction);
         const statuses = await landings([opening, ...snipes.map((s) => s.signature)]);
         const opened = statuses.get(opening)!;
