@@ -17,7 +17,7 @@ const shots = join(here, "..", "test-results", "shots");
  */
 export async function uniqueCoinImage(page: Page, seed: string): Promise<{ name: string; mimeType: string; buffer: Buffer }> {
   const base64 = (await page.evaluate(pictureScript(seed))) as string;
-  return { name: `${seed.toLowerCase()}.png`, mimeType: "image/png", buffer: Buffer.from(base64, "base64") };
+  return { name: `${seed.toLowerCase()}.webp`, mimeType: "image/webp", buffer: Buffer.from(base64, "base64") };
 }
 
 /** A coin's name made for one run: a protected Heat coin's name is refused to every later launch, like its ticker. */

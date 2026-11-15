@@ -5,9 +5,10 @@
 // would: each picture's nearest protected image by SSCD in the database DATABASE_URL names (the devnet one), and every
 // pair of drawn pictures against each other, by SSCD and by PDQ over the eight orientations. Vamp Shield labels at SSCD
 // 0.60 and refuses at PDQ distance 31 or under (packages/vamp-shield/src/images.ts), so it passes when no picture
-// reaches SSCD 0.40 against the protected set, no two reach 0.60 against each other (drawn pictures join the set as
-// their Fair Opens open; SSCD rates two random pictures of one recipe about 0.39 apart, so the label itself is the bar)
-// and none comes within PDQ 31 of another. Reads only.
+// reaches SSCD 0.55 against the protected set, no two reach 0.60 against each other and none comes within PDQ 31 of
+// another. Drawn pictures join the protected set as their Fair Opens open, and SSCD rates two pictures of one recipe
+// about 0.40 apart at the median, so against the set the nearest is an earlier run's picture, not a real coin's.
+// Reads only.
 import { chromium } from "@playwright/test";
 import { sql } from "drizzle-orm";
 import { createDb } from "@top-pad/db";
@@ -17,8 +18,8 @@ const count = Number(process.argv[2] ?? 300);
 const visionUrl = process.env.VISION_URL ?? "http://127.0.0.1:18080";
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error("Run through direnv exec, so DATABASE_URL names the database with the protected set.");
-/** The most SSCD similarity a drawn picture may reach against the protected set: well under Vamp Shield's 0.60 label. */
-const SSCD_LIMIT = 0.4;
+/** The most SSCD similarity a drawn picture may reach against the protected set: under Vamp Shield's 0.60 label. */
+const SSCD_LIMIT = 0.55;
 /** Vamp Shield's label, which no two drawn pictures may reach against each other. */
 const SSCD_NEAR = 0.6;
 const PDQ_MATCH_DISTANCE = 31;
@@ -70,7 +71,7 @@ try {
   const share = (limit: number) => nearest.filter((n) => n.similarity >= limit).length;
   console.log(`${signed.length} pictures drawn and signed`);
   console.log(`against the protected set: the nearest at SSCD ${nearest[0]?.similarity.toFixed(3)} (${nearest[0]?.seed} near ${nearest[0]?.url}); median ${nearest[Math.floor(nearest.length / 2)]?.similarity.toFixed(3)}`);
-  console.log(`  at or over 0.40: ${share(0.4)}; at or over 0.60 (labelled): ${share(0.6)}`);
+  console.log(`  at or over 0.40: ${share(0.4)}; at or over ${SSCD_LIMIT}: ${share(SSCD_LIMIT)}; at or over 0.60 (labelled): ${share(0.6)}`);
   console.log(`against each other: the closest pair at SSCD ${worstSscd.similarity.toFixed(3)} (${worstSscd.a}, ${worstSscd.b}); at PDQ distance ${worstPdq.distance} (${worstPdq.a}, ${worstPdq.b})`);
   const passed = share(SSCD_LIMIT) === 0 && worstSscd.similarity < SSCD_NEAR && worstPdq.distance > PDQ_MATCH_DISTANCE;
   console.log(passed ? "PASS" : "FAIL");

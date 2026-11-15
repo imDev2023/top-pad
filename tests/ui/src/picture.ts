@@ -4,13 +4,16 @@
 // pictures SSCD rated close to the protected set and to each other: on 2026-11-15, 19 of 30 reached 0.60 against the
 // devnet protected set. Flat compositions (stripes, rings, tiles, polygons) stayed close to the flat logos most of the set
 // holds, and smooth noise and pixel grids close to each other; what SSCD keeps apart is dense, multi-scale clutter: 700
-// marks of four kinds, every colour and opacity, mostly tiny with a few large. Measured with the vision service on
-// 2026-11-15 over 300 pictures: the nearest protected image of the 5,000-odd on devnet at SSCD 0.351 at most (median
-// 0.227), and no two of the 44,850 pairs at 0.60 (the closest 0.586, the median about 0.39; PDQ 90 apart at the closest).
+// marks of four kinds, every colour and opacity, mostly tiny with a few large, encoded as WebP. Measured with the vision
+// service on 2026-11-15 over 300 pictures: as PNG, before any picture of this recipe was protected, the nearest of the
+// 5,000-odd protected images on devnet at SSCD 0.351 (median 0.227); as WebP, once that day's runs had opened a few
+// coins drawn this way, the nearest at 0.520, an earlier run's picture; and of the 44,850 pairs drawn, the
+// closest at 0.588 (median about 0.40), none at the 0.60 label, PDQ 90 apart at the closest. So a picture of this recipe
+// is far from every real coin's and, rarely, near an earlier run's: the margin to watch as test coins accumulate.
 // `pnpm --filter @top-pad/tests-ui picture-check` measures it again.
 
 /**
- * Draws the picture for `seed` and answers its PNG as base64. It runs inside the page (`page.evaluate`, through
+ * Draws the picture for `seed` and answers it as WebP, base64. It runs inside the page (`page.evaluate`, through
  * `pictureScript`), so it may use nothing from outside its own body.
  */
 export async function drawCoinPicture(seed: string): Promise<string> {
@@ -55,7 +58,11 @@ export async function drawCoinPicture(seed: string): Promise<string> {
     }
     ctx.restore();
   }
-  const bytes = new Uint8Array(await (await canvas.convertToBlob({ type: "image/png" })).arrayBuffer());
+  // WebP, under the launch service's 96 KiB for a coin's image (`MAX_IMAGE_BYTES`): as a PNG this clutter comes to 105 to
+  // 126 KiB, which the site would redraw as WebP anyway and the API refuses when a spec posts it directly.
+  let blob = await canvas.convertToBlob({ type: "image/webp", quality: 0.9 });
+  for (const quality of [0.8, 0.7, 0.6]) if (blob.size > 90 * 1024) blob = await canvas.convertToBlob({ type: "image/webp", quality });
+  const bytes = new Uint8Array(await blob.arrayBuffer());
   let binary = "";
   for (const b of bytes) binary += String.fromCharCode(b);
   return btoa(binary);
