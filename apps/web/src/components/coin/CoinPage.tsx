@@ -11,6 +11,7 @@ import { CandleChart, type ChartFeed } from "./CandleChart";
 import { FairnessStrip } from "./Fairness";
 import styles from "./Coin.module.css";
 import { GraduationPanel } from "./GraduationPanel";
+import { PositionPanel } from "./PositionPanel";
 import { QuickTrade } from "./QuickTrade";
 import { LooksLikeFlag, LooksLikePanel } from "../vampShield/LooksLike";
 import { TaxBand } from "./TaxBand";
@@ -261,6 +262,16 @@ export function CoinPage({ initial, fairness }: { initial: Coin; fairness: Fairn
         </div>
       )}
 
+      {coin.graduation?.graduated?.paused && (
+        <div className="verdict verdict-stop" role="alert" data-testid="coin-paused">
+          <b>Meteora has paused this coin&apos;s pool</b>
+          <span className="note">
+            Meteora&apos;s operators can pause a graduated pool, and have: nobody can trade the coin until they resume it. Its liquidity stays locked and its
+            fees stay claimable. <Link href="/enforced#meteora">What Meteora can still do</Link>
+          </span>
+        </div>
+      )}
+
       {coin.finding && (
         <section className="verdict verdict-stop" aria-label="Confirmed creator bundle" data-testid="coin-finding">
           <b>Confirmed creator bundle</b>
@@ -297,66 +308,67 @@ export function CoinPage({ initial, fairness }: { initial: Coin; fairness: Fairn
           {coin.heat && (
             <div className={styles.trade}>
               <QuickTrade coin={coin} onTraded={onTraded} />
+              <PositionPanel mint={mint} lastTradeKey={coin.market.lastTradeKey} />
             </div>
           )}
-        <aside className={`panel ${styles.facts}`} aria-label="About this coin">
-          <div className={styles.fact}>
-            <span className="eyebrow">Launch</span>
-            {coin.heat ? (
+          <aside className={`panel ${styles.facts}`} aria-label="About this coin">
+            <div className={styles.fact}>
+              <span className="eyebrow">Launch</span>
+              {coin.heat ? (
+                <span>
+                  {coin.fairOpen ? (
+                    <a href={`/fair-open/${coin.fairOpen.launch}`}>Fair Open</a>
+                  ) : coin.launchMode === "fair_open" ? (
+                    "Fair Open"
+                  ) : (
+                    "Instant launch, no creator buy"
+                  )}
+                </span>
+              ) : (
+                <span>Not through Heat</span>
+              )}
+            </div>
+            {coin.fairOpen && (
+              <div className={styles.fact} data-testid="coin-creator-lock">
+                <span className="eyebrow">Creator lock</span>
+                <CreatorLockFact lock={coin.fairOpen.lock} ticker={coin.ticker} decimals={coin.decimals} />
+              </div>
+            )}
+            <div className={styles.fact}>
+              <span className="eyebrow">Creator</span>
               <span>
-                {coin.fairOpen ? (
-                  <a href={`/fair-open/${coin.fairOpen.launch}`}>Fair Open</a>
-                ) : coin.launchMode === "fair_open" ? (
-                  "Fair Open"
-                ) : (
-                  "Instant launch, no creator buy"
+                {coin.creator.handle && (
+                  <>
+                    <a href={`https://x.com/${coin.creator.handle}`} target="_blank" rel="noreferrer">
+                      @{coin.creator.handle}
+                    </a>{" "}
+                  </>
+                )}
+                <span className="mono note">{shortAddress(coin.creator.wallet)}</span>
+              </span>
+            </div>
+            <div className={styles.fact}>
+              <span className="eyebrow">On chain</span>
+              <span className="row">
+                <a href={coin.explorer.mint} target="_blank" rel="noreferrer">
+                  Coin
+                </a>
+                <a href={coin.explorer.pool} target="_blank" rel="noreferrer">
+                  {coin.graduation?.graduated ? "Curve" : "Pool"}
+                </a>
+                {coin.graduation?.graduated && (
+                  <a href={coin.graduation.graduated.explorer.pool} target="_blank" rel="noreferrer">
+                    DAMM v2 pool
+                  </a>
+                )}
+                {coin.heat && (
+                  <a href={coin.metadataUri} target="_blank" rel="noreferrer">
+                    Metadata on Arweave
+                  </a>
                 )}
               </span>
-            ) : (
-              <span>Not through Heat</span>
-            )}
-          </div>
-          {coin.fairOpen && (
-            <div className={styles.fact} data-testid="coin-creator-lock">
-              <span className="eyebrow">Creator lock</span>
-              <CreatorLockFact lock={coin.fairOpen.lock} ticker={coin.ticker} decimals={coin.decimals} />
             </div>
-          )}
-          <div className={styles.fact}>
-            <span className="eyebrow">Creator</span>
-            <span>
-              {coin.creator.handle && (
-                <>
-                  <a href={`https://x.com/${coin.creator.handle}`} target="_blank" rel="noreferrer">
-                    @{coin.creator.handle}
-                  </a>{" "}
-                </>
-              )}
-              <span className="mono note">{shortAddress(coin.creator.wallet)}</span>
-            </span>
-          </div>
-          <div className={styles.fact}>
-            <span className="eyebrow">On chain</span>
-            <span className="row">
-              <a href={coin.explorer.mint} target="_blank" rel="noreferrer">
-                Coin
-              </a>
-              <a href={coin.explorer.pool} target="_blank" rel="noreferrer">
-                {coin.graduation?.graduated ? "Curve" : "Pool"}
-              </a>
-              {coin.graduation?.graduated && (
-                <a href={coin.graduation.graduated.explorer.pool} target="_blank" rel="noreferrer">
-                  DAMM v2 pool
-                </a>
-              )}
-              {coin.heat && (
-                <a href={coin.metadataUri} target="_blank" rel="noreferrer">
-                  Metadata on Arweave
-                </a>
-              )}
-            </span>
-          </div>
-        </aside>
+          </aside>
           {coin.record && <CreatorSummaryCard summary={coin.record} fallbackWallet={coin.creator.wallet} />}
           <QuoteLabels quote={coin.quote} place="coin" />
         </div>

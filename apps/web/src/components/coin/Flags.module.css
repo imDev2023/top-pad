@@ -6,6 +6,8 @@
   display: grid;
   gap: 10px;
   min-width: 0;
+  /* Below the sticky site header when a link lands on the card (`/coin/<mint>#fairness`). */
+  scroll-margin-top: 80px;
 }
 
 .stripHead {
@@ -212,6 +214,10 @@
   flex-wrap: wrap;
   gap: 4px 16px;
   font-size: 0.86rem;
+}
+
+.enforcedLink {
+  color: var(--muted);
 }
 
 /* The whole card: its counts first, its border red with any red flag */

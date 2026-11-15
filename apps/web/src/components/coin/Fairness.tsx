@@ -106,6 +106,12 @@ export function FairnessStrip({
     };
   }, [mint, version, initial]);
 
+  // A link to the card itself, as a board row's flags give (`/coin/<mint>#fairness`), opens it whole.
+  const hasCard = card !== null;
+  useEffect(() => {
+    if (hasCard && window.location.hash === "#fairness") setOpen("card");
+  }, [hasCard]);
+
   const shownRadar = typeof open === "object" && open && "radar" in open ? shownRadarFlag(radar, open.radar) : null;
   const shownRow = typeof open === "object" && open && "row" in open ? (card?.rows.find((r) => r.key === open.row) ?? null) : null;
   const toggle = (next: Exclude<Open, null>) => setOpen((o) => (JSON.stringify(o) === JSON.stringify(next) ? null : next));
@@ -170,7 +176,7 @@ export function FairnessStrip({
         {shownRadar && <RadarEvidence state={radar} flag={shownRadar} ticker={ticker} decimals={decimals} quote={quote} />}
         {shownRow && (
           <div className={`panel ${styles.detail} ${styles[`detail_${shownRow.flag}`]}`} data-testid="fairness-detail">
-            <RowBody row={shownRow} onRadar={openRadar} />
+            <RowBody row={shownRow} mode={card!.launchMode} onRadar={openRadar} />
           </div>
         )}
         {open === "card" && card && <WholeCard card={card} onRadar={openRadar} />}
@@ -179,8 +185,34 @@ export function FairnessStrip({
   );
 }
 
-/** One row: what it is about, what it states, how it is known, and its links. */
-function RowBody({ row, onRadar }: { row: FairnessRow; onRadar: () => void }) {
+/**
+ * Where "How this is enforced" says what keeps each row's promise and who could still change it (spec 9); none for the
+ * creator's holdings, which promise nothing.
+ */
+function enforcedAnchor(row: FairnessRow, mode: FairnessCard["launchMode"]): string | null {
+  switch (row.key) {
+    case "launch":
+      return mode === "fair_open" ? "fair-open" : "listed";
+    case "creator_lock":
+      return "creator-lock";
+    case "liquidity":
+      return "liquidity";
+    case "finding":
+    case "radar":
+    case "creator":
+      return "bars";
+    case "keeper":
+      return "listed";
+    case "tax":
+      return "fees";
+    default:
+      return null;
+  }
+}
+
+/** One row: what it is about, what it states, how it is known, its links, and where Heat says how it is kept. */
+function RowBody({ row, mode, onRadar }: { row: FairnessRow; mode: FairnessCard["launchMode"]; onRadar: () => void }) {
+  const anchor = enforcedAnchor(row, mode);
   return (
     <>
       <div className={styles.rowHead}>
@@ -189,11 +221,16 @@ function RowBody({ row, onRadar }: { row: FairnessRow; onRadar: () => void }) {
       </div>
       <p className={`${styles.rowValue} ${row.flag === "red" ? styles.rowValueRed : ""}`}>{row.value}</p>
       <p className={styles.lead}>{row.detail}</p>
-      {row.links.length > 0 && (
+      {(row.links.length > 0 || anchor) && (
         <span className={styles.rowLinks}>
           {row.links.map((l) => (
             <RowLink key={l.href} href={l.href} label={l.label} onRadar={onRadar} />
           ))}
+          {anchor && (
+            <Link href={`/enforced#${anchor}`} className={styles.enforcedLink} data-testid={`fairness-enforced-${row.key}`}>
+              How this is kept
+            </Link>
+          )}
         </span>
       )}
     </>
@@ -228,7 +265,7 @@ function WholeCard({ card, onRadar }: { card: FairnessCard; onRadar: () => void 
       <ul className={styles.cardRows}>
         {card.rows.map((r) => (
           <li key={r.key} className={styles.cardRow} data-testid={`fairness-row-${r.key}`} data-flag={r.flag}>
-            <RowBody row={r} onRadar={onRadar} />
+            <RowBody row={r} mode={card.launchMode} onRadar={onRadar} />
           </li>
         ))}
       </ul>

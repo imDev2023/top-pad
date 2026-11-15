@@ -415,8 +415,24 @@
   display: flex;
   flex-wrap: wrap;
   gap: 4px 6px;
+  width: fit-content;
+  max-width: 100%;
   margin-top: 3px;
-  pointer-events: none;
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+}
+
+.flags:hover {
+  text-decoration: none;
+}
+
+.flags:hover :global(.chip) {
+  border-color: currentColor;
+}
+
+.flags:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
 }
 
 .coinFigures {

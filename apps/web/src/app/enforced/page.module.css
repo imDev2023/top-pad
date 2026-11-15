@@ -29,6 +29,53 @@
   font-size: 20px;
 }
 
+/* The promises' index, two columns where they fit. */
+.index {
+  padding: 14px 20px;
+}
+
+.index ol {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 6px 24px;
+  margin: 0;
+  padding-left: 20px;
+}
+
+/* Each promise: what it says, larger, then what keeps it and who could still change it. */
+.promise {
+  font-size: 1.05rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.part {
+  display: grid;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.part h3 {
+  margin: 0;
+}
+
+/* Where to check it: each program or key on the explorer. */
+.checks {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 10px 14px;
+  list-style: none;
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  overflow-wrap: anywhere;
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+
 .list {
   display: grid;
   gap: 10px;

@@ -57,7 +57,12 @@ export function CoinFlags({ coin }: { coin: BoardCoin }) {
     );
   }
   if (!chips.length) return null;
-  return <span className={styles.flags}>{chips}</span>;
+  // The flags open the coin's Fairness card, where each has its evidence (spec 9); the rest of the row opens the coin.
+  return (
+    <Link href={`/coin/${coin.mint}#fairness`} className={styles.flags} aria-label={`The Fairness card of $${coin.ticker}`} data-testid="coin-row-flags">
+      {chips}
+    </Link>
+  );
 }
 
 /** One coin on the board or in search: its picture, name, flags, and its market cap and way to Graduation. */

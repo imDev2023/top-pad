@@ -12,7 +12,7 @@ import {
   CreatorRecord,
   CreatorRoleOutcome,
   CreatorSummary,
-  EnforcementCounts,
+  Enforcement,
   FairnessCard,
   FairOpen,
   FairOpenOutcome,
@@ -23,6 +23,7 @@ import {
   LaunchStatus,
   Me,
   Platform,
+  Position,
   QuoteList,
   SearchResults,
   PreparedClaim,
@@ -242,6 +243,29 @@ export const reportTrade = (mint: string, signature: string) => call(SwapOutcome
 /** What a wallet holds to trade a coin with. */
 export const getHoldings = (mint: string, wallet: string) => call(Holdings, `/coins/${encodeURIComponent(mint)}/holdings/${encodeURIComponent(wallet)}`);
 
+/** A wallet's position in a coin and its P&L (spec 9), the newest snapshot, from the browser; null when it holds none Heat indexed. */
+export async function getPosition(mint: string, wallet: string): Promise<Position | null> {
+  try {
+    return await call(Position, `/coins/${encodeURIComponent(mint)}/positions/${encodeURIComponent(wallet)}`);
+  } catch (e) {
+    if (e instanceof ApiProblem && e.status === 404) return null;
+    throw e;
+  }
+}
+
+/** A position as the server renders its share page, at a snapshot or the newest: "missing" or "unavailable" otherwise. */
+export async function loadPosition(mint: string, wallet: string, at: string | null): Promise<Position | "missing" | "unavailable"> {
+  try {
+    const query = at ? `?at=${encodeURIComponent(at)}` : "";
+    const res = await fetch(`${API_URL}/coins/${encodeURIComponent(mint)}/positions/${encodeURIComponent(wallet)}${query}`, { cache: "no-store", signal: AbortSignal.timeout(8_000) });
+    if (res.status === 404) return "missing";
+    const parsed = Position.safeParse(await res.json());
+    return res.ok && parsed.success ? parsed.data : "unavailable";
+  } catch {
+    return "unavailable";
+  }
+}
+
 /** A coin's live room: its trades as they land (spec 10.2). */
 export const coinLiveUrl = (mint: string) => `${API_URL.replace(/^http/, "ws")}/live/coins/${encodeURIComponent(mint)}`;
 
@@ -358,11 +382,22 @@ export const replyToBar = (bar: string, body: string) => call(BarReply, `/bars/$
 export const appealBar = (bar: string, appeal: BarAppealRequest) =>
   call(BarAppeal.pick({ id: true, status: true, filedAt: true, dueAt: true }), `/bars/${encodeURIComponent(bar)}/appeals`, postJson(appeal));
 
-/** The counts "How this is enforced" publishes, as the server renders it, or null when the API does not answer in time. */
-export async function loadEnforcementCounts(): Promise<EnforcementCounts | null> {
+/** What "How this is enforced" publishes, as the server renders it: its counts and keys, or null when the API does not answer in time. */
+export async function loadEnforcement(): Promise<Enforcement | null> {
   try {
-    const res = await fetch(`${API_URL}/enforcement`, { cache: "no-store", signal: AbortSignal.timeout(5_000) });
-    const parsed = EnforcementCounts.safeParse(await res.json());
+    const res = await fetch(`${API_URL}/enforcement`, { cache: "no-store", signal: AbortSignal.timeout(8_000) });
+    const parsed = Enforcement.safeParse(await res.json());
+    return res.ok && parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The quotes Heat lists, as the server renders a page, or null when the API does not answer in time. */
+export async function loadQuotes(): Promise<QuoteList | null> {
+  try {
+    const res = await fetch(`${API_URL}/quotes`, { cache: "no-store", signal: AbortSignal.timeout(8_000) });
+    const parsed = QuoteList.safeParse(await res.json());
     return res.ok && parsed.success ? parsed.data : null;
   } catch {
     return null;
