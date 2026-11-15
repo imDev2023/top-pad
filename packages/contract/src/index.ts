@@ -6,6 +6,7 @@ export * from "./coin";
 export * from "./creator";
 export * from "./creatorSummary";
 export * from "./earnings";
+export * from "./fairness";
 export * from "./fairOpen";
 export * from "./health";
 export * from "./jobs";
