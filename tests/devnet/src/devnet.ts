@@ -39,7 +39,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * The RPC, every call retried while the endpoint answers 429: the public endpoint's per-IP budget is shared with every
- * other session on this Mac, so a run must wait its turn rather than fail.
+ * other session on this Mac, so a run must wait its turn rather than fail. Eight tries (about 40 s) were not enough for a
+ * burst of parallel reads while other sessions used it (#62's acceptance run, 2026-11-15), so it tries for about 3 minutes.
  */
 const http = createDefaultRpcTransport({ url: rpcUrl });
 const patient: RpcTransport = async (request) => {
@@ -48,8 +49,9 @@ const patient: RpcTransport = async (request) => {
       return await http(request);
     } catch (e) {
       const limited = isSolanaError(e, SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR) && e.context.statusCode === 429;
-      if (!limited || attempt >= 8) throw e;
-      await sleep(Math.min(500 * 2 ** attempt, 8_000));
+      if (!limited || attempt >= 24) throw e;
+      // Jittered, so parallel calls refused together do not all come back together.
+      await sleep(Math.min(500 * 2 ** attempt, 8_000) * (0.75 + Math.random() / 2));
     }
   }
 };
