@@ -226,6 +226,8 @@ test("a farm of 100 wallets gets one seat, the creator's cluster none, and every
     expect(latest).toBeLessThanOrEqual(120n);
     await page.reload();
     await expect(page.getByTestId("fair-open-delivered")).toContainText("Every seat has its coins and refund", { timeout: 60_000 });
+    // The deposit panel reads the connected wallet's seat a moment after the page: photographed once it has.
+    await expect(page.getByText("Reading your seat from the chain")).toHaveCount(0, { timeout: 30_000 });
     await snap(page, "farm-3-opened");
 
     // The keeper collects the Tax Share at 60 s, pays every seat as it closes, and closes the launch and its nonce.
