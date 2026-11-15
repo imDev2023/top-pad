@@ -19,3 +19,10 @@
   color: var(--caution);
   font-weight: 600;
 }
+
+.cohort {
+  margin-left: auto;
+  color: var(--fg);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}

@@ -1,0 +1,80 @@
+/* The devnet cohort's page: three numbered steps, each a panel. */
+.page {
+  display: grid;
+  gap: 16px;
+  max-width: 720px;
+}
+
+.head {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.lead {
+  max-width: 64ch;
+  color: var(--muted);
+  font-size: 1rem;
+}
+
+.steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.step {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 14px;
+  padding: 18px 20px;
+}
+
+.number {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid var(--line-strong);
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.body {
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.body > :global(.stack),
+.body > :global(.verdict) {
+  justify-self: stretch;
+}
+
+.title {
+  font-size: 1.15rem;
+  line-height: 28px;
+}
+
+.optional {
+  margin-left: 6px;
+  font-family: var(--font-body);
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+@media (max-width: 560px) {
+  .step {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    padding: 16px;
+  }
+}

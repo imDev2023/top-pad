@@ -5,6 +5,7 @@ import {
   Board,
   BundleRadar,
   ClaimOutcome,
+  CohortStatus,
   Coin,
   CoinCandles,
   CoinTrades,
@@ -134,6 +135,15 @@ export const verifyMessage = (wallet: string) => call(VerifyMessage, "/verify/me
 
 /** The signed message, base64 signature: the wallet has the person's tier in every Fair Open from now on. */
 export const verifyWallet = (wallet: string, message: string, signature: string) => call(VerifiedWallet, "/verify", postJson({ wallet, message, signature }));
+
+/** The devnet cohort as this browser's record stands in it (spec 11.3), or null when signed out. */
+export const getCohort = () => call(CohortStatus.nullable(), "/cohort");
+
+/** The signed-in record joins the cohort, X linked or not. */
+export const joinCohort = () => call(CohortStatus, "/cohort/join", { method: "POST" });
+
+/** 1 devnet SOL, once, to the record's Creator wallet, when the record linked X (spec 10.2). */
+export const tapCohort = () => call(CohortStatus, "/cohort/tap", { method: "POST" });
 
 export const logout = () => fetch(`${API_URL}/auth/logout`, { method: "POST", credentials: "include" });
 
