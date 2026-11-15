@@ -89,6 +89,26 @@ export async function holderCount(rpcUrl: string, mint: string, signal?: AbortSi
   return owners.size;
 }
 
+/**
+ * What a wallet holds of a coin, in raw units: every classic SPL token account it owns of the mint, summed (Heat's coins
+ * are SPL Token mints), at confirmed.
+ */
+export async function walletCoinBalance(rpcUrl: string, owner: string, mint: string, signal?: AbortSignal): Promise<bigint> {
+  const accounts = await rpcCall<{ value: { account: { data: [string, string] } }[] }>(
+    rpcUrl,
+    "getTokenAccountsByOwner",
+    // The amount, 8 bytes from 64, of each account.
+    [owner, { mint }, { encoding: "base64", commitment: "confirmed", dataSlice: { offset: 64, length: 8 } }],
+    signal,
+  );
+  let total = 0n;
+  for (const { account } of accounts.value) {
+    const data = Uint8Array.from(atob(account.data[0]), (c) => c.charCodeAt(0));
+    total += new DataView(data.buffer).getBigUint64(0, true);
+  }
+  return total;
+}
+
 /** The WebSocket endpoint of an HTTP RPC endpoint: the same URL, key and all, over wss. */
 export const webSocketUrlOf = (rpcUrl: string) => rpcUrl.replace(/^http/, "ws");
 
