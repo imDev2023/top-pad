@@ -827,6 +827,9 @@ The screens:
    As built ([#56](https://github.com/imDev2023/top-pad/issues/56)): a record with a published Bar opens with a red banner per Bar, "Barred: confirmed creator bundle in $X, date", its appeal status and the evidence behind a link, and carries a Barred mark wherever its summary shows; signed in as the record, the creator sees instead each Bar's private view: until when it stays private, the evidence pack open, their replies with a box for another, and the appeal form or where their appeals stand. A refused launch links there.
 6. **How this is enforced**: each promise, what keeps it, and who could still change it (below).
    As built ([#56](https://github.com/imDev2023/top-pad/issues/56)): `/enforced` says how bundling is labelled, confirmed and barred, the private window and the appeal, and shows the counts of bars, appeals and overturned findings from `GET /enforcement`.
+   As built ([#59](https://github.com/imDev2023/top-pad/issues/59)): `/enforced` states each point below as a promise, what keeps it and who could still change it, with the programs and keys it rests on linked to the explorer: each of Heat's programs' upgrade authority as its program data account holds it now (`GET /enforcement`'s `chain`), Heat's configs per quote, the treasury and the launch key.
+   The operator app's Bars page shows the same counts, worked out from the Bars themselves; on devnet both said 2 bars, 2 appeals and 2 overturned (the bundler simulations' Bars, lifted on appeal).
+   Each Fairness card row links to its promise (`/enforced#fees`, `#fair-open`, `#creator-lock`, `#liquidity`, `#bars`, `#listed`), a board row's flags open the coin's whole card (`/coin/<mint>#fairness`), and a graduated pool Meteora paused shows a red banner on its coin page, read from DAMM v2's `pool_status`.
 7. **Operator app** (separate, section 10): cases, appeals, refused launches and admissions.
 
 The Fairness card's rows:
@@ -850,6 +853,14 @@ The Fairness card's rows:
 - the guarantees cover only coins our launch key co-signed, and only those are listed.
 
 Also in the build: a P&L share card for a trader's own position (one of the core trading basics in the brief; owner, 2026-10-27), and the Fairness card as an image for X link cards (2:1, under 5 MB), the one channel to traders fully ours ([How can Top-pad's fairness data reach the trading terminals](https://github.com/imDev2023/top-pad/issues/20)).
+
+As built ([#59](https://github.com/imDev2023/top-pad/issues/59), 2026-11-15), the P&L share card:
+- A position is worked out from Heat's indexed rows alone, by average cost: a swap's coins and quote (a buy's fees inside what it spent, a sell's taken off what it received), a Fair Open fill at the open's one price, and the Tax Share as received; the held coins are valued at the coin's last trade.
+  Coins sent to or from the wallet are not counted, and coins sold beyond what the counted events hold cost nothing.
+- Every position is stated as of a snapshot, an order key, so the card a trader shares never changes: `GET /coins/<mint>/positions/<wallet>?at=` and its image `card.png?at=` (1200 x 600, the Fairness card's drawing), each past snapshot's image kept in R2.
+- The coin page shows the connected wallet's position under quick trade, read again as the coin trades; "Share P&L card" freezes the snapshot and offers Share on X, the device's share sheet with the image where it has one, Save image and Copy link.
+- `/pnl/<mint>/<wallet>?at=` is the share page, its link card the card's image, with the figures it adds up from.
+- On devnet a trader's buy and half-sell from the coin page matched their two transactions on chain to the raw unit in every figure, the snapshot's price that of its trade on chain.
 
 As built ([#58](https://github.com/imDev2023/top-pad/issues/58), 2026-11-15), the Fairness card's flags:
 - Green is proven on chain: a Fair Open's one price and sealed identity, an Instant launch with no buy at its creation, the Creator lock (or nothing to lock), no unlocked creator holdings, liquidity in the curve, the keeper's open, a Tax Share paid.
