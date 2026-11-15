@@ -244,14 +244,8 @@ export const reportTrade = (mint: string, signature: string) => call(SwapOutcome
 export const getHoldings = (mint: string, wallet: string) => call(Holdings, `/coins/${encodeURIComponent(mint)}/holdings/${encodeURIComponent(wallet)}`);
 
 /** A wallet's position in a coin and its P&L (spec 9), the newest snapshot, from the browser; null when it holds none Heat indexed. */
-export async function getPosition(mint: string, wallet: string): Promise<Position | null> {
-  try {
-    return await call(Position, `/coins/${encodeURIComponent(mint)}/positions/${encodeURIComponent(wallet)}`);
-  } catch (e) {
-    if (e instanceof ApiProblem && e.status === 404) return null;
-    throw e;
-  }
-}
+export const getPosition = (mint: string, wallet: string): Promise<Position | null> =>
+  call(Position.nullable(), `/coins/${encodeURIComponent(mint)}/positions/${encodeURIComponent(wallet)}`);
 
 /** A position as the server renders its share page, at a snapshot or the newest: "missing" or "unavailable" otherwise. */
 export async function loadPosition(mint: string, wallet: string, at: string | null): Promise<Position | "missing" | "unavailable"> {
@@ -259,8 +253,9 @@ export async function loadPosition(mint: string, wallet: string, at: string | nu
     const query = at ? `?at=${encodeURIComponent(at)}` : "";
     const res = await fetch(`${API_URL}/coins/${encodeURIComponent(mint)}/positions/${encodeURIComponent(wallet)}${query}`, { cache: "no-store", signal: AbortSignal.timeout(8_000) });
     if (res.status === 404) return "missing";
-    const parsed = Position.safeParse(await res.json());
-    return res.ok && parsed.success ? parsed.data : "unavailable";
+    const parsed = Position.nullable().safeParse(await res.json());
+    if (!res.ok || !parsed.success) return "unavailable";
+    return parsed.data ?? "missing";
   } catch {
     return "unavailable";
   }

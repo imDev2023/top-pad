@@ -19,14 +19,14 @@ const SLOT_KEY = 10_000_000_000n;
 const seatKey = (slot: number) => BigInt(slot) * SLOT_KEY;
 
 /**
- * A wallet's position in a Heat coin as of `at` (the newest snapshot when none is asked for); null when the mint is not
- * a Heat coin or the wallet has neither swapped it nor been filled in its Fair Open by then.
+ * A wallet's position in a Heat coin as of `at` (the newest snapshot when none is asked for); null when the wallet has
+ * neither swapped it nor been filled in its Fair Open by then, and "no coin" when the mint is not a Heat coin.
  */
-export async function positionOf(cfg: Config, db: Db, mint: string, wallet: string, asked: bigint | null): Promise<Position | null> {
+export async function positionOf(cfg: Config, db: Db, mint: string, wallet: string, asked: bigint | null): Promise<Position | null | "no coin"> {
   const heat = cfg.heat;
-  if (!heat) return null;
+  if (!heat) return "no coin";
   const [row] = await db.select({ pool: pools, coin: coins }).from(pools).innerJoin(coins, eq(coins.mint, pools.mint)).where(eq(pools.mint, mint));
-  if (!row) return null;
+  if (!row) return "no coin";
   const { pool, coin } = row;
   const [fairOpen] = await db.select({ launch: fairOpens.launch, spent: fairOpens.spent, coins: fairOpens.coins }).from(fairOpens).where(eq(fairOpens.mint, mint));
 
@@ -122,6 +122,7 @@ function divide(spentRaw: bigint, coinsRaw: bigint, quoteDecimals: number): stri
   return trimmed(`${text.slice(0, -places)}.${text.slice(-places)}`);
 }
 
+const noCoin = (c: Context<AppEnv>) => c.json({ error: "Heat has no coin at this address." }, 404);
 const noPosition = (c: Context<AppEnv>) => c.json({ error: "This wallet holds no position in this coin that Heat has indexed." }, 404);
 
 /** The wallet, the mint and the snapshot asked for, checked; null when any of them cannot be one. */
@@ -134,12 +135,19 @@ function asked(c: Context<AppEnv>): { mint: string; wallet: string; at: bigint |
   return { mint, wallet, at: at === undefined ? null : BigInt(at) };
 }
 
-/** `GET /coins/:mint/positions/:wallet?at=`: the position as of a snapshot, or the newest. */
+/**
+ * `GET /coins/:mint/positions/:wallet?at=`: the position as of a snapshot, or the newest; `null` for a wallet with none,
+ * an answer rather than an error, so a coin page asking for a connected wallet's position logs nothing in the console.
+ */
 export async function getPosition(c: Context<AppEnv>) {
   const q = asked(c);
-  if (!q) return noPosition(c);
+  if (!q) return noCoin(c);
   const position = await positionOf(c.var.cfg, c.var.db, q.mint, q.wallet, q.at);
-  if (!position) return noPosition(c);
+  if (position === "no coin") return noCoin(c);
+  if (!position) {
+    c.header("cache-control", "no-store");
+    return c.json(null);
+  }
   // A past snapshot never changes; the newest does with the next trade.
   c.header("cache-control", position.latest ? "no-store" : "public, max-age=3600");
   return c.json(position);
@@ -158,7 +166,7 @@ export async function getPositionImage(c: Context<AppEnv>) {
   const q = asked(c);
   if (!q) return noPosition(c);
   const position = await positionOf(cfg, c.var.db, q.mint, q.wallet, q.at);
-  if (!position) return noPosition(c);
+  if (!position || position === "no coin") return noPosition(c);
   const forGood = q.at !== null && BigInt(position.at) === q.at;
   const png = (bytes: Uint8Array | ArrayBuffer) =>
     new Response(bytes, {

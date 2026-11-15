@@ -19,7 +19,7 @@ import { address, getAddressEncoder, getProgramDerivedAddress } from "@solana/ki
 import { CLUSTERS, FAIR_OPEN_PROGRAM_ADDRESS, FEE_PROGRAM_ADDRESS, priceOfSqrtPrice } from "@top-pad/chain";
 import { Coin, CoinTrades, Enforcement, Position } from "@top-pad/contract";
 import { coinAmount, pnlPercentText, pnlText } from "@top-pad/contract/format";
-import { coins, creatorWallets, fairOpens, graduations, pools, coinRadar, trades, bars } from "@top-pad/db";
+import { coins, fairOpens, graduations, pools, coinRadar, trades, bars } from "@top-pad/db";
 import { decodeTransaction } from "@top-pad/indexer";
 import { coinBalance, fundedWallets, landed, rpc, sweep } from "@top-pad/tests-devnet/devnet";
 import { and, desc, eq, gt, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
@@ -198,7 +198,7 @@ test("a trader shares a P&L card whose numbers match their trades on chain", asy
       .poll(
         async () => {
           const res = await fetch(`${TARGET.api}/coins/${mint}/positions/${trader.address}`);
-          read.position = res.ok ? Position.parse(await res.json()) : null;
+          read.position = res.ok ? Position.nullable().parse(await res.json()) : null;
           return read.position?.swaps ?? 0;
         },
         { timeout: 90_000, intervals: [2_000] },
@@ -311,7 +311,8 @@ test("every screen of spec 9 on real devnet data, on a phone and a desktop, in b
       .orderBy(desc(coins.createdAt))
       .limit(1);
     const [barred] = await db.select({ creatorId: bars.creatorId }).from(bars).where(or(lte(bars.publishAt, new Date()), isNotNull(bars.liftedAt))).orderBy(desc(bars.confirmedAt)).limit(1);
-    const [record] = await db.select({ creatorId: creatorWallets.creatorId }).from(creatorWallets).where(eq(creatorWallets.wallet, fairOpenCoin!.creator)).limit(1);
+    // A Creator record with coins: the latest coin's that has one (a Fair Open a script scheduled has none).
+    const [record] = await db.select({ creatorId: coins.creatorId }).from(coins).where(isNotNull(coins.creatorId)).orderBy(desc(coins.createdAt)).limit(1);
     const [traded] = await db
       .select({ mint: trades.mint, trader: trades.trader })
       .from(trades)
@@ -319,7 +320,8 @@ test("every screen of spec 9 on real devnet data, on a phone and a desktop, in b
       .where(eq(trades.side, "sell"))
       .orderBy(desc(trades.orderKey))
       .limit(1);
-    expect([fairOpenCoin, graduated, red, record, traded].every(Boolean), "devnet has each kind of screen's data").toBe(true);
+    const found = { fairOpenCoin, graduated, red, record, traded };
+    expect(Object.entries(found).filter(([, v]) => !v).map(([k]) => k), "devnet has each kind of screen's data").toEqual([]);
 
     const screens: { name: string; path: string; ready: (p: Page) => Promise<void> }[] = [
       { name: "discover", path: "/", ready: (p) => expect(p.getByRole("heading", { name: "Live now" })).toBeVisible() },

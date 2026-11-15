@@ -260,10 +260,12 @@ describe("GET /coins/:mint/positions/:wallet", () => {
     expect((await request(`/coins/${c.mint}/positions/${await addr()}/card.png`)).status).toBe(404);
   });
 
-  it("answers 404 for a wallet with nothing indexed, a coin Heat does not have, and addresses that are not addresses", async () => {
+  it("answers null for a wallet with nothing indexed, and 404 for a coin Heat does not have and addresses that are not addresses", async () => {
     const c = await coin("PNLD");
     await trade(c, await addr(), "buy", { coins: COIN, quote: 1_000n, price: "0.001" });
-    expect((await request(`/coins/${c.mint}/positions/${await addr()}`)).status).toBe(404);
+    const none = await request(`/coins/${c.mint}/positions/${await addr()}`);
+    expect(none.status).toBe(200);
+    expect(await none.json()).toBeNull();
     expect((await request(`/coins/${await addr()}/positions/${await addr()}`)).status).toBe(404);
     expect((await request(`/coins/${c.mint}/positions/nope`)).status).toBe(404);
     expect((await request(`/coins/${c.mint}/positions/${await addr()}?at=12x`)).status).toBe(404);
