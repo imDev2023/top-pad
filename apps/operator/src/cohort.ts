@@ -209,7 +209,7 @@ export function defaultMode(m: Pick<CohortMeasures, "keptFairOpen" | "reachedMin
 
 export type TapView = {
   address: string | null;
-  /** The cron's last reading of the tap's float, with when it was read. */
+  /** The newest reading of the tap's float, the cron's or the one a tap takes as it leaves, with when it was read. */
   float: { lamports: string; floor: string; claimsLeft: number; at: Date } | null;
   sent: number;
   sending: number;
@@ -218,14 +218,14 @@ export type TapView = {
   recent: { handle: string; wallet: string; lamports: bigint; signature: string; status: string; at: Date }[];
 };
 
-/** The tap as the operator reads it: its claims, the cron's last reading of its float, and its alert if one is open. */
+/** The tap as the operator reads it: its claims, the newest reading of its float, and its alert if one is open. */
 export async function tapView(tx: DbOrTransaction): Promise<TapView> {
   const taps = await tx.select().from(cohortTaps).orderBy(desc(cohortTaps.createdAt));
   const [run] = await tx
     .select({ summary: jobRuns.summary, finishedAt: jobRuns.finishedAt })
     .from(jobRuns)
-    .where(and(eq(jobRuns.job, "cohort-tap"), eq(jobRuns.status, "succeeded")))
-    .orderBy(desc(jobRuns.startedAt))
+    .where(and(inArray(jobRuns.job, ["cohort-tap", "cohort-tap-float"]), eq(jobRuns.status, "succeeded")))
+    .orderBy(desc(jobRuns.finishedAt))
     .limit(1);
   const float = (run?.summary as { float?: { tap: string; lamports: string; floor: string; claimsLeft: number } } | null)?.float ?? null;
   const [alert] = await tx

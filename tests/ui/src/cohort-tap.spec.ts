@@ -52,12 +52,14 @@ async function setFloat(lamports: bigint) {
   }
 }
 
-/** The page's own request to the API, with its session cookie and its origin, as the cohort page sends it. */
-const tapFromPage = (page: Page) =>
-  page.evaluate(async (api) => {
-    const res = await fetch(`${api}/cohort/tap`, { method: "POST", credentials: "include" });
-    return { status: res.status, body: (await res.json()) as unknown };
-  }, TARGET.api);
+/**
+ * A tap asked of the API with the page's session cookie and the site's origin, as the cohort page would ask it, but from
+ * the test's own request context, so the refusals it expects are not the page's console errors.
+ */
+const tapFromPage = async (page: Page) => {
+  const res = await page.request.post(`${TARGET.api}/cohort/tap`, { headers: { origin: TARGET.web } });
+  return { status: res.status(), body: (await res.json()) as unknown };
+};
 
 /** Signs `wallet` in on /cohort with the test wallet. */
 async function signIn(page: Page, wallet: KeyPairSigner) {
@@ -147,9 +149,13 @@ test("the cohort tap gives a member who linked X 1 devnet SOL once, alerts befor
     members.push(secondRow!.creatorId);
     await other.context().close();
 
-    // The first member launches an Instant coin with its tapped SOL, from the same browser.
-    const ticker = newTicker();
-    await launchCoin(page, first, { name: "Cohort Tap", ticker }, { linked: true, looksLike: true });
+    // The first member launches an Instant coin with its tapped SOL, signed in already: a new page of the same browser,
+    // since the launch installs the test wallet in its page afresh.
+    const launchPage = await page.context().newPage();
+    const launchErrors = pageErrors(launchPage);
+    await launchCoin(launchPage, first, { name: "Cohort Tap", ticker: newTicker() }, { linked: true, looksLike: true });
+    expect(launchErrors).toEqual([]);
+    await launchPage.close();
 
     // The operator's Cohort page.
     const operator = await fetch(`${OPERATOR}/cohort`).catch(() => null);
@@ -159,6 +165,7 @@ test("the cohort tap gives a member who linked X 1 devnet SOL once, alerts befor
     await expect(ops.getByTestId("default-mode")).toContainText("Instant launch would become the default");
     await expect(ops.getByTestId("default-mode")).toContainText("Creators who kept Fair Open: 0 of 1, fewer than a third.");
     await expect(ops.getByTestId("tap-alert")).toContainText("2 more members can be paid");
+    await expect(ops.getByTestId("tap-float")).toContainText(`${Number(left) / 1e9} SOL, floor 3 SOL: 2 more members can be paid`);
     await expect(ops.getByText(`@${handle}`)).toBeVisible();
     await snap(ops, "cohort-operator");
     await ops.close();

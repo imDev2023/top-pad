@@ -23,7 +23,7 @@ import type { Context } from "hono";
 import { TAP_LAMPORTS, TAP_RESERVE_LAMPORTS, tapTransferMessage } from "@top-pad/chain";
 import { CohortRefusal, CohortStatus, type CohortTap } from "@top-pad/contract";
 import { cohortMembers, cohortTaps, type Db } from "@top-pad/db";
-import { failureMessage, raiseAlert, resolveAlert } from "@top-pad/jobs";
+import { failureMessage, raiseAlert, resolveAlert, runJob } from "@top-pad/jobs";
 import { currentCreatorWallet, sessionCreator, type SessionCreator } from "./auth";
 import type { Bindings, Config, SecretBinding } from "./env";
 import type { AppEnv } from "./http";
@@ -230,10 +230,12 @@ export async function tapCohort(c: Context<AppEnv>) {
     }
     // Not confirmed yet: it may still land, and the cron settles it from its signature.
   }
-  const after = await checkTapFloat(db, rpc, tap.address, floor).catch((e) => {
+  // The float as this tap left it, recorded as a run of its own, so the operator's page reads the newest reading.
+  const run = await runJob(db, "cohort-tap-float", async () => ({ float: await checkTapFloat(db, rpc, tap.address, floor) })).catch((e) => {
     console.error("checking the tap's float failed", e);
     return null;
   });
+  const after = (run?.summary as { float?: { lamports: string } } | null)?.float;
   return c.json(await statusOf(c, creator, after ? BigInt(after.lamports) : null));
 }
 

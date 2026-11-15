@@ -207,16 +207,15 @@ describe("the cohort's measures", () => {
     expect(outcomeOf({ cancelledAt: new Date(), openedAt: null, failure: "min_raise_missed" })).toBe("cancelled");
   });
 
-  it("shows the tap's claims, its float as the cron last read it, and its open alert", async () => {
+  it("shows the tap's claims, the newest reading of its float, and its open alert", async () => {
     const r = await record();
     await db.insert(cohortTaps).values({ creatorId: r.id, xUserId: "77", xHandle: "tapped_member", wallet: r.wallet, lamports: 1_000_000_000n, signature: id("S"), lastValidBlockHeight: 1n, status: "sent" });
-    await db.insert(jobRuns).values({
-      id: "run-1",
-      job: "cohort-tap",
-      status: "succeeded",
-      finishedAt: new Date(),
-      summary: { sent: 0, failed: 0, waiting: 0, float: { tap: "AQkkeusaMSeJdtz3iatfsvUJjBuYU2riQSrqLKwpUQTv", lamports: "2500000000", floor: "3000000000", low: true, claimsLeft: 2 } },
-    });
+    const float = (lamports: string, claimsLeft: number) => ({ tap: "AQkkeusaMSeJdtz3iatfsvUJjBuYU2riQSrqLKwpUQTv", lamports, floor: "3000000000", low: true, claimsLeft });
+    // The cron read 3.5 SOL; a tap since left 2.5, and its own reading is the newer.
+    await db.insert(jobRuns).values([
+      { id: "run-1", job: "cohort-tap", status: "succeeded", finishedAt: new Date(Date.now() - 60_000), summary: { sent: 0, failed: 0, waiting: 0, float: float("3500000000", 3) } },
+      { id: "run-2", job: "cohort-tap-float", status: "succeeded", finishedAt: new Date(), summary: { float: float("2500000000", 2) } },
+    ]);
     await db.insert(operatorAlerts).values({ kind: "tap_low_balance", subject: "AQkkeusaMSeJdtz3iatfsvUJjBuYU2riQSrqLKwpUQTv", message: "The cohort tap holds 2.500 SOL, below its 3.000 SOL floor." });
     const { status, html } = await page("/cohort");
     expect(status).toBe(200);

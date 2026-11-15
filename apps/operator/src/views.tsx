@@ -1103,7 +1103,8 @@ export const HubsPage: FC<Shell & { hubs: HubRow[]; flash: Child }> = ({ hubs, f
 // The cohort's measures and the default-mode rule (spec 11.3, #63), and the cohort tap (spec 10.2).
 
 const percent = (s: Share) => (s.of === 0 ? "-" : `${Math.round((100 * s.count) / s.of)}%`);
-const ofText = (s: Share, what: string) => (s.of === 0 ? `none yet of ${what}` : `${s.count} of ${s.of} ${what}`);
+/** "3 of 10 creators", "0 of 1 creator", or "none yet of creators"; `what` is the plural, which ends in "s". */
+const ofText = (s: Share, what: string) => (s.of === 0 ? `none yet of ${what}` : `${s.count} of ${s.of} ${s.of === 1 ? what.replace(/s$/, "") : what}`);
 const OUTCOMES: Record<FairOpenOutcome, [string, string]> = {
   reached: ["chip-go", "Reached its minimum raise"],
   missed: ["chip-stop", "Missed its minimum raise"],
@@ -1209,14 +1210,14 @@ export const CohortPage: FC<Shell & { measures: CohortMeasures; rule: DefaultMod
               <dt>Gives</dt>
               <dd>1 devnet SOL, once, to each member whose record linked X, sent to their Creator wallet.</dd>
               <dt>Float</dt>
-              <dd>
+              <dd data-testid="tap-float">
                 {tap.float ? (
                   <>
                     <span class="num">{units(tap.float.lamports, 9)}</span> SOL, floor <span class="num">{units(tap.float.floor, 9)}</span> SOL: {tap.float.claimsLeft === 1 ? "1 more member" : `${tap.float.claimsLeft} more members`} can be paid
-                    <div class="note">Read by the cron {when(tap.float.at)}</div>
+                    <div class="note">Read {when(tap.float.at)}</div>
                   </>
                 ) : (
-                  "Not read yet: the cron reads it every five minutes."
+                  "Not read yet: the cron reads it every five minutes, and each tap as it leaves."
                 )}
               </dd>
               {tap.address && (

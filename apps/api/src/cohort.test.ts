@@ -1,8 +1,8 @@
 import { decompileTransactionMessage, generateKeyPairSigner, getCompiledTransactionMessageDecoder, getU64Decoder, type KeyPairSigner, type Transaction } from "@solana/kit";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { CohortRefusal, CohortStatus } from "@top-pad/contract";
-import { cohortTaps, createDb, creators, creatorWallets, operatorAlerts, type Db } from "@top-pad/db";
+import { cohortTaps, createDb, creators, creatorWallets, jobRuns, operatorAlerts, type Db } from "@top-pad/db";
 import { createTestDatabase } from "@top-pad/db/testing";
 import { app } from "./index";
 import { settleTaps } from "./cohort";
@@ -164,6 +164,9 @@ describe("the cohort tap", () => {
     expect((await post("/cohort/tap", (await member({})).session)).status).toBe(200);
     const [alert] = await open();
     expect(alert).toMatchObject({ subject: tap().signer.address, resolvedAt: null });
+    // The tap's own reading is recorded as it leaves, for the operator's page.
+    const [reading] = await db.select().from(jobRuns).where(eq(jobRuns.job, "cohort-tap-float")).orderBy(desc(jobRuns.finishedAt)).limit(1);
+    expect(reading).toMatchObject({ status: "succeeded", summary: { float: { lamports: "2499990000", low: true, claimsLeft: 2 } } });
     expect(alert!.message).toContain("holds 2.500 SOL, below its 3.000 SOL floor: 2 more members can be paid");
 
     expect((await post("/cohort/tap", (await member({})).session)).status).toBe(200);

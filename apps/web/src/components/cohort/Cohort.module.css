@@ -56,6 +56,11 @@
   justify-self: stretch;
 }
 
+/* A step's button keeps its own width inside the stretched stack. */
+.body :global(.stack) > :global(.btn) {
+  justify-self: start;
+}
+
 .title {
   font-size: 1.15rem;
   line-height: 28px;
@@ -73,8 +78,8 @@
 
 @media (max-width: 560px) {
   .step {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 8px;
+    grid-template-columns: 28px minmax(0, 1fr);
+    gap: 12px;
     padding: 16px;
   }
 }
