@@ -11,6 +11,8 @@ node_modules/
 .open-next/
 dist/
 test-results/
+# The acceptance run's logs and measurements, one folder a run (tests/acceptance)
+tests/acceptance/runs/
 playwright-report/
 *.tsbuildinfo
 .dev.vars

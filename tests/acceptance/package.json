@@ -1,0 +1,17 @@
+{
+  "name": "@top-pad/tests-acceptance",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "acceptance": "tsx src/run.ts"
+  },
+  "devDependencies": {
+    "@solana/kit": "^8.5.0",
+    "@top-pad/chain": "workspace:*",
+    "@top-pad/clients": "workspace:*",
+    "@top-pad/db": "workspace:*",
+    "@types/node": "^24.19.2",
+    "drizzle-orm": "^0.45.4"
+  }
+}
