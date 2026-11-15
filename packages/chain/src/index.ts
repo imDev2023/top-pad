@@ -52,6 +52,11 @@ export type HeatCluster = {
     admission: Address;
     /** Writes each quote's `QuoteSettings` in the Fair Open program (ADR 0007 decision 4), and holds no funds. */
     quoteManager: Address;
+    /**
+     * The cohort tap (spec 10.2, 11.3): pays each cohort member who linked X 1 SOL once, from a float of its own with a
+     * low-balance alert, so a drained tap never touches the keeper's float; null where there is no cohort.
+     */
+    tap: Address | null;
   } | null;
   /**
    * Devnet's rehearsal config, made by `pnpm --filter @top-pad/meteora configs devnet --rehearsal --send`: the Instant
@@ -161,6 +166,8 @@ export const CLUSTERS: Record<Cluster, HeatCluster | null> = {
       admission: address("2LH1VzF3rbCKdfSZDBXkbbwXbZZsbYkP8qkVRP9rgzuJ"),
       // Made on 2026-11-04 (#84), in ~/.config/top-pad/devnet/quote-manager.json.
       quoteManager: address("639kdfnCQ762Rio8jdVXm66pqMx3uRHWeuiZpY5wwmWq"),
+      // Made on 2026-11-15 (#63), in ~/.config/top-pad/devnet/tap.json, funded from the bank.
+      tap: address("AQkkeusaMSeJdtz3iatfsvUJjBuYU2riQSrqLKwpUQTv"),
     },
     // Made and frozen on 2026-11-04 (#88), the table of 2026-10-31 (#46, B2XYd5qp7wyT5Dnvg3CJh6aZxoiiAAX4QRvLLMsgxMHT,
     // which ladders signed before it still name) with Token-2022 and the listed quotes added.
@@ -208,3 +215,4 @@ export * from "./graduation";
 export * from "./launch";
 export * from "./open";
 export * from "./swap";
+export * from "./tap";

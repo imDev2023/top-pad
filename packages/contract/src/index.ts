@@ -2,6 +2,7 @@
 export * from "./auth";
 export * from "./bar";
 export * from "./board";
+export * from "./cohort";
 export * from "./coin";
 export * from "./creator";
 export * from "./creatorSummary";

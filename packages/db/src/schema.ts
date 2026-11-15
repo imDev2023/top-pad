@@ -28,7 +28,7 @@ export const jobLocks = pgTable("job_locks", {
 export const operatorAlerts = pgTable(
   "operator_alerts",
   {
-    kind: text("kind", { enum: ["job_failed", "keeper_low_balance"] }).notNull(),
+    kind: text("kind", { enum: ["job_failed", "keeper_low_balance", "tap_low_balance"] }).notNull(),
     /** What the alert is about, such as a job's name. */
     subject: text("subject").notNull(),
     message: text("message").notNull(),
@@ -1353,6 +1353,54 @@ export const xMessages = pgTable(
     lastError: text("last_error"),
   },
   (t) => [index("x_messages_unsent_idx").on(t.createdAt).where(sql`${t.sentAt} is null`)],
+);
+
+/**
+ * The devnet cohort (spec 11.3, #63): the Creator records that joined it from the cohort page, signed in. The cohort's
+ * measures (the operator app's Cohort page) count only members' launches and the Fair Opens they scheduled.
+ */
+export const cohortMembers = pgTable("cohort_members", {
+  creatorId: uuid("creator_id")
+    .primaryKey()
+    .references(() => creators.id),
+  joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * The cohort tap (spec 10.2, 11.3, #63): 1 devnet SOL, once, to a member whose record linked X, sent from the tap key to
+ * the record's Creator wallet. Once a record, an X account and a wallet: a tap that failed or never landed frees all
+ * three for another try. A tap is written, its transaction signed, before it is sent, so a request that dies midway
+ * leaves a `sending` row the cron settles from its signature.
+ */
+export const cohortTaps = pgTable(
+  "cohort_taps",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    creatorId: uuid("creator_id")
+      .notNull()
+      .references(() => creators.id),
+    /** The record's X account when it tapped. */
+    xUserId: text("x_user_id").notNull(),
+    xHandle: text("x_handle").notNull(),
+    /** The record's Creator wallet when it tapped, which the SOL went to. */
+    wallet: text("wallet").notNull(),
+    lamports: bigint("lamports", { mode: "bigint" }).notNull(),
+    /** The transfer's signature, the tap key's, base58. */
+    signature: text("signature").notNull().unique(),
+    /** The block height after which the transfer can no longer land. */
+    lastValidBlockHeight: bigint("last_valid_block_height", { mode: "bigint" }).notNull(),
+    status: text("status", { enum: ["sending", "sent", "failed"] })
+      .notNull()
+      .default("sending"),
+    error: text("error"),
+    createdAt: createdAt(),
+    settledAt: timestamp("settled_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("cohort_taps_once_per_creator").on(t.creatorId).where(sql`${t.status} <> 'failed'`),
+    uniqueIndex("cohort_taps_once_per_x").on(t.xUserId).where(sql`${t.status} <> 'failed'`),
+    uniqueIndex("cohort_taps_once_per_wallet").on(t.wallet).where(sql`${t.status} <> 'failed'`),
+  ],
 );
 
 /** What an operator can do in the operator app, each written to the audit log as it is done. */
