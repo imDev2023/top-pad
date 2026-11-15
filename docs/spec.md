@@ -814,6 +814,8 @@ The screens:
    As built ([#53](https://github.com/imDev2023/top-pad/issues/53)): Bundle Radar's flags sit in a strip under the coin's head, above the sniper tax and the chart: red for wallets linked to the creator, yellow for same-slot buys, or "Nothing labelled"; each opens its evidence below the strip, every buy, deposit and transfer linked on the explorer.
    Coin rows come with the board ([#57](https://github.com/imDev2023/top-pad/issues/57)), which shows the same flags from the same route.
    As built ([#56](https://github.com/imDev2023/top-pad/issues/56)): a published finding shows as a red "Confirmed creator bundle" banner above the flags strip, with where the creator's appeal stands and the way to the evidence on their record.
+   As built ([#58](https://github.com/imDev2023/top-pad/issues/58)): the strip under the coin's head is the Fairness card's, a flag a row (Bundle Radar's two among them), each opening its row below the strip with its links, and a "Fairness card" button with the counts opening the whole card, red rows first; on a phone the flags wrap so none hides.
+   `GET /coins/<mint>/fairness` words every row once from its facts (also in the answer, raw, for anyone to check), read from Postgres and, for the Creator wallet's holdings, the chain, kept 30 s in KV; the page and the image show the same words.
 4. **Launch flow**: connect a wallet and sign in, "Link X" offered once as optional; Fair Open (preselected) or Instant launch; the coin with live Vamp Shield verdicts (clear, "looks like X", refused with an appeal link); schedule (time up to 7 days ahead, minimum raise, teaser, about 0.03 SOL refundable rent); sign; done.
    As built ([#47](https://github.com/imDev2023/top-pad/issues/47)): `/launch` walks a Fair Open through Link X, Launch mode, Coin, Schedule, Sign and Done; the schedule starts now or later (a local date and time, up to 7 days ahead), with the coin's open time beside it, the calendar entry previewed live, and refusals said as typed; signing is one button, "Sign your open in advance", with the 64 rungs behind a details link and the fallback beside them; Done says when the coin opens and, after the fallback, when to come back. The Fair Open's page shows the creator who signs at the open a panel that asks for that one signature once the window closes.
    As built ([#103](https://github.com/imDev2023/top-pad/issues/103), [ADR 0008](adr/0008-anyone-launches-with-a-wallet-x-is-optional.md)): the first step is Connect wallet, which connects one and signs in with it, then shows the Creator wallet, its launches and, once, an optional "Link X"; the coin's card names the linked X handle or else the Creator wallet; `/appeal` and the at-open panel ask for the same sign-in when the browser is not signed in as the Creator wallet.
@@ -848,6 +850,16 @@ The Fairness card's rows:
 - the guarantees cover only coins our launch key co-signed, and only those are listed.
 
 Also in the build: a P&L share card for a trader's own position (one of the core trading basics in the brief; owner, 2026-10-27), and the Fairness card as an image for X link cards (2:1, under 5 MB), the one channel to traders fully ours ([How can Top-pad's fairness data reach the trading terminals](https://github.com/imDev2023/top-pad/issues/20)).
+
+As built ([#58](https://github.com/imDev2023/top-pad/issues/58), 2026-11-15), the Fairness card's flags:
+- Green is proven on chain: a Fair Open's one price and sealed identity, an Instant launch with no buy at its creation, the Creator lock (or nothing to lock), no unlocked creator holdings, liquidity in the curve, the keeper's open, a Tax Share paid.
+- Checkered is liquidity locked forever after Graduation, counted green.
+- Yellow is a label: same-slot buys, creator holdings outside the lock, a buy at an Instant launch's creation.
+- Red is wallets linked to the Creator wallet, a published confirmed creator bundle, or a barred creator.
+- Neutral rows are told openly but prove nothing: "Nothing labelled" by Bundle Radar (no finding is not a proof), the creator's record, an Instant launch's tax to Heat, a Creator lock or Tax Share still to come.
+- A Creator lock past its cliff says it is releasing, and past its end that it ran its course.
+- The image (`GET /coins/<mint>/card.png?v=<version>`, 1200 x 600, about 110 KB) is drawn in the API Worker by satori and resvg from bundled WebAssembly, dark, with up to eight rows; each version, a hash of what the card says, is drawn once and kept in R2 (`fairness-cards/<cluster>/<mint>/<version>.png`) and served as immutable, so X fetches a new image whenever the card changes.
+- The coin page names it in `og:image` and `twitter:image` with `twitter:card` `summary_large_image`, and its description carries the counts and the first rows; the whole card's "Share on X" posts the coin page's link, which unfurls as the image.
 
 ## 10. Backend and stack
 
