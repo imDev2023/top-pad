@@ -988,13 +988,19 @@ Sources: [Stack](https://github.com/imDev2023/top-pad/issues/17), [Backend desig
   - The devnet demo (2026-11-09): the owner signed in through Access and, on devnet's real queue of 28 items, kept a refused launch (its appeal denied), kept a merged admission, and opened a bundling case's evidence pack, read from R2 and matching its Postgres copy; the audit log held all three, each row written at its decision's own transaction time. The export, run once on a 5-minute schedule, wrote the day before to R2 and recorded its run in `job_runs`.
   - On devnet the Worker connects with the API's database credentials and takes on `heat_operator` for each transaction; a login of its own, behind a Hyperdrive of its own, would make the role a boundary its credentials could not step out of, and is left for the mainnet effort.
 - **Cohort tap**: gives each cohort member 1 devnet SOL once.
+  As built ([#63](https://github.com/imDev2023/top-pad/issues/63), 2026-11-15): the web app's `/cohort` page, linked from the devnet strip, where a browser signed in with a wallet joins the cohort (`cohort_members`, `POST /cohort/join`), X linked or not.
+  A member whose record linked X gets 1 devnet SOL once (`POST /cohort/tap`), sent from the tap key to the record's Creator wallet, the tap paying the fee; a record without X gets nothing, since X is what makes the tap once a person rather than once a wallet, which costs nothing to make (ADR 0008 made X optional for launching, not for the tap).
+  A tap is once a record, once an X account and once a wallet (`cohort_taps`, unique over taps that did not fail): its transfer is signed and written before it is sent, so a repeat or a race finds the first, and a transfer refused, failed or expired unlanded frees the claim.
+  The tap key holds a float of its own, apart from the keeper's, and is a linkage hub, since it funds every member; its low-balance alert (`tap_low_balance`) is raised as a tap leaves it below its floor, 3 SOL by default (`TAP_FLOAT_MIN_LAMPORTS`, three members' worth), and by the cron's five-minute `cohort-tap` job, which also settles transfers still in flight from their signatures; a tap holding less than 1.01 SOL pays nobody.
+  Until Heat has its own X app, the devnet API links X through the stand-in, where anyone can make an account, so on devnet the float is the tap's real limit.
 
 ### 10.3 Keys
 
 - At scheduling every rung collects all its signatures; at the open the keeper only broadcasts, and no mint key is ever stored.
-- Three runtime hot keys, each in Cloudflare Secrets Store and bound only to the Worker that uses it:
+- Three runtime hot keys, and on devnet a fourth for the cohort tap, each in Cloudflare Secrets Store and bound only to the Worker that uses it:
   - the **keeper key**: fee payer for the lock, pushes, claims and graduation, the pot's delegate and the nonce authority, and the launch key that co-signs creation transactions and registers coins, holding a capped SOL float with a low-balance alert **(owner, 2026-10-27)**;
   - the **admission signer**, holding no funds.
+  - on devnet only, the **cohort tap**, holding the cohort's SOL as a float of its own with a low-balance alert (section 11.3), `AQkkeusaMSeJdtz3iatfsvUJjBuYU2riQSrqLKwpUQTv`, made on 2026-11-15 ([#63](https://github.com/imDev2023/top-pad/issues/63)), in `~/.config/top-pad/devnet/tap.json` and in the Secrets Store as `top-pad-devnet-tap-key`, bound to the devnet API alone, topped up from the bank;
   - the **quote manager**, holding no funds, which writes each quote's `QuoteSettings` for the band job ([ADR 0007](adr/0007-stock-priced-coins-on-meteora-quotes.md) decision 4); named by the upgrade authority, which can name another if it leaks; on devnet `639kdfnCQ762Rio8jdVXm66pqMx3uRHWeuiZpY5wwmWq`, made on 2026-11-04 ([#84](https://github.com/imDev2023/top-pad/issues/84)) and put in the Secrets Store as `top-pad-devnet-quote-manager-key` on 2026-11-06 ([#89](https://github.com/imDev2023/top-pad/issues/89)), bound to the devnet API alone.
 - On devnet the keeper key, the treasury and the upgrade authority were made on 2026-10-29 ([#41](https://github.com/imDev2023/top-pad/issues/41)) and live in `~/.config/top-pad/devnet` on the owner's Mac, to be backed up in the owner's password manager (an owner task, still open on 2026-10-29); the keeper's float is 0.5 SOL, with the low-balance alert at 0.25 SOL.
   The owner put the keeper key in the account's Secrets Store the same day, as `top-pad-devnet-keeper-key`, bound to the devnet API alone.
@@ -1072,6 +1078,11 @@ All on devnet, against Meteora's deployed programs, with no Meteora binaries any
 - About 30 creators and 100 traders for 2 weeks, recruited from the owner's X following and memecoin Telegram groups; members sign in with a wallet, link X if they choose ([ADR 0008](adr/0008-anyone-launches-with-a-wallet-x-is-optional.md)), and get 1 devnet SOL once from our tap.
 - It measures the share of creators who keep Fair Open (preselected) rather than switch to Instant launch; how many sealed Fair Opens reach their minimum raise, and depositors per Fair Open; creators who launch a second coin and depositors who join a second Fair Open, as weak evidence.
 - **Fair Open stays the default unless fewer than a third of cohort creators keep it, or fewer than half of sealed Fair Opens reach their minimum raise.**
+- As built ([#63](https://github.com/imDev2023/top-pad/issues/63), 2026-11-15): the operator app's Cohort page works the measures and the rule out over the cohort's members only (records that joined from `/cohort`, the tap in section 10.2).
+  A cohort creator is a member with a landed launch, who kept Fair Open when their first landed launch is one: their first choice, before anything else on Heat could sway it.
+  Every Fair Open is sealed; one reached its minimum raise when it opened and missed it when it failed for a pot below the minimum raise or the lowest rung, while one that failed late or that a Bar cancelled says nothing of demand and is left out.
+  A Fair Open's depositors are the people, by the admission server's cluster, whose seat held a deposit as the window closed, the creator's own seat aside; a depositor joined a second Fair Open when they held a seat in two members' Fair Opens.
+  The rule is worked out in whole numbers, so exactly a third, or exactly half, keeps Fair Open, and a clause with nothing yet to count cannot apply.
 
 ### 11.4 Devnet SOL
 

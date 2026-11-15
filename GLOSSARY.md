@@ -157,3 +157,13 @@ _Avoid_: partner fee (Meteora's name for the role), protocol fee (that is Meteor
 **Creator Earnings**:
 What a coin's creator earns from trades of their coin, on the curve and after Graduation.
 _Avoid_: creator fee (Meteora's on-chain term), creator rewards, royalties
+
+### The devnet cohort
+
+**Cohort**:
+The people recruited to launch and trade on devnet for two weeks before mainnet, counted as members once they join from the cohort page; what they do decides whether Fair Open stays the default launch mode.
+_Avoid_: beta testers, early access, waitlist
+
+**Cohort tap**:
+What gives each cohort member who linked X 1 devnet SOL, once, from a float of its own.
+_Avoid_: faucet (that is Solana's own, for anyone), airdrop (that is a token distribution)
