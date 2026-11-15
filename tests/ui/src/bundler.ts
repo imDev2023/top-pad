@@ -15,11 +15,15 @@ import { TARGET } from "./target";
 export const SOL = 1_000_000_000n;
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export const INSTANT = devnet.configs!.instant;
-/** Each creation-slot buy, and how many copies of each bundle transaction go out as the launch is sent. */
+/**
+ * Each creation-slot buy, and how many copies of each bundle transaction go out as the launch is sent, 100 ms apart: 28
+ * rounds cover 2.8 s after the submit. With 16 (1.6 s), five tries of five on 2026-11-15 (#62) had the creation land at
+ * the end of the spray, every copy in its slot ordered before it and failing on the missing pool.
+ */
 export const BUY = 300_000n;
-export const COPIES = 16;
-/** What each wallet the creator funds gets, and what it buys past the sniper tax. */
-export const FUNDED = (35n * SOL) / 1_000n;
+export const COPIES = 28;
+/** What each wallet the creator funds gets (its copies' wrapped SOL, its buy past the tax, fees and rent), and that buy. */
+export const FUNDED = (40n * SOL) / 1_000n;
 export const PAST_TAX = (2n * SOL) / 100n;
 
 export const api = async <T>(path: string, schema: { parse(v: unknown): T }) => schema.parse(await (await fetch(`${TARGET.api}${path}`)).json());
@@ -30,8 +34,9 @@ export type Attempt = { mint: Address; copies: BundleCopy[]; sniperCopies: Bundl
 /**
  * Launches a coin from the site with the bundle's buys signed the moment the launch is prepared and sent from the moment
  * it is submitted: copies of the two bundle transactions (the Creator wallet with two funded wallets, then the other two)
- * together each round, 100 ms apart for 1.6 s, the sniper's from the ninth round. On devnet the launch service's creation
- * landed 0.4 to 1.4 s after the submit (2026-11-02), and the copies sent before it fail for their fee alone.
+ * together each round, 100 ms apart for 2.8 s, the sniper's from the ninth round. On devnet the launch service's creation
+ * landed 0.4 to 1.4 s after the submit on 2026-11-02 and up to about 1.6 s on 2026-11-15; the copies sent before it fail
+ * for their fee alone, and those that land after its slot buy again, which the loss measure shares out by coins.
  */
 export async function launchWithBundle(page: Page, creator: KeyPairSigner, funded: KeyPairSigner[], sniper: KeyPairSigner, o: { linked: boolean; linkX?: boolean }): Promise<Attempt & { handle: string | null }> {
   let signing: Promise<[BundleCopy[], BundleCopy[]]> | null = null;
