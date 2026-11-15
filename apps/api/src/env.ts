@@ -64,6 +64,13 @@ export type Bindings = {
   ALERT_WEBHOOK_URL?: string;
   /** Below this the keeper's SOL float raises an alert (spec 10.3). */
   KEEPER_FLOAT_MIN_LAMPORTS?: string;
+  /**
+   * The cohort tap's key (spec 10.2, 11.3), as a 64-byte keypair array: a Secrets Store binding when deployed, or a plain
+   * var locally. Without it, or where the cluster names no tap, the tap pays nobody.
+   */
+  TAP_KEY?: SecretBinding | string;
+  /** Below this the cohort tap's float raises an alert, several members' worth so it is topped up before it runs dry. */
+  TAP_FLOAT_MIN_LAMPORTS?: string;
   /** The priority fee launches pay, in micro-lamports per compute unit. */
   COMPUTE_UNIT_PRICE?: string;
   /** The largest coin image taken, in bytes: under Turbo's free 100 KiB per data item on devnet. */
@@ -114,6 +121,7 @@ export type Config = {
   arweaveGateway: string;
   alertWebhookUrl: string | null;
   keeperFloatMinLamports: bigint;
+  tapFloatMinLamports: bigint;
   computeUnitPrice: bigint;
   maxImageBytes: number;
 };
@@ -165,6 +173,8 @@ export function config(env: Bindings): Config {
     arweaveGateway: (env.ARWEAVE_GATEWAY || "https://turbo-gateway.com").replace(/\/$/, ""),
     alertWebhookUrl: env.ALERT_WEBHOOK_URL ? new URL(env.ALERT_WEBHOOK_URL).toString() : null,
     keeperFloatMinLamports: amount(env.KEEPER_FLOAT_MIN_LAMPORTS, 250_000_000n, "KEEPER_FLOAT_MIN_LAMPORTS"),
+    // Three members' worth: the alert reaches the operator while the tap can still pay three more.
+    tapFloatMinLamports: amount(env.TAP_FLOAT_MIN_LAMPORTS, 3_000_000_000n, "TAP_FLOAT_MIN_LAMPORTS"),
     computeUnitPrice: amount(env.COMPUTE_UNIT_PRICE, 0n, "COMPUTE_UNIT_PRICE"),
     maxImageBytes,
   };

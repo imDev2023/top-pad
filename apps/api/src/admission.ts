@@ -85,7 +85,8 @@ export type Linkage = { source: FundingSource; hubs: ReadonlySet<string> };
 /** The hubs: Heat's own keys, the cluster's shared funding sources, and the operator's `linkage_hubs`. */
 export async function linkageOf(db: Db, heat: HeatCluster, source: FundingSource): Promise<Linkage> {
   const named = await db.select({ address: linkageHubs.address }).from(linkageHubs);
-  const keys = heat.keys ? [heat.keys.treasury, heat.keys.keeper, heat.keys.admission, heat.keys.quoteManager] : [];
+  // The cohort tap funds every member who linked X, so it ties nobody, as the bank does.
+  const keys = heat.keys ? [heat.keys.treasury, heat.keys.keeper, heat.keys.admission, heat.keys.quoteManager, ...(heat.keys.tap ? [heat.keys.tap] : [])] : [];
   return { source, hubs: new Set<string>([...keys, ...heat.linkageHubs, ...named.map((h) => h.address)]) };
 }
 

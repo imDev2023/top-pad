@@ -12,6 +12,7 @@ import { pruneCandles, refreshKnownBots, summarizeMissingRadars } from "@top-pad
 import { notifyPending, runJob } from "@top-pad/jobs";
 import { finishXLink, logout, me, startXLink, walletSignIn, walletSignInMessage } from "./auth";
 import { verifyMessageRoute, verifyRoute } from "./verify";
+import { getCohort, joinCohort, settleTaps, tapCohort } from "./cohort";
 import { getBoard, getCoinRecords, getCoinRecordSnapshot, keeperKeyOf, search, snapshotCoinRecords } from "./board";
 import { getCoinRadar, reviewBundles } from "./bundleRadar";
 import { getCoin, getCoinCandles, getCoinTrades } from "./coins";
@@ -129,7 +130,7 @@ app.post("*", async (c, next) => {
   const refusal: LaunchRefusal = { error: `The image is too large: a coin's image can be at most ${Math.round(maxImageBytes / 1024)} KB.`, code: "image" };
   return bodyLimit({ maxSize: maxImageBytes + 16 * 1024, onError: (c) => c.json(refusal, 413) })(c, next);
 });
-for (const path of ["/auth/*", "/me", "/verify", "/verify/*", "/launches", "/launches/*", "/vamp-shield/*", "/coins/*", "/earnings/*", "/fair-opens/*", "/creators/*", "/bars/*", "/enforcement", "/board", "/search", "/coin-records", "/coin-records/*"]) app.use(path, withDb);
+for (const path of ["/auth/*", "/me", "/verify", "/verify/*", "/cohort", "/cohort/*", "/launches", "/launches/*", "/vamp-shield/*", "/coins/*", "/earnings/*", "/fair-opens/*", "/creators/*", "/bars/*", "/enforcement", "/board", "/search", "/coin-records", "/coin-records/*"]) app.use(path, withDb);
 app.get("/auth/x/start", startXLink);
 app.get("/auth/x/callback", finishXLink);
 app.post("/auth/wallet/message", walletSignInMessage);
@@ -138,6 +139,9 @@ app.post("/auth/logout", logout);
 app.get("/me", me);
 app.post("/verify/message", verifyMessageRoute);
 app.post("/verify", verifyRoute);
+app.get("/cohort", getCohort);
+app.post("/cohort/join", joinCohort);
+app.post("/cohort/tap", tapCohort);
 app.post("/vamp-shield/check", checkRoute);
 app.post("/vamp-shield/image", checkImageRoute);
 app.get("/vamp-shield/image/:sha256", imageVerdictRoute);
@@ -254,7 +258,8 @@ async function everyMinute(controller: ScheduledController, env: Bindings, ctx: 
 }
 
 /**
- * The Cron Triggers. Every five minutes: the indexer kept running, the keeper's float, any window claim, Fair Open or
+ * The Cron Triggers. Every five minutes: the indexer kept running, the keeper's float, the cohort tap's transfers and
+ * float, any window claim, Fair Open or
  * Graduation the keeper's Workflows missed, Bundle Radar's case job, the known-bot list, the day's signed snapshot of
  * the CoinRecord list, the quotes' band, Heat's LP fees once an hour, Creator
  * wallet rotations due, housekeeping, then every
@@ -272,6 +277,8 @@ async function scheduled(_controller: ScheduledController, env: Bindings, ctx: E
     if (keeper) {
       await runJob(db, "keeper-balance", () => checkKeeperFloat(db, createSolanaRpc(cfg.rpcUrl), keeper, cfg.keeperFloatMinLamports), { exclusive: true }).catch(() => undefined);
     }
+    // The cohort tap's transfers still in flight settled, and its float checked against its floor (spec 10.2, 11.3).
+    await runJob(db, "cohort-tap", () => settleTaps(db, cfg, env), { exclusive: true }).catch(() => undefined);
     await runJob(db, "window-claims", () => sweepWindowClaims(db, env), { exclusive: true }).catch(() => undefined);
     await runJob(db, "fair-opens", () => sweepFairOpens(db, env), { exclusive: true }).catch(() => undefined);
     await runJob(db, "graduations", () => sweepGraduations(db, env), { exclusive: true }).catch(() => undefined);

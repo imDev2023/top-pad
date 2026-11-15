@@ -117,7 +117,9 @@
         { "binding": "JUPITER_API_KEY", "store_id": "bbb2e2aa36724838a433d7495bbe9baf", "secret_name": "top-pad-devnet-jupiter-key" },
         // The quote manager key, which writes each quote's QuoteSettings and holds no funds, for the band job (#89); made
         // from ~/.config/top-pad/devnet/quote-manager.json on 2026-11-06.
-        { "binding": "QUOTE_MANAGER_KEY", "store_id": "bbb2e2aa36724838a433d7495bbe9baf", "secret_name": "top-pad-devnet-quote-manager-key" }
+        { "binding": "QUOTE_MANAGER_KEY", "store_id": "bbb2e2aa36724838a433d7495bbe9baf", "secret_name": "top-pad-devnet-quote-manager-key" },
+        // The cohort tap's key, which pays each cohort member who linked X 1 devnet SOL once from its own float (#63).
+        { "binding": "TAP_KEY", "store_id": "bbb2e2aa36724838a433d7495bbe9baf", "secret_name": "top-pad-devnet-tap-key" }
       ]
     }
   }
