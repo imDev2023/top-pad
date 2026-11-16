@@ -1,7 +1,7 @@
 // A trader's position in a Heat coin and its P&L share card (spec 9): what the wallet's indexed trades and Fair Open
 // fills add up to, priced at the coin's last trade, stated as of one snapshot so the card it shares never changes. The
 // card's image is drawn by `pnlImage.ts` and kept in R2 per snapshot.
-import { and, asc, desc, eq, inArray, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lt, lte, sql } from "drizzle-orm";
 import type { Context } from "hono";
 import { COIN_DECIMALS, priceOfSqrtPrice } from "@top-pad/chain";
 import { Address, OrderKey, type Position } from "@top-pad/contract";
@@ -136,12 +136,38 @@ function asked(c: Context<AppEnv>): { mint: string; wallet: string; at: bigint |
 }
 
 /**
- * `GET /coins/:mint/positions/:wallet?at=`: the position as of a snapshot, or the newest; `null` for a wallet with none,
- * an answer rather than an error, so a coin page asking for a connected wallet's position logs nothing in the console.
+ * How long a position read naming a slot waits for the indexer to have the coin's trade in it, looking every
+ * `INDEXED_POLL_MS`: the trade's fast path hands it to the indexer as it reports it, so this is seconds at most.
+ */
+const INDEXED_WAIT_MS = 8_000;
+const INDEXED_POLL_MS = 250;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Whether the indexer has a trade of the coin in `slot`. */
+async function indexedIn(db: Db, mint: string, slot: bigint): Promise<boolean> {
+  const [found] = await db
+    .select({ key: trades.orderKey })
+    .from(trades)
+    .where(and(eq(trades.mint, mint), gte(trades.orderKey, (slot * SLOT_KEY).toString()), lt(trades.orderKey, ((slot + 1n) * SLOT_KEY).toString())))
+    .limit(1);
+  return found !== undefined;
+}
+
+/**
+ * `GET /coins/:mint/positions/:wallet?at=&after=`: the position as of a snapshot, or the newest; `null` for a wallet with
+ * none, an answer rather than an error, so a coin page asking for a connected wallet's position logs nothing in the
+ * console. With `after`, a slot, the newest once the indexer has the coin's trade in it (for up to 8 s): the coin page
+ * asks so for its own trade, which its fast path showed before the indexer had it, so the position counts it (#110).
  */
 export async function getPosition(c: Context<AppEnv>) {
   const q = asked(c);
   if (!q) return noCoin(c);
+  const after = c.req.query("after");
+  if (after !== undefined) {
+    if (!/^\d{1,15}$/.test(after)) return c.json({ error: "Name the slot to read after as a whole number." }, 400);
+    const until = Date.now() + INDEXED_WAIT_MS;
+    while (!(await indexedIn(c.var.db, q.mint, BigInt(after))) && Date.now() < until) await sleep(INDEXED_POLL_MS);
+  }
   const position = await positionOf(c.var.cfg, c.var.db, q.mint, q.wallet, q.at);
   if (position === "no coin") return noCoin(c);
   if (!position) {

@@ -250,14 +250,16 @@ export const prepareSwap = (mint: string, request: SwapRequest & { wallet: strin
 /** A sent trade, read back from the chain the moment it confirms, so the page shows it at once (spec 10.2). */
 export const reportTrade = (mint: string, signature: string) => call(SwapOutcome, `/coins/${encodeURIComponent(mint)}/trades`, postJson({ signature }));
 
-/** What a wallet holds to trade a coin with. */
-/** What a wallet holds to trade with; with `after`, as the chain stood at that slot or later: a trade's own slot (#110). */
+/** What a wallet holds to trade a coin with; with `after`, as the chain stood at that slot or later: a trade's own (#110). */
 export const getHoldings = (mint: string, wallet: string, after?: number | null) =>
   call(Holdings, `/coins/${encodeURIComponent(mint)}/holdings/${encodeURIComponent(wallet)}${after != null ? `?after=${after}` : ""}`);
 
-/** A wallet's position in a coin and its P&L (spec 9), the newest snapshot, from the browser; null when it holds none Heat indexed. */
-export const getPosition = (mint: string, wallet: string): Promise<Position | null> =>
-  call(Position.nullable(), `/coins/${encodeURIComponent(mint)}/positions/${encodeURIComponent(wallet)}`);
+/**
+ * A wallet's position in a coin and its P&L (spec 9), the newest snapshot, from the browser; null when it holds none Heat
+ * indexed. With `after`, once the indexer has the coin's trade in that slot: the page's own trade (#110).
+ */
+export const getPosition = (mint: string, wallet: string, after?: number | null): Promise<Position | null> =>
+  call(Position.nullable(), `/coins/${encodeURIComponent(mint)}/positions/${encodeURIComponent(wallet)}${after != null ? `?after=${after}` : ""}`);
 
 /** A position as the server renders its share page, at a snapshot or the newest: "missing" or "unavailable" otherwise. */
 export async function loadPosition(mint: string, wallet: string, at: string | null): Promise<Position | "missing" | "unavailable"> {

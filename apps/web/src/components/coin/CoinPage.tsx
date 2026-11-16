@@ -100,6 +100,9 @@ export function CoinPage({ initial, fairness }: { initial: Coin; fairness: Fairn
     });
   }, [trades, pending, supply]);
 
+  // The slot of this page's newest trade the indexer has not reported yet: the position waits for it (#110).
+  const ownTradeSlot = useMemo(() => trades?.find((t) => pending.has(key(t)))?.slot ?? null, [trades, pending]);
+
   /** A trade this page sent, read back the moment it confirmed. */
   const onTraded = useCallback(
     (sent: Trade[]) => {
@@ -308,7 +311,7 @@ export function CoinPage({ initial, fairness }: { initial: Coin; fairness: Fairn
           {coin.heat && (
             <div className={styles.trade}>
               <QuickTrade coin={coin} onTraded={onTraded} />
-              <PositionPanel mint={mint} lastTradeKey={coin.market.lastTradeKey} />
+              <PositionPanel mint={mint} lastTradeKey={coin.market.lastTradeKey} ownTradeSlot={ownTradeSlot} />
             </div>
           )}
           <aside className={`panel ${styles.facts}`} aria-label="About this coin">

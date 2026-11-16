@@ -68,6 +68,24 @@
   overflow-wrap: anywhere;
 }
 
+/* While the page's own trade is being counted, the figures from before it recede rather than read as current. */
+.pnl,
+.figures {
+  transition: opacity 150ms ease;
+}
+
+.updating .pnl,
+.updating .figures {
+  opacity: 0.45;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pnl,
+  .figures {
+    transition: none;
+  }
+}
+
 .share {
   display: grid;
   gap: 10px;

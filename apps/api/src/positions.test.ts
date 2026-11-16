@@ -204,6 +204,21 @@ describe("GET /coins/:mint/positions/:wallet", () => {
     expect(ahead.at).toBe(now.at);
   });
 
+  it("with `after`, answers once the indexer has the coin's trade in that slot, so the page's own trade is counted (#110)", async () => {
+    const c = await coin("PNLW");
+    const trader = await addr();
+    await trade(c, trader, "buy", { coins: 2_000_000n * COIN, quote: SOL, price: "0.0000005" });
+    // The page asks for its sell's slot before the indexer has written the sell.
+    const sold = slot + 1;
+    const asked = position(`/coins/${c.mint}/positions/${trader}?after=${sold}`);
+    await new Promise((r) => setTimeout(r, 600));
+    await trade(c, trader, "sell", { coins: 2_000_000n * COIN, quote: 900_000_000n, price: "0.00000045" });
+    const { position: p } = await asked;
+    expect(p).toMatchObject({ swaps: 2, held: "0", at: keyOf(sold).toString() });
+    const bad = await request(`/coins/${c.mint}/positions/${trader}?after=soon`);
+    expect(bad.status).toBe(400);
+  });
+
   it("counts a depositor's Fair Open fill at the open's one price and the Tax Share their seat was paid", async () => {
     const c = await coin("PNLC", "fair_open");
     const depositor = await addr();

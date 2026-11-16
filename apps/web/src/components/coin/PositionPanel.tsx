@@ -21,22 +21,28 @@ export const sharePath = (p: Pick<Position, "mint" | "wallet" | "at">) => `/pnl/
  * priced at the coin's latest trade, read again as the coin trades; and the P&L card to share, frozen at the moment the
  * trader opens it, so the image, the link and the post all say the same.
  */
-export function PositionPanel({ mint, lastTradeKey }: { mint: string; lastTradeKey: string | null }) {
+export function PositionPanel({ mint, lastTradeKey, ownTradeSlot }: { mint: string; lastTradeKey: string | null; ownTradeSlot: number | null }) {
   const { account } = useWallet();
   const wallet = account?.address ?? null;
   const [position, setPosition] = useState<Position | null>(null);
+  const [updating, setUpdating] = useState(false);
   const [shared, setShared] = useState<Position | null>(null);
   const shareId = useId();
 
-  // Read now, and again as the coin trades, at most every few seconds and always once after the newest trade.
+  // Read now, and again as the coin trades, at most every few seconds and always once after the newest trade. A
+  // snapshot never replaces a newer one, so a read answering late cannot put back what stood before a trade.
   const last = useRef(0);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const load = useCallback(async () => {
-    if (!wallet) return;
-    last.current = Date.now();
-    const p = await getPosition(mint, wallet).catch(() => undefined);
-    if (p !== undefined) setPosition(p && p.wallet === wallet ? p : null);
-  }, [mint, wallet]);
+  const load = useCallback(
+    async (after?: number) => {
+      if (!wallet) return;
+      last.current = Date.now();
+      const p = await getPosition(mint, wallet, after).catch(() => undefined);
+      if (p === undefined) return;
+      setPosition((shown) => (p && p.wallet === wallet ? (shown && shown.wallet === wallet && BigInt(shown.at) > BigInt(p.at) ? shown : p) : null));
+    },
+    [mint, wallet],
+  );
   useEffect(() => {
     setPosition(null);
     setShared(null);
@@ -49,16 +55,30 @@ export function PositionPanel({ mint, lastTradeKey }: { mint: string; lastTradeK
     };
   }, [load, lastTradeKey]);
 
+  // A trade this page sent, shown before the indexer has it: the position is read at once, as soon as the indexer has
+  // it, and says it is updating meanwhile rather than showing what stood before the trade as current (#110).
+  const ownRead = useRef(0);
+  useEffect(() => {
+    if (ownTradeSlot === null || !wallet) return;
+    const read = ++ownRead.current;
+    setUpdating(true);
+    void load(ownTradeSlot).finally(() => {
+      if (read === ownRead.current) setUpdating(false);
+    });
+  }, [ownTradeSlot, load, wallet]);
+
   if (!wallet || !position || position.wallet !== wallet) return null;
   const p = position;
   const taxShare = BigInt(p.taxShare) > 0n;
   return (
-    <section className={`panel ${styles.panel}`} aria-labelledby={`${shareId}-title`} data-testid="position">
+    <section className={`panel ${styles.panel} ${updating ? styles.updating : ""}`} aria-labelledby={`${shareId}-title`} aria-busy={updating} data-testid="position">
       <div className={styles.head}>
         <h2 id={`${shareId}-title`} className="eyebrow">
           Your position
         </h2>
-        <span className="note">{[p.fills ? "Fair Open fill" : null, p.swaps ? `${p.swaps} ${p.swaps === 1 ? "swap" : "swaps"}` : null].filter(Boolean).join(" + ")}</span>
+        <span className="note" data-testid="position-count">
+          {updating ? "Counting your trade" : [p.fills ? "Fair Open fill" : null, p.swaps ? `${p.swaps} ${p.swaps === 1 ? "swap" : "swaps"}` : null].filter(Boolean).join(" + ")}
+        </span>
       </div>
       <p className={styles.pnl}>
         <span className={`num ${styles.pnlFigure} ${toneOf(p.pnl)}`} data-testid="position-pnl">

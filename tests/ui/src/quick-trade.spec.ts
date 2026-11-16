@@ -5,9 +5,9 @@
 // the indexer's logs socket often does; deployed, Helius serves a transaction seconds late and the fast path wins),
 // and stay one row once the indexer has; and every swap must pay Heat's referral account its share. "All" right after a
 // buy must sell what the buy brought too (#110): the trader's network holds every holdings answer 2 s, as a slow
-// connection would, so a panel offering its holdings from before the trade is caught every run. The panel is
-// photographed in every view at each step. Real devnet SOL: about 0.08 a run, most of it the tax the trader pays. No page
-// may report an error.
+// connection would, so a panel offering its holdings from before the trade is caught every run; and the position card
+// must count the sell, never showing the figures from before it as current. The panel is photographed in every view at
+// each step. Real devnet SOL: about 0.08 a run, most of it the tax the trader pays. No page may report an error.
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { address } from "@solana/kit";
 import { FEE_DENOMINATOR, SNIPER_TAX, CLUSTERS, referralAccountOf, TOKEN_PROGRAM_ADDRESS } from "@top-pad/chain";
@@ -121,6 +121,11 @@ test("a trader buys and sells from the coin's page, seeing the fee before signin
     await expect(traderPage.getByLabel("Sniper tax")).toContainText("Fee now");
     await record("buy", await trade(traderPage, "buy", { preset: "0.05 SOL" }, "quick-3-buy-after-tax"));
     await record("sell", await trade(traderPage, "sell", { preset: "All" }));
+    // The position counts the sell as soon as the indexer has it: nothing held, four swaps (#110).
+    const position = traderPage.getByTestId("position");
+    await expect(position.getByTestId("position-count")).toHaveText("4 swaps");
+    await expect(position.getByTestId("position-held")).toHaveText(/^0 /);
+    await expect(position).toHaveAttribute("aria-busy", "false");
     await snap(traderPage, "quick-4-sold-all");
 
     console.table(runs.map((r) => ({ ...r, shown: `${r.shown}%`, charged: `${r.charged}%` })));
