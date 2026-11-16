@@ -11,6 +11,8 @@ import {
   createSolanaRpc,
   getBase64EncodedWireTransaction,
   getBase64Encoder,
+  isSolanaError,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
   type Address as KitAddress,
 } from "@solana/kit";
 import { eq } from "drizzle-orm";
@@ -39,6 +41,12 @@ const CLOCK_SYSVAR = address("SysvarC1ock11111111111111111111111111111111");
 const SETTLE_WAIT_MS = 30_000;
 /** How often it asks: the fast path is only worth having if it answers the moment the trade confirms (spec 10.2). */
 const SETTLE_POLL_MS = 300;
+/**
+ * How long a holdings read naming a slot waits for the RPC node to reach it, asking again every `CATCH_UP_POLL_MS`: a
+ * node a trade's slot behind answers -32016 rather than what stood before the trade (#110), and catches up in seconds.
+ */
+const CATCH_UP_WAIT_MS = 8_000;
+const CATCH_UP_POLL_MS = 250;
 /** An SPL token account's size, whose rent a swap pays when it opens one. */
 const TOKEN_ACCOUNT_BYTES = 165n;
 /** That rent, asked of the cluster once per isolate: rent has changed before (2,039,280 lamports until late 2026). */
@@ -134,7 +142,7 @@ async function readMarket(rpc: Rpc, heat: HeatCluster, row: PoolRow, quote: Heat
 /** A refusal with the sentence to show, and its status. */
 class Refusal extends Error {
   constructor(
-    readonly status: 400 | 404 | 409,
+    readonly status: 400 | 404 | 409 | 503,
     message: string,
   ) {
     super(message);
@@ -313,21 +321,47 @@ export const prepareSwap = (c: Context<AppEnv>) =>
     return prepared;
   });
 
-/** `GET /coins/:mint/holdings/:wallet`. */
+/**
+ * A read naming a `minContextSlot`, asked again while the RPC node answers that it has not reached the slot yet, for up
+ * to `CATCH_UP_WAIT_MS`; past that, a refusal the page can show rather than holdings from before the slot.
+ */
+async function caughtUp<T>(read: () => Promise<T>): Promise<T> {
+  const until = Date.now() + CATCH_UP_WAIT_MS;
+  for (;;) {
+    try {
+      return await read();
+    } catch (e) {
+      if (!isSolanaError(e, SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED)) throw e;
+      if (Date.now() >= until) throw new Refusal(503, "The chain has not caught up with your trade yet. Try again in a moment.");
+      await sleep(CATCH_UP_POLL_MS);
+    }
+  }
+}
+
+/**
+ * `GET /coins/:mint/holdings/:wallet[?after=<slot>]`. With `after`, read at that slot or later (`minContextSlot`), so the
+ * holdings a page reads right after its own trade include the trade, whichever RPC node answers (#110).
+ */
 export const getHoldings = (c: Context<AppEnv>) =>
   respond(c, async () => {
     const { cfg, db } = c.var;
     const mint = c.req.param("mint")!;
     const wallet = c.req.param("wallet")!;
     if (!Address.safeParse(wallet).success) throw new Refusal(400, "That is not a Solana wallet address.");
+    const asked = c.req.query("after");
+    const after = asked === undefined ? null : /^\d{1,15}$/.test(asked) ? BigInt(asked) : undefined;
+    if (after === undefined) throw new Refusal(400, "Name the slot to read after as a whole number.");
     const [pool] = cfg.heat && Address.safeParse(mint).success ? await db.select({ quoteMint: pools.quoteMint }).from(pools).where(eq(pools.mint, mint)) : [];
     const quote = pool && listedQuoteOf(cfg.heat!, pool.quoteMint);
     if (!pool || !quote) throw new Refusal(404, "Heat has no coin at this address.");
     const coinAccount = await coinAccountOf(address(wallet), address(mint));
     const quoteAccount = await tokenAccountOf(address(wallet), quote.mint, quote.tokenProgram);
-    const { value } = await createSolanaRpc(cfg.rpcUrl)
-      .getMultipleAccounts([address(wallet), coinAccount, quoteAccount], { encoding: "base64", commitment: "confirmed" })
-      .send(limited());
+    const rpc = createSolanaRpc(cfg.rpcUrl);
+    const { value } = await caughtUp(() =>
+      rpc
+        .getMultipleAccounts([address(wallet), coinAccount, quoteAccount], { encoding: "base64", commitment: "confirmed", ...(after !== null && { minContextSlot: after }) })
+        .send(limited()),
+    );
     const amountAt = (i: number) => (value[i] ? tokenAmount(base64.encode(value[i].data[0]) as Uint8Array) : 0n);
     const lamports = value[0]?.lamports ?? 0n;
     const holdings: Holdings = { wallet, sol: `${lamports}`, quote: `${pool.quoteMint === WSOL_MINT ? lamports : amountAt(2)}`, coins: `${amountAt(1)}` };
@@ -364,7 +398,7 @@ export const reportTrade = (c: Context<AppEnv>) =>
     const rpc = createSolanaRpc(cfg.rpcUrl);
     const until = Date.now() + SETTLE_WAIT_MS;
     const settled = (await settleSignatures(rpc, [signature], SETTLE_WAIT_MS, SETTLE_POLL_MS)).get(signature)!;
-    const outcome: SwapOutcome = { signature, status: settled.status, error: settled.error, explorer: explorerUrl(cfg, "tx", signature), trades: [] };
+    const outcome: SwapOutcome = { signature, status: settled.status, error: settled.error, slot: settled.slot, explorer: explorerUrl(cfg, "tx", signature), trades: [] };
     if (settled.status === "failed") {
       const code = customError(JSON.parse(settled.error ?? "null"));
       const known = graduation ? DAMM_ERRORS : DBC_ERRORS;

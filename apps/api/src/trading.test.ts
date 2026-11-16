@@ -376,6 +376,27 @@ describe("a quick trade", () => {
     const fresh = random();
     expect(Holdings.parse(await (await request(`/coins/${MINT}/holdings/${fresh}`)).json())).toEqual({ wallet: fresh, sol: "0", quote: "0", coins: "0" });
   });
+
+  it("reads holdings at a trade's slot or later, asking a node still behind it again until it catches up (#110)", async () => {
+    const wallet = random();
+    fakes.accounts.set(wallet, { owner: "11111111111111111111111111111111", data: new Uint8Array(), lamports: 123n });
+    fakes.accounts.set(await coinAccountOf(wallet, MINT), tokenAccount(wallet, MINT, 456n));
+    fakes.nodeSlot = 4_000;
+    fakes.lagging = 2;
+    fakes.minContextSlots = [];
+    const res = await request(`/coins/${MINT}/holdings/${wallet}?after=4242`);
+    expect(res.status).toBe(200);
+    expect(Holdings.parse(await res.json())).toEqual({ wallet, sol: "123", quote: "123", coins: "456" });
+    // Refused twice as not reached yet, then read at the trade's slot.
+    expect(fakes.minContextSlots).toEqual([4_242, 4_242, 4_242]);
+    // Without `after`, any slot the node has reached will do.
+    await request(`/coins/${MINT}/holdings/${wallet}`);
+    expect(fakes.minContextSlots.at(-1)).toBeNull();
+    // A slot must be a whole number.
+    const bad = await request(`/coins/${MINT}/holdings/${wallet}?after=-1`);
+    expect(bad.status).toBe(400);
+    expect(await errorOf(bad)).toBe("Name the slot to read after as a whole number.");
+  });
 });
 
 describe("a sent trade's report, the browser's fast path", () => {
@@ -386,7 +407,8 @@ describe("a sent trade's report, the browser's fast path", () => {
     const res = await post(`/coins/${MINT}/trades`, { signature });
     expect(res.status).toBe(200);
     const outcome = SwapOutcome.parse(await res.json());
-    expect(outcome).toMatchObject({ signature, status: "landed", error: null });
+    // The slot it confirmed in, which the page names when it reads what the trade left (#110).
+    expect(outcome).toMatchObject({ signature, status: "landed", error: null, slot: 4_242 });
     expect(outcome.trades).toHaveLength(1);
     expect(outcome.trades[0]).toMatchObject({
       signature,

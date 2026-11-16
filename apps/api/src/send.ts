@@ -84,7 +84,8 @@ export async function sendAndConfirm(rpc: Rpc, wire: Base64EncodedWireTransactio
   return confirmed(rpc, signature, o.timeoutMs);
 }
 
-export type Settled = { status: "landed" | "failed" | "pending"; error: string | null };
+/** Where a sent transaction stands, and the slot it confirmed in once it has (landed or failed); null while pending. */
+export type Settled = { status: "landed" | "failed" | "pending"; error: string | null; slot: number | null };
 
 /**
  * Where sent transactions stand, asked every `pollMs` until each has confirmed or failed or `waitMs` has passed: a
@@ -96,12 +97,12 @@ export async function settleSignatures(rpc: Rpc, signatures: string[], waitMs: n
   for (;;) {
     const { value } = await rpc.getSignatureStatuses(signatures as Signature[], { searchTransactionHistory: true }).send(limited());
     value.forEach((status, i) => {
-      if (status?.err) outcome.set(signatures[i]!, { status: "failed", error: json(status.err) });
-      else if (status?.confirmationStatus === "confirmed" || status?.confirmationStatus === "finalized") outcome.set(signatures[i]!, { status: "landed", error: null });
+      if (status?.err) outcome.set(signatures[i]!, { status: "failed", error: json(status.err), slot: Number(status.slot) });
+      else if (status?.confirmationStatus === "confirmed" || status?.confirmationStatus === "finalized") outcome.set(signatures[i]!, { status: "landed", error: null, slot: Number(status.slot) });
     });
     if (outcome.size === signatures.length || Date.now() > until) break;
     await sleep(pollMs);
   }
-  for (const signature of signatures) if (!outcome.has(signature)) outcome.set(signature, { status: "pending", error: null });
+  for (const signature of signatures) if (!outcome.has(signature)) outcome.set(signature, { status: "pending", error: null, slot: null });
   return outcome;
 }

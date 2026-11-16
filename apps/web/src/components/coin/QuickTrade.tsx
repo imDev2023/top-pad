@@ -74,10 +74,17 @@ export function QuickTrade({ coin, onTraded }: { coin: Coin; onTraded: (trades: 
   const held = holdings && holdings.wallet === account?.address ? (side === "buy" ? BigInt(holdings.quote) : BigInt(holdings.coins)) : null;
   const tooMuch = amount !== null && held !== null && amount > held;
 
-  const loadHoldings = useCallback(async () => {
-    if (!account) return;
-    setHoldings(await getHoldings(coin.mint, account.address).catch(() => null));
-  }, [account, coin.mint]);
+  // Only the latest read lands, so an older one answering late cannot put back what stood before a trade.
+  const holdingsAsked = useRef(0);
+  const loadHoldings = useCallback(
+    async (after?: number | null) => {
+      if (!account) return;
+      const asked = ++holdingsAsked.current;
+      const read = await getHoldings(coin.mint, account.address, after).catch(() => null);
+      if (asked === holdingsAsked.current) setHoldings(read);
+    },
+    [account, coin.mint],
+  );
   useEffect(() => {
     void loadHoldings();
   }, [loadHoldings]);
@@ -142,6 +149,9 @@ export function QuickTrade({ coin, onTraded }: { coin: Coin; onTraded: (trades: 
       }
       setSending({ phase: "confirming" });
       const outcome = await reportTrade(coin.mint, getBase58Decoder().decode(signature));
+      // What the trade left, read at its slot or later, before the panel says it is done and offers its presets again:
+      // "All" right after a buy must sell what the buy brought too, however slow the read or far behind the node (#110).
+      await loadHoldings(outcome.slot);
       if (outcome.status === "landed") {
         onTraded(outcome.trades);
         const ran = outcome.trades[0] ? Date.parse(outcome.trades[0].at) / 1000 : null;
@@ -155,7 +165,6 @@ export function QuickTrade({ coin, onTraded }: { coin: Coin; onTraded: (trades: 
           explorer: outcome.explorer,
         });
       }
-      await loadHoldings();
     } catch (e) {
       setSending({ phase: "failed", text: e instanceof ApiProblem ? e.message : `It did not go through: ${(e as Error).message}` });
     }

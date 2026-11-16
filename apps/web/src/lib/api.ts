@@ -251,7 +251,9 @@ export const prepareSwap = (mint: string, request: SwapRequest & { wallet: strin
 export const reportTrade = (mint: string, signature: string) => call(SwapOutcome, `/coins/${encodeURIComponent(mint)}/trades`, postJson({ signature }));
 
 /** What a wallet holds to trade a coin with. */
-export const getHoldings = (mint: string, wallet: string) => call(Holdings, `/coins/${encodeURIComponent(mint)}/holdings/${encodeURIComponent(wallet)}`);
+/** What a wallet holds to trade with; with `after`, as the chain stood at that slot or later: a trade's own slot (#110). */
+export const getHoldings = (mint: string, wallet: string, after?: number | null) =>
+  call(Holdings, `/coins/${encodeURIComponent(mint)}/holdings/${encodeURIComponent(wallet)}${after != null ? `?after=${after}` : ""}`);
 
 /** A wallet's position in a coin and its P&L (spec 9), the newest snapshot, from the browser; null when it holds none Heat indexed. */
 export const getPosition = (mint: string, wallet: string): Promise<Position | null> =>

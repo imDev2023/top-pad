@@ -86,6 +86,15 @@ export class Fakes {
   clock: bigint | null = null;
   /** The block time `getBlockTime` answers, Unix seconds. */
   blockTime: bigint | null = null;
+  /** The slot the RPC node has reached: what it answers in each reply's context. */
+  nodeSlot = 123;
+  /**
+   * How many more reads naming a `minContextSlot` past `nodeSlot` the node refuses as not reached yet (-32016) before it
+   * catches up to the slot asked for, as a node behind the cluster does for a moment.
+   */
+  lagging = 0;
+  /** Every `minContextSlot` a `getMultipleAccounts` named, in order, null for none. */
+  minContextSlots: (number | null)[] = [];
   /** The chain's accounts, by address: what `getAccountInfo`, `getMultipleAccounts` and `getProgramAccounts` read. */
   accounts = new Map<string, { owner: string; data: Uint8Array; lamports?: bigint }>();
   /** Landed transactions, by signature, as `getTransaction` serves them. */
@@ -156,7 +165,7 @@ export class Fakes {
 
   private rpc(body: Json) {
     const { id, method, params } = body as { id: number; method: string; params: unknown[] };
-    const context = { slot: 123 };
+    const context = { slot: this.nodeSlot };
     const ok = (result: unknown) => json({ jsonrpc: "2.0", id, result });
     switch (method) {
       case "getLatestBlockhash":
@@ -192,8 +201,18 @@ export class Fakes {
       }
       case "getAccountInfo":
         return ok({ context, value: this.rpcAccount(params[0] as string) });
-      case "getMultipleAccounts":
-        return ok({ context, value: (params[0] as string[]).map((address) => this.rpcAccount(address)) });
+      case "getMultipleAccounts": {
+        const asked = (params[1] as { minContextSlot?: number } | undefined)?.minContextSlot ?? null;
+        this.minContextSlots.push(asked);
+        if (asked !== null && asked > this.nodeSlot) {
+          if (this.lagging > 0) {
+            this.lagging--;
+            return json({ jsonrpc: "2.0", id, error: { code: -32016, message: "Minimum context slot has not been reached", data: { contextSlot: this.nodeSlot } } });
+          }
+          this.nodeSlot = asked;
+        }
+        return ok({ context: { slot: this.nodeSlot }, value: (params[0] as string[]).map((address) => this.rpcAccount(address)) });
+      }
       case "getProgramAccounts": {
         const [program, { filters = [] }] = params as [string, { filters?: Filter[] }];
         const found = [...this.accounts].filter(([, a]) => a.owner === program && filters.every((f) => passes(f, a.data)));

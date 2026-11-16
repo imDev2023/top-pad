@@ -76,14 +76,20 @@ export const SwapOutcome = z.object({
   /** `pending` when it had not confirmed by the time the API stopped waiting: it may still land. */
   status: z.enum(["landed", "failed", "pending"]),
   error: z.string().nullable(),
+  /**
+   * The slot it confirmed in, null while pending: a read the page makes right after it names this slot, so an RPC node
+   * still behind it cannot answer with what stood before the trade (#110).
+   */
+  slot: z.number().int().nonnegative().nullable(),
   explorer: z.string().url(),
   trades: z.array(Trade),
 });
 export type SwapOutcome = z.infer<typeof SwapOutcome>;
 
 /**
- * `GET /coins/:mint/holdings/:wallet`: what a wallet can trade with, in raw units: its SOL, which pays every network fee
- * and rent, the coin's quote it can spend on a buy (its SOL again for a coin priced in SOL), and the coin.
+ * `GET /coins/:mint/holdings/:wallet[?after=<slot>]`: what a wallet can trade with, in raw units: its SOL, which pays every
+ * network fee and rent, the coin's quote it can spend on a buy (its SOL again for a coin priced in SOL), and the coin.
+ * With `after`, as read at that slot or later: a page reading what its own trade left names the trade's slot (#110).
  */
 export const Holdings = z.object({ wallet: Address, sol: RawAmount, quote: RawAmount, coins: RawAmount });
 export type Holdings = z.infer<typeof Holdings>;
