@@ -149,15 +149,19 @@ export function QuickTrade({ coin, onTraded }: { coin: Coin; onTraded: (trades: 
       }
       setSending({ phase: "confirming" });
       const outcome = await reportTrade(coin.mint, getBase58Decoder().decode(signature));
+      if (outcome.status === "landed") {
+        onTraded(outcome.trades);
+        // The amount is spent: left in the field, the trade's own report on the live room would quote it again, against
+        // a pool it has already moved (selling everything twice is refused).
+        setText("");
+        const ran = outcome.trades[0] ? Date.parse(outcome.trades[0].at) / 1000 : null;
+        if (clicked !== null && ran !== null) setLanding((l) => Math.min(MAX_LANDING_SECONDS, Math.max(0, (l + (ran - clicked)) / 2)));
+      }
       // What the trade left, read at its slot or later, before the panel says it is done and offers its presets again:
       // "All" right after a buy must sell what the buy brought too, however slow the read or far behind the node (#110).
       await loadHoldings(outcome.slot);
       if (outcome.status === "landed") {
-        onTraded(outcome.trades);
-        const ran = outcome.trades[0] ? Date.parse(outcome.trades[0].at) / 1000 : null;
-        if (clicked !== null && ran !== null) setLanding((l) => Math.min(MAX_LANDING_SECONDS, Math.max(0, (l + (ran - clicked)) / 2)));
         setSending({ phase: "done", ...doneText(outcome, ticker, coin.decimals, quote), explorer: outcome.explorer });
-        setText("");
       } else {
         setSending({
           phase: "failed",
