@@ -89,9 +89,12 @@ export function QuickTrade({ coin, onTraded }: { coin: Coin; onTraded: (trades: 
     void loadHoldings();
   }, [loadHoldings]);
 
-  // The quote, again whenever the amount, side or slippage changes and whenever a trade moves the price.
+  // The quote, again whenever the amount, side or slippage changes and whenever a trade moves the price; never while a
+  // trade of this panel is on its way, whose prepared quote stands: the live room often reports the trade before its own
+  // report returns, and quoting its amount again then, against the pool it has moved, was refused (#110).
   const lastTrade = coin.market.lastTradeKey;
   useEffect(() => {
+    if (busy) return;
     if (amount === null) {
       setQuoted(null);
       setQuoteProblem(null);
@@ -114,7 +117,7 @@ export function QuickTrade({ coin, onTraded }: { coin: Coin; onTraded: (trades: 
       clearTimeout(timer);
       abort.abort();
     };
-  }, [coin.mint, side, amount, slippageBps, lastTrade]);
+  }, [coin.mint, side, amount, slippageBps, lastTrade, busy]);
 
   // While the sniper tax runs, the fee shown falls with the chain's clock, four times a second.
   const taxing = quoted !== null && quoted.quote.steps.length > 1;
