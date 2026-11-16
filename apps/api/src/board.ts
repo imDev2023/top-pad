@@ -226,7 +226,8 @@ const KV_MIN_TTL_SECONDS = 60;
 
 /**
  * A public read through KV: the cached value while younger than `maxAgeMs`, else worked out afresh and cached. KV failing
- * never fails the read.
+ * never fails the read. A null, nothing there yet, is never kept: what is missing now may exist a moment later, as a coin
+ * does once the indexer reaches it, and a kept null answered 404 for the coin's whole first 30 s (#110's run).
  */
 export async function cached<T>(c: Context<AppEnv>, key: string, maxAgeMs: number, compute: () => Promise<T>): Promise<T> {
   const kv = c.env.CACHE;
@@ -239,7 +240,7 @@ export async function cached<T>(c: Context<AppEnv>, key: string, maxAgeMs: numbe
     }
   }
   const value = await compute();
-  if (kv) {
+  if (kv && value !== null) {
     const put = kv.put(key, JSON.stringify({ at: Date.now(), value }), { expirationTtl: Math.max(KV_MIN_TTL_SECONDS, Math.ceil(maxAgeMs / 1000)) });
     c.executionCtx.waitUntil(put.catch((e) => console.warn(`writing ${key} to KV failed`, e)));
   }

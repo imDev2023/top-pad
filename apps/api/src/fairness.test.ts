@@ -105,8 +105,8 @@ async function creator(handle: string | null) {
 type Creator = Awaited<ReturnType<typeof creator>>;
 
 /** A Heat coin, or a pool around Heat's flow with `heat: false`. */
-async function coin(ticker: string, by: Creator, o: { mode?: "instant" | "fair_open"; heat?: boolean; at?: Date } = {}) {
-  const [mint, pool] = await Promise.all([addr(), addr()]);
+async function coin(ticker: string, by: Creator, o: { mode?: "instant" | "fair_open"; heat?: boolean; at?: Date; mint?: string } = {}) {
+  const [mint, pool] = await Promise.all([o.mint ?? addr(), addr()]);
   const mode = o.mode ?? "instant";
   const at = o.at ?? ago(2 * DAY);
   const created = { createdSignature: signature(), createdSlot: ++slot, createdAt: at };
@@ -392,6 +392,27 @@ describe("the card's image and its absence", () => {
     expect((await request(`/coins/${c.mint}/fairness`)).status).toBe(404);
     expect((await request(`/coins/${c.mint}/card.png`)).status).toBe(404);
     expect((await request("/coins/not-a-mint/fairness")).status).toBe(404);
+  });
+
+  it("answers a coin's card as soon as the indexer has the coin, keeping no 404 from a moment before (#110)", async () => {
+    // KV as the Worker binds it, in memory: the card is a public read through it.
+    const kept = new Map<string, string>();
+    const CACHE = {
+      get: async (key: string) => (kept.has(key) ? JSON.parse(kept.get(key)!) : null),
+      put: async (key: string, value: string) => void kept.set(key, value),
+    };
+    const throughKv = (path: string) => app.request(path, {}, testBindings(url, { BLOBS, CACHE }), ctx);
+    // The coin page's server render asks a moment before the indexer has written the coin.
+    const mint = await addr();
+    expect((await throughKv(`/coins/${mint}/fairness`)).status).toBe(404);
+    await settle();
+    expect(kept.size).toBe(0);
+    await coin("SOON", await creator(null), { mint });
+    chainHolds({});
+    expect((await throughKv(`/coins/${mint}/fairness`)).status).toBe(200);
+    // A card found is kept, as before.
+    await settle();
+    expect([...kept.keys()]).toEqual([`fairness:v1:${mint}`]);
   });
 
   it("serves a version R2 keeps as it was, for good", async () => {
