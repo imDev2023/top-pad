@@ -15,7 +15,7 @@ export type Stage = {
   env?: Record<string, string>;
   /** The most SOL the stage holds out of the bank at once, lent or spent: the run checks the bank covers it first. */
   peakSol: number;
-  /** About how long it takes, for the plan the run prints. */
+  /** About how long it takes, for the plan the run prints: as measured on 2026-11-15. */
   minutes: number;
   /** It needs the two operator apps on this Mac (`pnpm --filter @top-pad/tests-ui operators`, ports 8803 and 8804). */
   operators?: boolean;
@@ -36,7 +36,7 @@ export const STAGES: Stage[] = [
     cwd: "tests/acceptance",
     command: ["pnpm", "exec", "tsx", "src/verified-builds.ts"],
     peakSol: 0,
-    minutes: 20,
+    minutes: 9,
   },
   {
     name: "configs",
@@ -52,7 +52,7 @@ export const STAGES: Stage[] = [
     cwd: "tests/devnet",
     command: vitest("src/instant-launch.test.ts"),
     peakSol: 0.1,
-    minutes: 2,
+    minutes: 1,
   },
   {
     name: "fee-claims",
@@ -60,7 +60,7 @@ export const STAGES: Stage[] = [
     cwd: "tests/devnet",
     command: vitest("src/fee-claims.test.ts"),
     peakSol: 0.2,
-    minutes: 4,
+    minutes: 3,
   },
   {
     name: "fair-open-window",
@@ -68,7 +68,7 @@ export const STAGES: Stage[] = [
     cwd: "tests/devnet",
     command: vitest("src/fair-open.test.ts"),
     peakSol: 1,
-    minutes: 20,
+    minutes: 16,
   },
   {
     name: "fair-open-open",
@@ -78,7 +78,7 @@ export const STAGES: Stage[] = [
     // which answered 429 for minutes on end (2026-11-15).
     command: [...vitest("src/fair-open-open.test.ts"), "--maxConcurrency=1"],
     peakSol: 4,
-    minutes: 20,
+    minutes: 15,
   },
   {
     name: "graduation-8.5",
@@ -87,7 +87,7 @@ export const STAGES: Stage[] = [
     command: vitest("src/graduation.test.ts"),
     env: { GRADUATION: "real" },
     peakSol: 9.5,
-    minutes: 5,
+    minutes: 2,
   },
   {
     name: "usdc-instant",
@@ -96,7 +96,7 @@ export const STAGES: Stage[] = [
     command: vitest("src/graduation.test.ts"),
     env: { GRADUATION_QUOTE: "usdc" },
     peakSol: 0.2,
-    minutes: 5,
+    minutes: 2,
   },
   {
     name: "usdc-fair-open-refunds",
@@ -104,7 +104,7 @@ export const STAGES: Stage[] = [
     cwd: "tests/devnet",
     command: vitest("src/fair-open-usdc.test.ts"),
     peakSol: 0.2,
-    minutes: 6,
+    minutes: 2,
   },
   {
     name: "usdc-fair-open",
@@ -113,7 +113,7 @@ export const STAGES: Stage[] = [
     command: vitest("src/fair-open-graduation.test.ts"),
     env: { FAIR_OPEN_QUOTE: "usdc" },
     peakSol: 0.3,
-    minutes: 5,
+    minutes: 3,
   },
   {
     name: "token2022-instant",
@@ -122,7 +122,7 @@ export const STAGES: Stage[] = [
     command: vitest("src/graduation.test.ts"),
     env: { GRADUATION_QUOTE: "token2022" },
     peakSol: 0.2,
-    minutes: 5,
+    minutes: 2,
   },
   {
     name: "token2022-fair-open",
@@ -131,7 +131,7 @@ export const STAGES: Stage[] = [
     command: vitest("src/fair-open-graduation.test.ts"),
     env: { FAIR_OPEN_QUOTE: "token2022" },
     peakSol: 0.3,
-    minutes: 6,
+    minutes: 4,
   },
   {
     name: "sniper",
@@ -139,7 +139,7 @@ export const STAGES: Stage[] = [
     cwd: "tests/devnet",
     command: vitest("src/sniper-simulation.test.ts"),
     peakSol: 3,
-    minutes: 8,
+    minutes: 6,
   },
   {
     name: "failure",
@@ -147,7 +147,7 @@ export const STAGES: Stage[] = [
     cwd: "tests/devnet",
     command: vitest("src/failure-simulation.test.ts"),
     peakSol: 1,
-    minutes: 21,
+    minutes: 18,
   },
   {
     name: "fair-open-scheduled",
@@ -156,7 +156,7 @@ export const STAGES: Stage[] = [
     command: playwright("fair-open-scheduled.spec.ts"),
     env: devnetSite,
     peakSol: 1,
-    minutes: 15,
+    minutes: 12,
   },
   {
     name: "sign-at-open",
@@ -165,7 +165,7 @@ export const STAGES: Stage[] = [
     command: playwright("fair-open-sign-at-open.spec.ts"),
     env: devnetSite,
     peakSol: 1,
-    minutes: 14,
+    minutes: 12,
   },
   {
     name: "farm",
@@ -174,7 +174,7 @@ export const STAGES: Stage[] = [
     command: playwright("farm-simulation.spec.ts"),
     env: devnetSite,
     peakSol: 4.5,
-    minutes: 25,
+    minutes: 22,
   },
   {
     name: "bundler",
@@ -183,7 +183,7 @@ export const STAGES: Stage[] = [
     command: playwright("bundler-simulation.spec.ts"),
     env: devnetSite,
     peakSol: 1,
-    minutes: 90,
+    minutes: 80,
     operators: true,
   },
   {
@@ -192,7 +192,7 @@ export const STAGES: Stage[] = [
     cwd: "tests/acceptance",
     command: ["pnpm", "exec", "tsx", "src/compute.ts"],
     peakSol: 0,
-    minutes: 8,
+    minutes: 1,
     measurement: true,
   },
   {

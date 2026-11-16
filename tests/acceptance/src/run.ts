@@ -9,9 +9,9 @@
 // run measures only what it ran.
 //
 // It needs what its stages need: DATABASE_URL (the devnet database) and HELIUS_API_KEY from the main checkout's
-// environment, which `direnv exec` gives, and Heat's devnet keys in ~/.config/top-pad/devnet. Real devnet SOL: about 5 a
+// environment, which `direnv exec` gives, and Heat's devnet keys in ~/.config/top-pad/devnet. Real devnet SOL: about 4 a
 // run from Heat's bank, about 10 of it lent at once at the 8.5 SOL Graduation, and some from the keeper key, which pays
-// the launch key's fees and the deployed keeper's sends: a stage starts only while the keeper holds 0.5 SOL. About four
+// the launch key's fees and the deployed keeper's sends: a stage starts only while the keeper holds 0.5 SOL. About three
 // and a half hours.
 import { spawn, type ChildProcess } from "node:child_process";
 import { createWriteStream, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -58,7 +58,7 @@ const rpc = readRpc();
 const bank = await createKeyPairSignerFromBytes(Uint8Array.from(JSON.parse(readFileSync(join(homedir(), ".config/top-pad/devnet/bank.json"), "utf8")) as number[]));
 const bankSol = async () => Number((await rpc.getBalance(bank.address, { commitment: "confirmed" }).send()).value) / 1e9;
 // The keeper key pays too: the launch key's fees in the tests, and the deployed keeper's migrations, nonces and claims. A
-// run took it from about 2 SOL to nothing on 2026-11-15, and every keeper send after that failed for rent.
+// run left it at 0.0017 SOL on 2026-11-15, and the next keeper send failed for rent.
 const keeper = CLUSTERS.devnet!.keys!.keeper;
 const keeperSol = async () => Number((await rpc.getBalance(keeper, { commitment: "confirmed" }).send()).value) / 1e9;
 /** The most a stage has taken from the keeper key, with room: a stage starts only with this much there. */
