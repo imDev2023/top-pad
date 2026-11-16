@@ -135,12 +135,12 @@ test("a coin bought to its Graduation Target graduates into DAMM v2 by Heat's ke
     await trade(traderPage, "sell", { preset: "All" });
     expect(await coinBalance(trader.address, address(mint))).toBe(0n);
     await snap(traderPage, "graduation-8-sold-all");
+    expect(errors).toEqual([]);
+    expect(traderErrors).toEqual([]);
   } finally {
     // A run stopped after Graduation sells back what the trader still holds, so its SOL comes home.
     if (mint) await sellBack(trader, address(mint)).catch((e: Error) => console.error(`selling back failed: ${e.message}`));
     await sweep(trader, creator);
-    expect(errors).toEqual([]);
-    expect(traderErrors).toEqual([]);
   }
 });
 

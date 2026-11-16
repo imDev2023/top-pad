@@ -3,13 +3,16 @@
 // the page shows before signing must be within one 1-second step of what the chain charged; each trade must show on
 // the page the moment it confirms, from the browser's fast path or the indexer, whichever reports it first (locally
 // the indexer's logs socket often does; deployed, Helius serves a transaction seconds late and the fast path wins),
-// and stay one row once the indexer has; and every swap must pay Heat's referral account its share. The panel is photographed in every view at each step. Real devnet SOL: about
-// 0.08 a run, most of it the tax the trader pays. No page may report an error.
+// and stay one row once the indexer has; and every swap must pay Heat's referral account its share. "All" right after a
+// buy must sell what the buy brought too (#110): the trader's network holds every holdings answer 2 s, as a slow
+// connection would, so a panel offering its holdings from before the trade is caught every run. The panel is
+// photographed in every view at each step. Real devnet SOL: about 0.08 a run, most of it the tax the trader pays. No page
+// may report an error.
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { address } from "@solana/kit";
 import { FEE_DENOMINATOR, SNIPER_TAX, CLUSTERS, referralAccountOf, TOKEN_PROGRAM_ADDRESS } from "@top-pad/chain";
 import { Coin, CoinTrades } from "@top-pad/contract";
-import { coinBalance, fundedWallets, landed, sweep } from "@top-pad/tests-devnet/devnet";
+import { coinBalance, fundedWallets, landed, swap, sweep } from "@top-pad/tests-devnet/devnet";
 import { launchCoin, newTicker, pageErrors, snap } from "./steps";
 import { TARGET } from "./target";
 import { connectTestWallet, installTestWallet } from "./wallet";
@@ -19,6 +22,8 @@ const api = async <T>(path: string, schema: { parse(v: unknown): T }) => schema.
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** One of the sniper tax's 1-second steps, in percentage points. */
 const STEP = (Number(SNIPER_TAX.reductionFactor) / Number(FEE_DENOMINATOR)) * 100;
+/** How long the trader's slow connection holds each holdings answer. */
+const HOLDINGS_DELAY_MS = 2_000;
 
 /** The percentage a locator shows first, as a number. */
 async function rateOf(locator: Locator) {
@@ -65,12 +70,19 @@ test("a trader buys and sells from the coin's page, seeing the fee before signin
   // The trader's browser, its wallet connected before the coin exists, so the trading starts as soon as it does.
   const traderPage = await (await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: "dark" })).newPage();
   const traderErrors = pageErrors(traderPage);
+  // A slow connection: every holdings answer reaches the panel 2 s after the API sent it (#110).
+  await traderPage.route(`${TARGET.api}/coins/*/holdings/*`, async (route) => {
+    const response = await route.fetch();
+    await sleep(HOLDINGS_DELAY_MS);
+    await route.fulfill({ response });
+  });
   await installTestWallet(traderPage, trader);
   await traderPage.goto("/");
   await connectTestWallet(traderPage, traderPage.getByRole("banner").getByRole("button", { name: "Connect wallet" }));
 
+  let mint: string | null = null;
   try {
-    const { mint } = await launchCoin(page, creator, { name: "Heat Quick", ticker: newTicker() });
+    ({ mint } = await launchCoin(page, creator, { name: "Heat Quick", ticker: newTicker() }));
     await traderPage.goto(`/coin/${mint}`);
     await expect(traderPage.getByRole("heading", { level: 1 })).toContainText("Heat Quick", { timeout: 30_000 });
     const panel = traderPage.getByRole("region", { name: "Quick trade" });
@@ -137,9 +149,12 @@ test("a trader buys and sells from the coin's page, seeing the fee before signin
     await expect(visitorPanel.getByRole("button", { name: "Connect wallet" })).toBeVisible();
     await snap(visitor, "quick-5-no-wallet");
     expect(visitorErrors).toEqual([]);
-  } finally {
     expect(errors).toEqual([]);
     expect(traderErrors).toEqual([]);
+  } finally {
+    // Coins a failed run leaves go back into the pool first, so the sweep brings the trader's SOL home.
+    const left = mint ? await coinBalance(trader.address, address(mint)).catch(() => 0n) : 0n;
+    if (left > 0n) await swap(trader, address(mint!), "sell", left).catch((e: Error) => console.error(`selling back failed: ${e.message}`));
     await sweep(trader, creator);
   }
 });
