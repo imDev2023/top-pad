@@ -287,6 +287,31 @@ describe("scheduling a Fair Open", { timeout: 30_000 }, () => {
     expect((await prepare(second, { ticker: "GLOW", wallet: other })).status).toBe(201);
   });
 
+  it("sends the schedule again when the node that takes it is behind the blockhash it was prepared on", async () => {
+    const cookie = await linkX({ id: "4014", username: "lagging" });
+    const wallet = (await testKeypair()).signer;
+    const launch = await prepared(await prepare(cookie, { ticker: "LAGGED", name: "Lagged", wallet: wallet.address }));
+    // The preflight of the first send answers "Blockhash not found", as devnet's did on 2026-11-18.
+    fakes.sendsBehind = 1;
+    const res = await submit(cookie, launch, wallet);
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(LaunchStatus.parse(await res.json())).toMatchObject({ mode: "fair_open", status: "landed" });
+    expect(fakes.sendsBehind).toBe(0);
+  });
+
+  it("says nothing was sent when no node takes the schedule in time, and releases the ticker", async () => {
+    const cookie = await linkX({ id: "4015", username: "stranded" });
+    const wallet = (await testKeypair()).signer;
+    const launch = await prepared(await prepare(cookie, { ticker: "STRAND", name: "Stranded", wallet: wallet.address }));
+    fakes.sendsBehind = 1_000;
+    expect(await refusal(await submit(cookie, launch, wallet))).toMatchObject({
+      status: 422,
+      code: "send_failed",
+      error: "Solana's nodes did not take the schedule in time, so nothing was sent and nothing was spent. Schedule again.",
+    });
+    expect((await db.select().from(launches).where(eq(launches.id, launch.id)))[0]).toMatchObject({ status: "failed", tickerKey: null });
+  });
+
   it("is signed in one approval and sent with our keeper's signatures on the schedule and every rung, then kept by its Workflow", async () => {
     const cookie = await linkX({ id: "4006", username: "kettle" });
     const wallet = (await testKeypair()).signer;

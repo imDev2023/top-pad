@@ -63,6 +63,7 @@ import {
   json,
   launchProblem,
   limited,
+  notTaken,
   onLanded,
   ownLaunch,
   readImage,
@@ -75,7 +76,7 @@ import {
 import { signItems, storeItems } from "./metadata";
 import { amountText, offeredQuote } from "./quotes";
 import { keeperSignatureOn, wireOf } from "./rungs";
-import { sendAndConfirm } from "./send";
+import { blockhashNotFound, sendAndConfirm, sendFresh } from "./send";
 import { checkTeaser, firstRefusal, judgeLaunch, judgeLaunchText } from "./vampShield";
 
 /** How far ahead a window may start (spec 2.1 step 4), as `create_launch` allows it. */
@@ -483,7 +484,7 @@ export async function submitFairOpen(c: Context<AppEnv>, creator: Creator, launc
 
   const full = await partiallySignTransaction([keeper.signer.keyPair], schedule);
   try {
-    await rpc.sendTransaction(getBase64EncodedWireTransaction(full), { encoding: "base64", preflightCommitment: "confirmed" }).send(limited());
+    await sendFresh(rpc, getBase64EncodedWireTransaction(full));
   } catch (e) {
     if ((e as Error).name === "TimeoutError" || (e as Error).name === "AbortError") {
       console.warn("sending the schedule timed out; its signature will tell", launch.id);
@@ -491,7 +492,7 @@ export async function submitFairOpen(c: Context<AppEnv>, creator: Creator, launc
       const reason = sendError(e);
       console.error("sending the schedule failed", launch.id, reason);
       await db.update(launches).set({ status: "failed", error: reason, tickerKey: null }).where(eq(launches.id, launch.id));
-      return refuse(c, 422, { error: `The schedule failed on chain: ${reason}`, code: "send_failed" });
+      return refuse(c, 422, { error: blockhashNotFound(e) ? notTaken("schedule") : `The schedule failed on chain: ${reason}`, code: "send_failed" });
     }
   }
   const until = Date.now() + CONFIRM_WAIT_MS;

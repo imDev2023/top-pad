@@ -41,6 +41,7 @@ import { refuse, type AppEnv } from "./http";
 import { loadKeeper } from "./keeper";
 import { barProblem } from "./bars";
 import { MetadataUploadFailed, signItems, sniffImageType, storeItems, uploadItem, waitServed, type ImageType } from "./metadata";
+import { blockhashNotFound, sendFresh } from "./send";
 import { firstRefusal, judgeLaunch, judgeLaunchText } from "./vampShield";
 
 /** How many launches a creator may have waiting to be signed at once, against a flood of prepared transactions. */
@@ -374,7 +375,7 @@ export async function submitLaunch(c: Context<AppEnv>) {
   const full = await partiallySignTransaction([keeper.signer.keyPair], withMint);
   assertIsFullySignedTransaction(full);
   try {
-    await rpc.sendTransaction(getBase64EncodedWireTransaction(full), { encoding: "base64", preflightCommitment: "confirmed" }).send(limited());
+    await sendFresh(rpc, getBase64EncodedWireTransaction(full));
   } catch (e) {
     // A send that timed out may still have reached the network: the launch stays sending, and its signature settles it.
     if ((e as Error).name === "TimeoutError" || (e as Error).name === "AbortError") {
@@ -383,7 +384,7 @@ export async function submitLaunch(c: Context<AppEnv>) {
       const reason = sendError(e);
       console.error("sending the creation transaction failed", launch.id, reason);
       await db.update(launches).set({ status: "failed", error: reason }).where(eq(launches.id, launch.id));
-      return refuse(c, 422, { error: `The launch failed on chain: ${reason}`, code: "send_failed" });
+      return refuse(c, 422, { error: blockhashNotFound(e) ? notTaken("launch") : `The launch failed on chain: ${reason}`, code: "send_failed" });
     }
   }
 
@@ -518,6 +519,13 @@ async function toStatus(cfg: Config, launch: Launch): Promise<LaunchStatus> {
         : null,
   };
 }
+
+/**
+ * What the creator reads when no node took a fresh send for its blockhash within the wait (`sendFresh`): the preflight
+ * refused it each time, so nothing reached the chain.
+ */
+export const notTaken = (what: "launch" | "schedule") =>
+  `Solana's nodes did not take the ${what} in time, so nothing was sent and nothing was spent. ${what === "launch" ? "Launch" : "Schedule"} again.`;
 
 /** What a failed send says, with the program's own log lines when preflight caught it. */
 export function sendError(e: unknown): string {

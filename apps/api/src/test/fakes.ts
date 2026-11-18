@@ -130,6 +130,8 @@ export class Fakes {
     const padding = Array.from({ length: 1_000 }, () => getBase58Decoder().decode(crypto.getRandomValues(new Uint8Array(64))));
     this.history.set(wallet, [...padding, ...(this.history.get(wallet) ?? [])]);
   }
+  /** How many sends the node refuses first for a blockhash it does not hold yet, being behind the node that gave it. */
+  sendsBehind = 0;
   // Turbo and the gateway
   uploads: string[] = [];
   turboFails = false;
@@ -187,6 +189,11 @@ export class Fakes {
       }
       case "sendTransaction": {
         const tx = decode(params[0] as string);
+        if (this.sendsBehind > 0) {
+          this.sendsBehind--;
+          const data = { err: "BlockhashNotFound", logs: [], accounts: null, unitsConsumed: 0, returnData: null };
+          return json({ jsonrpc: "2.0", id, error: { code: -32002, message: "Transaction simulation failed: Blockhash not found", data } });
+        }
         this.sent.push(tx);
         this.makeNonces(tx);
         this.onSend?.(tx);

@@ -1,7 +1,14 @@
 // Sending a signed transaction for the keeper and the launch service, and waiting for it to confirm, over HTTP. The
 // free-tier RPC the devnet build runs on sends 1 transaction a second and answers bursts with 429 (spec 10.5), so a send
 // refused that way is tried again a moment later; anything else the RPC refuses is the caller's to judge.
-import { createSolanaRpc, isSolanaError, type Base64EncodedWireTransaction, type Commitment, type Signature } from "@solana/kit";
+import {
+  createSolanaRpc,
+  isSolanaError,
+  SOLANA_ERROR__TRANSACTION_ERROR__BLOCKHASH_NOT_FOUND,
+  type Base64EncodedWireTransaction,
+  type Commitment,
+  type Signature,
+} from "@solana/kit";
 
 type Rpc = ReturnType<typeof createSolanaRpc>;
 
@@ -54,6 +61,38 @@ export async function sendWire(rpc: Rpc, wire: Base64EncodedWireTransaction, o: 
     } catch (e) {
       if (!rateLimited(e) || attempt >= 20) throw e;
       await sleep(500 + attempt * 250);
+    }
+  }
+}
+
+/** Whether a preflight refused a transaction because its bank does not hold the transaction's blockhash. */
+export function blockhashNotFound(e: unknown): boolean {
+  return isSolanaError(e) && isSolanaError(e.cause, SOLANA_ERROR__TRANSACTION_ERROR__BLOCKHASH_NOT_FOUND);
+}
+
+/** How long a fresh send is tried again while the node that takes it is behind, and how far apart the tries are. */
+const BEHIND_WAIT_MS = 8_000;
+const BEHIND_EVERY_MS = 1_200;
+
+/**
+ * Sends a transaction a wallet signed moments ago, whose blockhash the caller has just found inside its lifetime, with
+ * a preflight at `confirmed`. "Blockhash not found" then says the node that took the send is behind the node that gave
+ * the blockhash, not that anything is wrong with the transaction: on 2026-11-18 it failed a valid Fair Open schedule on
+ * devnet, sent a second after it was prepared. A preflight's refusal sends nothing, so the send is tried again, over a
+ * second apart since the free tier sends one transaction a second (a 429 between tries is waited out too), and after
+ * 8 s the refusal is thrown as it came. Any other refusal is thrown at once, as is a first try's 429.
+ */
+export async function sendFresh(rpc: Rpc, wire: Base64EncodedWireTransaction, o: { waitMs?: number; everyMs?: number } = {}) {
+  const until = Date.now() + (o.waitMs ?? BEHIND_WAIT_MS);
+  let behind = false;
+  for (;;) {
+    try {
+      await rpc.sendTransaction(wire, { encoding: "base64", preflightCommitment: "confirmed" }).send(limited());
+      return;
+    } catch (e) {
+      if (!(blockhashNotFound(e) || (behind && rateLimited(e))) || Date.now() >= until) throw e;
+      behind = true;
+      await sleep(o.everyMs ?? BEHIND_EVERY_MS);
     }
   }
 }

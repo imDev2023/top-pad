@@ -452,6 +452,17 @@ describe("an Instant launch", () => {
     expect(fakes.sent).toHaveLength(1);
   });
 
+  it("sends the creation transaction again when the node that takes it is behind its blockhash", async () => {
+    const cookie = await linkX({ id: "2016", username: "lagging" });
+    const wallet = (await testKeypair()).signer;
+    const launch = await prepared(await prepare(cookie, { ticker: "LAGS", wallet: wallet.address }));
+    // The preflight of the first send answers "Blockhash not found": the node is behind the one that gave the blockhash.
+    fakes.sendsBehind = 1;
+    const status = LaunchStatus.parse(await (await submit(cookie, launch.id, await signAsWallet(launch, wallet))).json());
+    expect(status).toMatchObject({ status: "landed", mint: launch.mint, error: null });
+    expect(fakes.sendsBehind).toBe(0);
+  });
+
   it("reports a creation transaction that failed on chain", async () => {
     const cookie = await linkX({ id: "2015", username: "failing" });
     const wallet = (await testKeypair()).signer;
