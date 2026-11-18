@@ -1,5 +1,5 @@
-# Python's caches, and the SSCD model in either form: the model is downloaded and exported inside the Docker build
-# and must never be committed (it is Meta's file, about 100 MB, and the build pins its hash instead).
+# Python's caches, and the SSCD model in either form: the model is fetched and exported inside the Docker build
+# and must never be committed (about 100 MB; the build pins its hash, and Heat's copy is a release asset, #108).
 __pycache__/
 .pytest_cache/
 *.pt
