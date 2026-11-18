@@ -231,9 +231,11 @@ export function LaunchFlow({ linkOutcome: arrived }: { linkOutcome: LinkOutcome 
             ? scheduled?.ok === true
             : false;
   const signStep = steps.indexOf("Sign" as never);
-  // The calendar preview shows what is valid so far: a refused teaser is not shown as if it would go out.
+  // The calendar preview shows what is valid so far: a refused teaser is not shown as if it would go out, whether the
+  // rules here refuse it or the API did at the sign step for naming a Protected coin, until the creator changes it.
   const teaserRule = teaserVerdict(schedule.teaser);
-  const teaserPreview = teaserRule.ok ? teaserRule.teaser : "";
+  const teaserRefused = scheduleProblem !== null && refusal?.refusal.code === "teaser";
+  const teaserPreview = teaserRule.ok && !teaserRefused ? teaserRule.teaser : "";
   const startPreview = schedule.start === "now" ? now : Date.parse(schedule.start);
   const opensAtPreview = terms && !Number.isNaN(startPreview) ? startPreview + terms.windowSeconds * 1000 : null;
   const doneStep = steps.length - 1;

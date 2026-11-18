@@ -84,6 +84,7 @@ test("a creator schedules a Fair Open from the site and signs once; the keeper o
     const teaserField = page.getByLabel("Teaser for the calendar (optional)");
     // Not just any alert: Next's route announcer is one too, and empty.
     const refusedTeaser = page.getByRole("alert").filter({ hasText: "Refused" });
+    const calendarPreview = page.getByRole("complementary", { name: "What traders will see" });
     const refusals = [
       { written: "ONE price for everyone", reads: /"ONE" in the teaser reads as .+ \(\$ONE\), a protected coin: the calendar cannot carry another coin's name\. Capitals are read as a coin's ticker or name: write everyday words in lower case\.$/ },
       { written: "bigger than b0nk", reads: /"b0nk" in the teaser reads as .+ \(\$BONK\), a protected coin: the calendar cannot carry another coin's name\.$/i },
@@ -96,6 +97,9 @@ test("a creator schedules a Fair Open from the site and signs once; the keeper o
       await page.getByRole("button", { name: "Sign your open in advance" }).click();
       await expect(refusedTeaser).toContainText(reads, { timeout: 60_000 });
       await expect(page.getByRole("heading", { name: "Schedule the window" })).toBeVisible();
+      // A refused teaser is not previewed as if the calendar would carry it.
+      await expect(calendarPreview).toContainText("Your one-line teaser");
+      await expect(calendarPreview).not.toContainText(written);
       console.log(`"${written}": ${(await refusedTeaser.innerText()).replace(/\s+/g, " ")}`);
       // The refusal is a 422, which the browser logs as a failed load: the one error this step is meant to show.
       const refusalLogged = errors.findIndex((e, at) => at >= beforeRefusal && e.includes("status of 422"));
@@ -108,6 +112,7 @@ test("a creator schedules a Fair Open from the site and signs once; the keeper o
     // ticket's own teaser, refused on 2026-11-04, goes on the calendar.
     await teaserField.fill(TEASER);
     await expect(refusedTeaser).toHaveCount(0);
+    await expect(calendarPreview).toContainText(TEASER);
     await expect(page.getByTestId("schedule-timeline")).toContainText("open now");
     await snap(page, "fair-open-scheduled-3-schedule-now");
     await page.getByRole("button", { name: "Continue" }).click();
