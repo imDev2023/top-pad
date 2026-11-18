@@ -14,7 +14,7 @@ import { fetchLaunch, LaunchStatus } from "@top-pad/clients/fair-open";
 import { Coin, FairOpen, QuoteList } from "@top-pad/contract";
 import { chainTime, coinBalance, fundedWallets, rpc } from "@top-pad/tests-devnet/devnet";
 import { fundQuote, quoteHeld, sweepDepositors } from "@top-pad/tests-devnet/fair-open";
-import { expectVampClear, linkXOnLaunch, signInOnLaunch, newTicker, pageErrors, runName, snap, uniqueCoinImage } from "./steps";
+import { expectVampClear, linkXOnLaunch, signInOnLaunch, newTicker, pageErrors, runName, snap, TEASER, uniqueCoinImage } from "./steps";
 import { TARGET } from "./target";
 import { connectTestWallet, installTestWallet } from "./wallet";
 
@@ -174,7 +174,7 @@ test("a Fair Open in USDC from the picker, deposited in USDC from its page and o
     await expect(page.getByRole("heading", { name: "Schedule the window" })).toBeVisible();
     await expect(page.getByLabel("Minimum raise (USDC, optional)")).toBeVisible();
     await expect(page.getByText(/The pot buys at most [\d.]+\sUSDC\./)).toBeVisible();
-    await page.getByLabel("Teaser for the calendar (optional)").fill(newTicker());
+    await page.getByLabel("Teaser for the calendar (optional)").fill(TEASER);
     await snap(page, "stock-6-schedule-usdc");
     await page.getByRole("button", { name: "Continue" }).click();
     await page.getByText(/What you sign: the schedule and 64 versions of the open/).click();

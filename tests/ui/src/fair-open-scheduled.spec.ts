@@ -18,7 +18,7 @@ import { fetchLaunch, LaunchStatus } from "@top-pad/clients/fair-open";
 import { FairOpen } from "@top-pad/contract";
 import { chainTime, coinBalance, fundedWallets, rpc, sweep } from "@top-pad/tests-devnet/devnet";
 import { admitted, deposit, newPerson, sellAll } from "@top-pad/tests-devnet/fair-open";
-import { expectVampClear, signInOnLaunch, newTicker, pageErrors, runName, snap, uniqueCoinImage } from "./steps";
+import { expectVampClear, signInOnLaunch, newTicker, pageErrors, runName, snap, TEASER, uniqueCoinImage } from "./steps";
 import { TARGET } from "./target";
 import { connectTestWallet, installTestWallet } from "./wallet";
 
@@ -55,7 +55,6 @@ test("a creator schedules a Fair Open from the site and signs once; the keeper o
   try {
     const wallet = await installTestWallet(page, creator);
     const ticker = newTicker();
-    const teaser = newTicker();
     await page.goto("/launch");
     await signInOnLaunch(page);
     await expect(page.getByRole("radio", { name: /Fair Open/ })).toBeChecked();
@@ -79,11 +78,36 @@ test("a creator schedules a Fair Open from the site and signs once; the keeper o
     await snap(page, "fair-open-scheduled-2-schedule-later");
     await page.getByRole("radio", { name: /Now/ }).check();
     await page.getByLabel("Minimum raise (SOL, optional)").fill("0.2");
-    // A teaser's words are read as names and tickers against the live protected set, folded (a "10" reads as IO),
-    // and ordinary words keep being refused as coins join it (#93: "one" as $ONE and "10" as IO on 2026-11-04), so the
-    // teaser is one word drawn for the run, which no Protected coin has; never the coin's ticker, which the calendar
-    // would show before the open.
-    await page.getByLabel("Teaser for the calendar (optional)").fill(teaser);
+    // Vamp Shield reads a teaser against the live protected set only where it is written as a coin (#93): `ONE` in
+    // capitals and `b0nk` with a digit among its letters are refused at the sign step, which says what was read as
+    // which coin and brings the creator back here, their wallet never asked.
+    const teaserField = page.getByLabel("Teaser for the calendar (optional)");
+    // Not just any alert: Next's route announcer is one too, and empty.
+    const refusedTeaser = page.getByRole("alert").filter({ hasText: "Refused" });
+    const refusals = [
+      { written: "ONE price for everyone", reads: /"ONE" in the teaser reads as .+ \(\$ONE\), a protected coin: the calendar cannot carry another coin's name\. Capitals are read as a coin's ticker or name: write everyday words in lower case\.$/ },
+      { written: "bigger than b0nk", reads: /"b0nk" in the teaser reads as .+ \(\$BONK\), a protected coin: the calendar cannot carry another coin's name\.$/i },
+    ];
+    for (const [i, { written, reads }] of refusals.entries()) {
+      await teaserField.fill(written);
+      await expect(refusedTeaser).toHaveCount(0);
+      const beforeRefusal = errors.length;
+      await page.getByRole("button", { name: "Continue" }).click();
+      await page.getByRole("button", { name: "Sign your open in advance" }).click();
+      await expect(refusedTeaser).toContainText(reads, { timeout: 60_000 });
+      await expect(page.getByRole("heading", { name: "Schedule the window" })).toBeVisible();
+      console.log(`"${written}": ${(await refusedTeaser.innerText()).replace(/\s+/g, " ")}`);
+      // The refusal is a 422, which the browser logs as a failed load: the one error this step is meant to show.
+      const refusalLogged = errors.findIndex((e, at) => at >= beforeRefusal && e.includes("status of 422"));
+      expect(refusalLogged).toBeGreaterThanOrEqual(0);
+      errors.splice(refusalLogged, 1);
+      await snap(page, `fair-open-scheduled-3-teaser-refused-${i + 1}`);
+    }
+    expect(wallet.approvals).toEqual([1]);
+    // Everyday writing is never read as a coin, though "one" is $ONE's ticker and "no" a Protected coin's name: the
+    // ticket's own teaser, refused on 2026-11-04, goes on the calendar.
+    await teaserField.fill(TEASER);
+    await expect(refusedTeaser).toHaveCount(0);
     await expect(page.getByTestId("schedule-timeline")).toContainText("open now");
     await snap(page, "fair-open-scheduled-3-schedule-now");
     await page.getByRole("button", { name: "Continue" }).click();
@@ -103,7 +127,7 @@ test("a creator schedules a Fair Open from the site and signs once; the keeper o
     await page.getByRole("link", { name: "Open its page" }).click();
     await page.waitForURL(/\/fair-open\//);
     launch = page.url().split("/fair-open/")[1]!.split(/[?#]/)[0] as Address;
-    await expect(page.getByText(`\u{201C}${teaser}\u{201D}`)).toBeVisible();
+    await expect(page.getByText(`\u{201C}${TEASER}\u{201D}`)).toBeVisible();
     const account = (await fetchLaunch(rpc, launch)).data;
     expect(account.creator).toBe(creator.address);
     expect(account.minRaise).toBe(200_000_000n);

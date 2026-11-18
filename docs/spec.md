@@ -82,8 +82,13 @@ Fair Open is preselected.
 - The window's start, up to 7 days ahead; the window is a fixed 10 minutes ([Fair Open rules](https://github.com/imDev2023/top-pad/issues/19)).
 - An optional minimum raise.
 - A one-line teaser for the calendar: free text, at most 80 characters, plain text with no links or cashtags, refused if it names a Protected coin or holds the characters refused in names **(owner, 2026-10-27)**.
-- As built ([#47](https://github.com/imDev2023/top-pad/issues/47)): `teaserVerdict` in `@top-pad/vamp-shield/rules` refuses a link (a scheme, `www.`, or a word, a dot and two letters), a cashtag (`$` before a letter), control, hidden and unassigned characters, and a word that mixes scripts; the API then reads every run of up to four words as a name (strict and loose keys) and every word of three or more characters as a ticker (strict key) against the Protected coins.
+- As built ([#47](https://github.com/imDev2023/top-pad/issues/47)): `teaserVerdict` in `@top-pad/vamp-shield/rules` refuses a link (a scheme, `www.`, or a word, a dot and two letters), a cashtag (`$` before a letter), control, hidden and unassigned characters, and a word that mixes scripts; the API then reads the teaser against the Protected coins with `teaserReadings` in `@top-pad/vamp-shield`.
   Core keys are left out, since they strip words such as OFFICIAL from ordinary sentences.
+- A teaser names a coin only where it is written as one **(owner, 2026-11-18, [#93](https://github.com/imDev2023/top-pad/issues/93))**: a word in capitals (`ONE`, `BoNK`, any capital past the first letter), or with a digit among its letters (`b0nk`) or any character beyond a to z and 0 to 9, each a lookalike of a plain letter (an accent, a fullwidth letter, another alphabet).
+  Each such word is read as a ticker (strict key), and each run of up to four words that holds one as a name (strict and loose keys), the run whole, so `LOCK in` meets "LOCK IN"; a key under three characters is never matched, on either path.
+  Everyday writing is never read, whatever coins join the Protected set: lower case, a first capital, and numbers in digits (`one`, `One`, `Bonk Inu`, `10`).
+  Before this every word of three or more characters was read as a ticker and every run as a name, and on 2026-11-04 "Ten minutes, one price, no snipers" was refused as $ONE and "10" as IO; on 2026-11-18 the set refused 32 of 144 of the commonest English words (`now`, `open`, `soon`, `hold`).
+  The refusal says what was read as which coin, and for capitals alone that everyday words pass in lower case.
 
 **5. Seal the identity.**
 - Our server prepares the coin's metadata JSON and image as Arweave data items and signs them at scheduling; a data item's id is fixed once signed and binds its content, so the metadata URI also commits to the image.

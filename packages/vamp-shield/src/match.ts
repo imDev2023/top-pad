@@ -97,13 +97,20 @@ export function lookupValues(candidate: CoinKeys): KeyLookup {
 // Ticker and name come from outside sources and are shown in the launch form: invisible and control characters go.
 const shown = (text: string) => text.replace(/[\p{Cc}\p{Default_Ignorable_Code_Point}]/gu, "").trim();
 
-function reason({ field, kind, against }: Rule, coin: ProtectedCoin, keys: Keys): string {
+/** A Protected coin as a refusal names it: the first of its ticker and name with the other in brackets, or its id. */
+function named(coin: Pick<ProtectedCoin, "ticker" | "name" | "mint">, first: Field): string {
   const symbol = shown(coin.ticker).replace(/^\$/, "");
   const ticker = symbol ? `$${symbol}` : "";
   const name = shown(coin.name);
-  const both = (first: string, second: string) => (first && second ? `${first} (${second})` : first || second || coin.mint);
-  const target =
-    field !== against ? `the ${against} of ${both(name, ticker)}` : field === "ticker" ? both(ticker, name) : both(name, ticker);
+  const [a, b] = first === "ticker" ? [ticker, name] : [name, ticker];
+  return a && b ? `${a} (${b})` : a || b || coin.mint;
+}
+
+/** A Protected coin by its name, then its ticker: "Bonk ($BONK)". */
+export const nameAndTicker = (coin: Pick<ProtectedCoin, "ticker" | "name" | "mint">) => named(coin, "name");
+
+function reason({ field, kind, against }: Rule, coin: ProtectedCoin, keys: Keys): string {
+  const target = field !== against ? `the ${against} of ${named(coin, "name")}` : named(coin, field);
   if (kind === "strict") return `The ${field} looks the same as ${target}, a protected coin.`;
   if (kind === "loose") return `The ${field} reads as ${target}, a protected coin, once digits and symbols are read as letters.`;
   const stripped = keys.loose !== keys.core || coin.keys[against].loose !== coin.keys[against].core;

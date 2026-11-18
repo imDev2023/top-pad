@@ -30,7 +30,7 @@ import { landRefused, newRun, untilChainTime } from "@top-pad/tests-devnet/simul
 import { eq } from "drizzle-orm";
 import { database } from "./bundler";
 import { FARM_SIZE, farmWallets, HONEST, linkX, prepareDeposit, SCORED, sendConfirmed, signPrepared, sweepFarm, TIED, verifyOnce } from "./farm";
-import { expectVampLaunchable, newHandle, newTicker, pageErrors, runName, short, signInOnLaunch, snap, uniqueCoinImage } from "./steps";
+import { expectVampLaunchable, newHandle, newTicker, pageErrors, runName, short, signInOnLaunch, snap, TEASER, uniqueCoinImage } from "./steps";
 import { TARGET } from "./target";
 import { connectTestWallet, installTestWallet } from "./wallet";
 
@@ -97,7 +97,7 @@ test("a farm of 100 wallets gets one seat, the creator's cluster none, and every
     await page.getByRole("button", { name: "Continue" }).click();
     await expect(page.getByRole("heading", { name: "Schedule the window" })).toBeVisible();
     await page.getByRole("radio", { name: /Now/ }).check();
-    await page.getByLabel("Teaser for the calendar (optional)").fill(newTicker());
+    await page.getByLabel("Teaser for the calendar (optional)").fill(TEASER);
     await page.getByRole("button", { name: "Continue" }).click();
     await page.getByRole("button", { name: "Sign your open in advance" }).click();
     await expect(page.getByRole("heading", { name: "Scheduled" })).toBeVisible({ timeout: 150_000 });

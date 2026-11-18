@@ -40,6 +40,14 @@ export async function expectVampLaunchable(page: Page) {
 /** An address as the pages and the API shorten it. */
 export const short = (a: string) => `${a.slice(0, 4)}\u{2026}${a.slice(-4)}`;
 export const newTicker = () => `E2E${Math.random().toString(36).slice(2, 7).toUpperCase().replace(/[^A-Z0-9]/g, "X")}`;
+/**
+ * A Fair Open's teaser for a spec: everyday writing, which Vamp Shield never reads as a coin whatever the live protected
+ * set holds (#93). It reads a word only in capitals, or with a digit or a lookalike among its letters, so a spec's
+ * teaser has none of those; and never the coin's own ticker, which the calendar would show before the open.
+ */
+export const TEASER = "Ten minutes, one price, no snipers";
+/** An everyday teaser with a word drawn for the run, in lower-case letters, for a spec that finds its launch by it. */
+export const newTeaser = () => `One price for all, says ${Array.from({ length: 6 }, () => String.fromCharCode(97 + Math.floor(Math.random() * 26))).join("")}`;
 /** A creator new to Heat: a fresh handle on the stand-in for X makes a fresh Creator record. */
 export const newHandle = () => `e2e_creator_${Math.floor(Math.random() * 9e9 + 1e9)}`;
 

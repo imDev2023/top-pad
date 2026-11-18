@@ -4,3 +4,4 @@ export * from "./images";
 export * from "./keys";
 export * from "./match";
 export * from "./rules";
+export * from "./teaser";

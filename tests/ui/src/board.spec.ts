@@ -24,7 +24,7 @@ import { admitted, deposit, newPerson } from "@top-pad/tests-devnet/fair-open";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { api, BUY, COPIES, database, INSTANT, SOL, sleep, waitFor } from "./bundler";
 import { boardWallets, sweepBoardRun } from "./boardRun";
-import { expectVampLaunchable, launchCoin, newTicker, pageErrors, runName, signInOnLaunch, snap, uniqueCoinImage } from "./steps";
+import { expectVampLaunchable, launchCoin, newTeaser, newTicker, pageErrors, runName, signInOnLaunch, snap, uniqueCoinImage } from "./steps";
 import { TARGET } from "./target";
 import { installTestWallet } from "./wallet";
 
@@ -108,8 +108,8 @@ test("the board ranks a cohort's coins by their people, every 15 s, and shows on
     await wrapSol(w.bot, BUY * BigInt(COPIES) * 6n);
 
     // The calendar: a Fair Open taking deposits now, and one whose window starts in 6 minutes.
-    const teaserNow = newTicker();
-    const teaserLater = newTicker();
+    const teaserNow = newTeaser();
+    const teaserLater = newTeaser();
     const now = await scheduleFromSite(page, w.openNow, teaserNow, null);
     const laterPage = await browser.newPage();
     const later = await scheduleFromSite(laterPage, w.openLater, teaserLater, 6 * 60_000);

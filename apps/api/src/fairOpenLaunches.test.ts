@@ -221,26 +221,42 @@ describe("scheduling a Fair Open", { timeout: 30_000 }, () => {
     const wallet = (await testKeypair()).signer.address;
     expect(await refusal(await prepare(cookie, { wallet, teaser: "join t.me/lumen" }))).toMatchObject({ status: 422, code: "teaser" });
     expect(await refusal(await prepare(cookie, { wallet, teaser: "better than $WIF" }))).toMatchObject({ status: 422, code: "teaser" });
-    const keys = candidateKeys("BONK", "Bonk Inu");
-    await db.insert(protectedCoins).values({
-      mint: "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
-      ticker: "BONK",
-      name: "Bonk Inu",
-      source: "jupiter_verified",
-      tickerStrict: keys.ticker.strict,
-      tickerLoose: keys.ticker.loose,
-      tickerCore: keys.ticker.core,
-      nameStrict: keys.name.strict,
-      nameLoose: keys.name.loose,
-      nameCore: keys.name.core,
-      foldVersion: FOLD_VERSION,
-    });
+    // Bonk, and the coins whose ticker and name everyday teasers were refused on (#93): "one" as $ONE, "10" as IO.
+    const coins = [
+      { mint: "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263", ticker: "BONK", name: "Bonk Inu" },
+      { mint: "onechain", ticker: "ONE", name: "ONEchain" },
+      { mint: "BZLbGTNCSFfoth2GYDtwr7e4imWzpR5jqcUuGEwr646K", ticker: "IO", name: "IO" },
+    ];
+    await db.insert(protectedCoins).values(
+      coins.map((coin) => {
+        const keys = candidateKeys(coin.ticker, coin.name);
+        return {
+          ...coin,
+          source: "jupiter_verified" as const,
+          tickerStrict: keys.ticker.strict,
+          tickerLoose: keys.ticker.loose,
+          tickerCore: keys.ticker.core,
+          nameStrict: keys.name.strict,
+          nameLoose: keys.name.loose,
+          nameCore: keys.name.core,
+          foldVersion: FOLD_VERSION,
+        };
+      }),
+    );
     try {
-      for (const teaser of ["the next Bonk Inu", "bigger than b0nk", "a BONK killer"]) {
+      // A coin is named where the teaser is written as one: in capitals, or with a digit or a lookalike among letters.
+      for (const teaser of ["the next BONK INU", "bigger than b0nk", "a BONK killer", "ONE price for everyone"]) {
         expect(await refusal(await prepare(cookie, { wallet, teaser })), teaser).toMatchObject({ status: 422, code: "teaser" });
       }
-      // Ordinary words still pass.
-      expect((await prepare(cookie, { wallet, ticker: "TEASE", teaser: "the bonfire of the season" })).status).toBe(201);
+      expect((await refusal(await prepare(cookie, { wallet, teaser: "ONE price for everyone" }))).error).toBe(
+        `"ONE" in the teaser reads as ONEchain ($ONE), a protected coin: the calendar cannot carry another coin's name. Capitals are read as a coin's ticker or name: write everyday words in lower case.`,
+      );
+      // Everyday writing passes, whatever the Protected coins hold: the words "one" and "10", and "Bonk Inu" as a name
+      // is written in a sentence.
+      const everyday = ["Ten minutes, one price, no snipers", "Opens at 10, so be in", "the next Bonk Inu", "the bonfire of the season"];
+      for (const [i, teaser] of everyday.entries()) {
+        expect((await prepare(cookie, { wallet, ticker: `TEASE${i}`, teaser })).status, teaser).toBe(201);
+      }
     } finally {
       await db.delete(protectedCoins);
     }
