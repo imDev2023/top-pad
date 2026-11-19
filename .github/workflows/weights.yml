@@ -1,0 +1,18 @@
+name: Weights
+
+# Every source of SSCD's weights still gives the pinned bytes (#108). The vision image's build asks Heat's copy, then
+# Meta's URL, and is green while either answers, so a copy that died would go unseen until the other failed too: this
+# asks each of them, weekly, and fails when one does not answer with the bytes the Dockerfile pins. A red run blocks
+# nothing; it says which source to put back (apps/vision/build/publish_weights.sh for Heat's copy).
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+jobs:
+  sources:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - run: docker build --platform linux/amd64 --target sources --no-cache-filter sources --progress plain apps/vision

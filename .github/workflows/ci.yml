@@ -90,7 +90,8 @@ jobs:
       - run: cargo test
 
   # The vision service's image (apps/vision, spec 10.2): its build exports SSCD to ONNX and checks it against Meta's
-  # TorchScript model, and its `test` stage runs the service's tests on the image it ships.
+  # TorchScript model, fetched from Heat's copy or else Meta's URL (#108; weights.yml checks each source weekly), and
+  # its `test` stage runs the service's tests on the image it ships.
   vision:
     runs-on: ubuntu-latest
     timeout-minutes: 30
